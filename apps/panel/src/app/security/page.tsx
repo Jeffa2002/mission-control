@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { PageShell } from '../../components/PageShell';
+import { AttackMap } from '../../components/AttackMap';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -369,6 +370,8 @@ export default function SecurityPage() {
 
   return (
     <PageShell title="Cyber Security">
+
+      <AttackMap />
 
       {/* ── E8 + NIST ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 24 }}>
