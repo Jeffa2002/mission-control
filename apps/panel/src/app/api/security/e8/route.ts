@@ -15,10 +15,14 @@ export async function GET() {
     const upgradable = Math.max(0, Number.parseInt(upgradableRaw.trim(), 10) - 1 || 0);
     const patchStatus: Status = upgradable === 0 ? 'compliant' : upgradable <= 5 ? 'partial' : 'at-risk';
 
-    const ufw = safeExec('/usr/sbin/ufw status 2>/dev/null');
-    const sshd = safeExec("grep -E '^[#[:space:]]*PasswordAuthentication' /etc/ssh/sshd_config 2>/dev/null | tail -1");
-    const restrictDetail = `ufw=${/active/i.test(ufw) ? 'active' : 'inactive'}; password_auth=${/yes/i.test(sshd) ? 'enabled' : /no/i.test(sshd) ? 'disabled' : 'unknown'}`;
-    const restrictStatus: Status = /active/i.test(ufw) && /no/i.test(sshd) ? 'compliant' : 'partial';
+    // UFW: check the config file directly (works inside Docker where ufw binary can't run iptables)
+    const ufwEnabled = safeExec("grep -i '^ENABLED=yes' /host-logs/../etc/ufw/ufw.conf 2>/dev/null || grep -i '^ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null");
+    const ufwActive = ufwEnabled.includes('yes') || /active/i.test(safeExec('/usr/sbin/ufw status 2>/dev/null'));
+    // SSH: check main config + all drop-ins, take the last effective value
+    const sshdAll = safeExec("grep -rh -i '^PasswordAuthentication' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null | tail -1");
+    const passwordAuthDisabled = /no/i.test(sshdAll);
+    const restrictDetail = `ufw=${ufwActive ? 'active' : 'inactive'}; password_auth=${/yes/i.test(sshdAll) ? 'enabled' : passwordAuthDisabled ? 'disabled' : 'unknown'}`;
+    const restrictStatus: Status = ufwActive && passwordAuthDisabled ? 'compliant' : 'partial';
 
     const unattended = safeExec("systemctl is-active unattended-upgrades 2>/dev/null || dpkg -s unattended-upgrades 2>/dev/null | grep -E '^Status:'");
     const patchAppsStatus: Status = /active|install ok installed/i.test(unattended) ? 'compliant' : 'partial';
