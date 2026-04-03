@@ -109,25 +109,44 @@ function extractEvents(records: SessionRecord[]): ActivityEvent[] {
 }
 
 async function readLatestSession(agentId: string) {
-  const sessionDir = path.join(DATA_ROOT, agentId, 'sessions');
+  const agentDir = path.join(DATA_ROOT, agentId);
+  const candidates: string[] = [];
+
+  // Check sessions/ subdirectory (subagents like dev, designer)
+  const sessionDir = path.join(agentDir, 'sessions');
   const entries = await readdir(sessionDir, { withFileTypes: true }).catch(() => [] as any[]);
-  const files = entries
-    .filter((e) => e.isFile() && (e.name.endsWith('.jsonl') || e.name.endsWith('.json')) && !e.name.includes('.deleted.') && !e.name.includes('.reset.'))
-    .map((e) => path.join(sessionDir, e.name));
-  const withStats = await Promise.all(files.map(async (file) => ({ file, stat: await stat(file) })));
+  for (const e of entries) {
+    if (e.isFile() && (e.name.endsWith('.jsonl') || e.name.endsWith('.json')) && !e.name.includes('.deleted.') && !e.name.includes('.reset.')) {
+      candidates.push(path.join(sessionDir, e.name));
+    }
+  }
+
+  // Also check root-level sessions.json (main agent)
+  const rootSession = path.join(agentDir, 'sessions.json');
+  const rootStat = await stat(rootSession).catch(() => null);
+  if (rootStat) candidates.push(rootSession);
+
+  if (candidates.length === 0) return { sessionFile: null, events: [] as ActivityEvent[] };
+
+  const withStats = await Promise.all(candidates.map(async (file) => ({ file, stat: await stat(file) })));
   withStats.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
   const latest = withStats[0]?.file;
   if (!latest) return { sessionFile: null, events: [] as ActivityEvent[] };
 
   const raw = await readFile(latest, 'utf8');
   let records: SessionRecord[] = [];
-  if (latest.endsWith('.json')) {
-    const parsed = JSON.parse(raw);
-    records = Array.isArray(parsed) ? parsed : parsed?.messages ?? [];
-  } else {
+  // JSONL format (one JSON object per line)
+  if (latest.endsWith('.jsonl') || raw.trimStart().startsWith('{')) {
     records = raw.split(/\n+/).filter(Boolean).map((line) => {
       try { return JSON.parse(line); } catch { return null; }
     }).filter(Boolean) as SessionRecord[];
+  } else {
+    try {
+      const parsed = JSON.parse(raw);
+      records = Array.isArray(parsed) ? parsed : parsed?.messages ?? [];
+    } catch {
+      records = [];
+    }
   }
   return { sessionFile: latest, events: extractEvents(records) };
 }
