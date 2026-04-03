@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { Nav } from '../nav';
+import { AgentActivityDrawer } from '../../components/AgentActivityDrawer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -111,7 +112,7 @@ function AgentAvatar({ emoji, status, busy }: { emoji: string; status: string; b
 
 // ─── Computer / Work Area ─────────────────────────────────────────────────────
 
-function WorkArea({ agent }: { agent: AgentStatus }) {
+function WorkArea({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: AgentStatus) => void }) {
   const isWorking = agent.status === 'Working';
   const isIdle    = agent.status === 'Idle';
   const isOffline = agent.status === 'Offline';
@@ -130,7 +131,20 @@ function WorkArea({ agent }: { agent: AgentStatus }) {
     >
       {/* Monitor SVG */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-        <MonitorSVG active={isWorking} />
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpen(agent); }}
+          aria-label={`Open activity for ${agent.label}`}
+          style={{
+            border: 'none',
+            background: 'transparent',
+            padding: 0,
+            cursor: 'pointer',
+            borderRadius: 8,
+            outline: 'none',
+          }}
+        >
+          <MonitorSVG active={isWorking} />
+        </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           {isOffline ? (
             <div style={{ color: '#667799', fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>
@@ -248,13 +262,17 @@ function MonitorSVG({ active }: { active: boolean }) {
 
 // ─── Agent Desk Card ──────────────────────────────────────────────────────────
 
-function DeskCard({ agent }: { agent: AgentStatus }) {
+function DeskCard({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: AgentStatus) => void }) {
   const color  = STATUS_COLORS[agent.status] ?? '#667799';
   const bg     = STATUS_BG[agent.status]     ?? 'rgba(40,50,70,0.08)';
   const border = STATUS_BORDER[agent.status] ?? 'rgba(80,100,140,0.18)';
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(agent)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(agent); }}
       style={{
         borderRadius: 18,
         border: `1px solid ${border}`,
@@ -265,7 +283,8 @@ function DeskCard({ agent }: { agent: AgentStatus }) {
         padding: 16,
         display: 'flex',
         flexDirection: 'column',
-        transition: 'box-shadow 0.4s ease',
+        transition: 'box-shadow 0.4s ease, transform 0.2s ease, border-color 0.2s ease',
+        cursor: 'pointer',
       }}
     >
       {/* Header: avatar + name + status badge */}
@@ -319,7 +338,7 @@ function DeskCard({ agent }: { agent: AgentStatus }) {
       </div>
 
       {/* Work area */}
-      <WorkArea agent={agent} />
+      <WorkArea agent={agent} onOpen={onOpen} />
 
       {/* Footer: last seen */}
       <div
@@ -404,6 +423,7 @@ export default function OfficePage() {
   const [lastFetch, setLastFetch] = useState<string>('');
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedAgent, setSelectedAgent] = useState<AgentStatus | null>(null);
 
   async function fetchStatus() {
     try {
@@ -494,7 +514,7 @@ export default function OfficePage() {
         }}
       >
         {agents.map((agent) => (
-          <DeskCard key={agent.id} agent={agent} />
+          <DeskCard key={agent.id} agent={agent} onOpen={setSelectedAgent} />
         ))}
 
         {/* Empty state */}
@@ -504,6 +524,12 @@ export default function OfficePage() {
           </div>
         )}
       </div>
+
+      <AgentActivityDrawer
+        agent={selectedAgent}
+        open={!!selectedAgent}
+        onClose={() => setSelectedAgent(null)}
+      />
 
       {/* Legend */}
       <div
