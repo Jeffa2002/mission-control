@@ -24,8 +24,12 @@ export async function GET() {
     const restrictDetail = `ufw=${ufwActive ? 'active' : 'inactive'}; password_auth=${/yes/i.test(sshdAll) ? 'enabled' : passwordAuthDisabled ? 'disabled' : 'unknown'}`;
     const restrictStatus: Status = ufwActive && passwordAuthDisabled ? 'compliant' : 'partial';
 
-    const unattended = safeExec("systemctl is-active unattended-upgrades 2>/dev/null || dpkg -s unattended-upgrades 2>/dev/null | grep -E '^Status:'");
-    const patchAppsStatus: Status = /active|install ok installed/i.test(unattended) ? 'compliant' : 'partial';
+    // Check config files directly (systemctl doesn't work inside Docker)
+    const autoUpgradesConf = safeExec('cat /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null').trim();
+    const unattendedEnabled = autoUpgradesConf.includes('Unattended-Upgrade "1"') || autoUpgradesConf.includes("Unattended-Upgrade '1'");
+    const periodicEnabled = autoUpgradesConf.includes('Update-Package-Lists "1"') || autoUpgradesConf.includes("Update-Package-Lists '1'");
+    const patchAppsStatus: Status = unattendedEnabled && periodicEnabled ? 'compliant' : 'partial';
+    const unattended = unattendedEnabled ? 'active; auto-upgrade enabled' : 'unattended-upgrades not configured';
 
     const fail2ban = safeExec("dpkg -l | grep -E 'fail2ban|crowdsec|sshguard' 2>/dev/null | head -5");
     const hardeningStatus: Status = fail2ban.trim() ? 'compliant' : 'partial';
