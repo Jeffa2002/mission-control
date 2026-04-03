@@ -31,8 +31,11 @@ export async function GET() {
     const patchAppsStatus: Status = unattendedEnabled && periodicEnabled ? 'compliant' : 'partial';
     const unattended = unattendedEnabled ? 'active; auto-upgrade enabled' : 'unattended-upgrades not configured';
 
-    const fail2ban = safeExec("dpkg -l | grep -E 'fail2ban|crowdsec|sshguard' 2>/dev/null | head -5");
-    const hardeningStatus: Status = fail2ban.trim() ? 'compliant' : 'partial';
+    // Check for config files directly (dpkg not available inside Docker)
+    const fail2banConf = safeExec('ls /etc/fail2ban/jail.local /etc/fail2ban/jail.conf 2>/dev/null').trim();
+    const crowdsecConf = safeExec('ls /etc/crowdsec/config.yaml 2>/dev/null').trim();
+    const fail2ban = fail2banConf || crowdsecConf;
+    const hardeningStatus: Status = fail2ban ? 'compliant' : 'partial';
 
     const backups = safeExec("crontab -l 2>/dev/null; grep -RHiE 'borg|restic|rsync|duplicity|backup' /etc/cron* /var/spool/cron 2>/dev/null | head -20");
     const backupStatus: Status = backups.trim() ? 'compliant' : 'partial';
