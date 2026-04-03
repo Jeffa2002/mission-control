@@ -1,0 +1,24 @@
+services:
+  panel:
+    build: ./panel
+    container_name: mission-panel
+    restart: unless-stopped
+    env_file:
+      - ./panel/.env
+    environment:
+      - PORT=3020
+      - HOSTNAME=0.0.0.0
+    ports:
+      - "127.0.0.1:3020:3020"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.openclaw/workspace:/workspace
+      - /root/.openclaw/agents:/agent-data:ro
+      - /root/.openclaw/workspace:/workspace-data:ro
+    networks:
+      - infra_default
+
+networks:
+  infra_default:
+    external: true
+    name: infra_default

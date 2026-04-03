@@ -1,0 +1,9 @@
+node_modules/
+.next/
+.env
+.env.local
+*.env
+dist/
+node_modules/
+runtime/
+tmp_*.js
