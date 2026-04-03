@@ -69,7 +69,7 @@ export function AttackMap() {
       }
     }
     load();
-    const t = setInterval(load, 60_000);
+    const t = setInterval(load, 5 * 60_000);
     return () => { alive = false; clearInterval(t); };
   }, []);
 
