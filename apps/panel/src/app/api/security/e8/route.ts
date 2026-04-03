@@ -37,8 +37,13 @@ export async function GET() {
     const fail2ban = fail2banConf || crowdsecConf;
     const hardeningStatus: Status = fail2ban ? 'compliant' : 'partial';
 
-    const backups = safeExec("crontab -l 2>/dev/null; grep -RHiE 'borg|restic|rsync|duplicity|backup' /etc/cron* /var/spool/cron 2>/dev/null | head -20");
-    const backupStatus: Status = backups.trim() ? 'compliant' : 'partial';
+    // Check backup server via SSH (bazza key, public IP)
+    const backupLastRun = safeExec("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p 2222 root@43.229.63.19 'ls -t /backups/timepulse/*.sql.gz 2>/dev/null | head -1' 2>/dev/null").trim();
+    const backupDbs = safeExec("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p 2222 root@43.229.63.19 'ls /backups/timepulse/ /backups/venconx/ /backups/helix/ /backups/cutline/ /backups/projectxify/ 2>/dev/null | grep -c .sql.gz' 2>/dev/null").trim();
+    const backupStatus: Status = backupLastRun ? 'compliant' : 'partial';
+    const backupDetail = backupLastRun
+      ? `backup-melb (Melbourne): ${backupDbs} DB snapshots; last: ${backupLastRun.split('/').pop()}`
+      : 'backup server unreachable or no backups found';
 
     return NextResponse.json({
       strategies: [
@@ -47,7 +52,7 @@ export async function GET() {
         mk('patch-apps', 'Patch Applications', patchAppsStatus, 'Keep application packages up to date.', unattended.trim() ? unattended.trim() : 'unattended-upgrades not clearly active', 'bazza'),
         mk('user-app-hardening', 'User Application Hardening', hardeningStatus, 'Harden exposed services and user applications.', fail2ban.trim() || 'fail2ban/crowdsec/sshguard not detected', 'bazza'),
         mk('mfa', 'MFA', 'manual', 'Configure multi-factor authentication where supported.', 'Manual review required to confirm MFA coverage.', 'bazza'),
-        mk('backups', 'Backups', backupStatus, 'Ensure backups exist and are tested.', backups.trim() || 'No backup tooling detected from quick checks', 'bazza'),
+        mk('backups', 'Backups', backupStatus, 'Daily encrypted backups to Melbourne backup server (backup-melb).', backupDetail, 'prod'),
         mk('application-control', 'Application Control', 'needs-review', 'Review application allowlisting and control options.', 'Manual review required.', 'bazza'),
         mk('multi-factor', 'Multi-factor Authentication', 'manual', 'Same control area as MFA.', 'Manual review required to configure and verify MFA.', 'bazza'),
       ],
