@@ -51,10 +51,10 @@ export async function GET() {
         mk('restrict-admin', 'Restrict Administrative Privileges', restrictStatus, 'Reduce attack surface for admin access.', restrictDetail, 'bazza'),
         mk('patch-apps', 'Patch Applications', patchAppsStatus, 'Keep application packages up to date.', unattended.trim() ? unattended.trim() : 'unattended-upgrades not clearly active', 'bazza'),
         mk('user-app-hardening', 'User Application Hardening', hardeningStatus, 'Harden exposed services and user applications.', fail2ban.trim() || 'fail2ban/crowdsec/sshguard not detected', 'bazza'),
-        mk('mfa', 'MFA', 'partial', 'Configure multi-factor authentication where supported.', 'GitHub: passkey ✓; BinaryLane: OTP email ✓; TimePulse app: not yet implemented', 'bazza'),
+        mk('mfa', 'MFA', 'compliant', 'Configure multi-factor authentication where supported.', 'GitHub: passkey ✓; BinaryLane: OTP email ✓; TimePulse: opt-in TOTP (otpauth) ✓', 'bazza'),
         mk('backups', 'Backups', backupStatus, 'Daily encrypted backups to Melbourne backup server (backup-melb).', backupDetail, 'prod'),
         mk('application-control', 'Application Control', 'needs-review', 'Review application allowlisting and control options.', 'Manual review required.', 'bazza'),
-        mk('multi-factor', 'Multi-factor Authentication', 'partial', 'MFA across all admin surfaces.', 'GitHub: passkey ✓; BinaryLane: OTP email ✓; TimePulse TOTP: pending', 'bazza'),
+        mk('multi-factor', 'Multi-factor Authentication', 'compliant', 'MFA across all admin surfaces.', 'GitHub: passkey ✓; BinaryLane: OTP email ✓; TimePulse: TOTP opt-in live ✓', 'bazza'),
       ],
     });
   } catch {
