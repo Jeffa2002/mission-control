@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { readdirSync } from 'node:fs';
-import { readFirstExisting, readGlobbed } from '../_security-logs';
+import { readFirstExisting, readGlobbed, runRemote } from '../_security-logs';
 
 type Item = { ts: string; ip: string; method: string; path: string; status: number; bytes: number };
 
@@ -14,14 +14,23 @@ function parseCombined(line: string): Item | null {
 
 export async function GET() {
   try {
-    let raw = await readFirstExisting(['/host-logs/nginx/access.log', '/var/log/nginx/access.log']);
-    if (!raw) {
-      const patterns = ['/workspace-data/*/logs/nginx*.log', '/host-logs/**/nginx*.log', '/var/log/**/nginx*.log'];
-      raw = await readGlobbed(patterns);
-    }
-    if (!raw) return NextResponse.json({ recent: [], errorCount: 0, topPaths: [], topIPs: [] });
-    const lines = raw.split('\n').filter(Boolean).slice(-100);
-    const recent = lines.map(parseCombined).filter((x): x is Item => x !== null);
+    const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
+      if (host === 'bazza') {
+        let raw = await readFirstExisting(['/host-logs/nginx/access.log', '/var/log/nginx/access.log']);
+        if (!raw) {
+          const patterns = ['/workspace-data/*/logs/nginx*.log', '/host-logs/**/nginx*.log', '/var/log/**/nginx*.log'];
+          raw = await readGlobbed(patterns);
+        }
+        return raw;
+      }
+      return runRemote('tail -200 /var/log/nginx/access.log 2>/dev/null');
+    };
+
+    const [bazzaRaw, prodRaw] = await Promise.all([fetchRaw('bazza'), fetchRaw('prod')]);
+    const recent = [
+      ...bazzaRaw.split('\n').filter(Boolean).slice(-100).map(parseCombined).filter((x): x is Item => x !== null).map((r) => ({ ...r, host: 'bazza' as const })),
+      ...prodRaw.split('\n').filter(Boolean).slice(-100).map(parseCombined).filter((x): x is Item => x !== null).map((r) => ({ ...r, host: 'prod' as const })),
+    ].sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
     const errorCount = recent.filter((r) => r.status >= 400).length;
     const paths = new Map<string, number>();
     const ips = new Map<string, number>();

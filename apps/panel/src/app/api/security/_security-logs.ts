@@ -48,6 +48,17 @@ export function safeExec(command: string): string {
   }
 }
 
+export function runRemote(cmd: string): string {
+  try {
+    return execSync(
+      `ssh -i /root/.ssh/prod_deploy_v3 -p 2222 -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@203.57.50.240 bash -lc ${escapeShell(cmd)}`,
+      { timeout: 10000, encoding: 'utf8' }
+    );
+  } catch {
+    return '';
+  }
+}
+
 export function jsonLinesTail(text: string, limit: number): string[] {
   const lines = text.split('\n').filter(Boolean);
   return lines.slice(-limit);

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readFirstExisting, safeExec } from '../_security-logs';
+import { readFirstExisting, runRemote, safeExec } from '../_security-logs';
 
 type AuthEvent = { ts: string; type: 'sudo' | 'ssh-accept' | 'auth-fail' | 'su'; user: string; detail: string };
 
@@ -36,14 +36,23 @@ function parseLine(line: string): AuthEvent | null {
 
 export async function GET() {
   try {
-    let raw = await readFirstExisting(['/host-logs/auth.log', '/var/log/auth.log']);
-    if (!raw) raw = safeExec("journalctl -u ssh -u sshd --no-pager -n 2000 2>/dev/null");
+    const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
+      if (host === 'bazza') {
+        let raw = await readFirstExisting(['/host-logs/auth.log', '/var/log/auth.log']);
+        if (!raw) raw = safeExec("journalctl -u ssh -u sshd --no-pager -n 2000 2>/dev/null");
+        return raw;
+      }
+      return runRemote('journalctl _SYSTEMD_UNIT=ssh.service --since "1 hour ago" --no-pager 2>/dev/null');
+    };
     const now = Date.now();
     const hourAgo = now - 60 * 60 * 1000;
-    const events = raw.split('\n').filter(Boolean).map(parseLine).filter((x): x is AuthEvent => x !== null).filter((e) => new Date(e.ts).getTime() >= hourAgo);
-    const recent = events.slice().sort((a, b) => +new Date(b.ts) - +new Date(a.ts)).slice(0, 100);
+    const [bazzaRaw, prodRaw] = await Promise.all([fetchRaw('bazza'), fetchRaw('prod')]);
+    const events = [
+      ...bazzaRaw.split('\n').filter(Boolean).map(parseLine).filter((x): x is AuthEvent => x !== null).filter((e) => new Date(e.ts).getTime() >= hourAgo).map((e) => ({ ...e, host: 'bazza' as const })),
+      ...prodRaw.split('\n').filter(Boolean).map(parseLine).filter((x): x is AuthEvent => x !== null).map((e) => ({ ...e, host: 'prod' as const })),
+    ].sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
     return NextResponse.json({
-      recent,
+      recent: events.slice(0, 100),
       sudoCount: events.filter((e) => e.type === 'sudo').length,
       failCount: events.filter((e) => e.type === 'auth-fail').length,
       sshAcceptCount: events.filter((e) => e.type === 'ssh-accept').length,

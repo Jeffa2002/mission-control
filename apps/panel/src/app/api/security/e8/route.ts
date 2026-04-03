@@ -3,10 +3,10 @@ import { safeExec } from '../_security-logs';
 
 type Status = 'compliant' | 'partial' | 'at-risk' | 'manual' | 'needs-review';
 
-type Strategy = { id: string; name: string; status: Status; description: string; detail: string };
+type Strategy = { id: string; name: string; status: Status; description: string; detail: string; host: 'bazza' | 'prod' };
 
-function mk(id: string, name: string, status: Status, description: string, detail: string): Strategy {
-  return { id, name, status, description, detail };
+function mk(id: string, name: string, status: Status, description: string, detail: string, host: 'bazza' | 'prod'): Strategy {
+  return { id, name, status, description, detail, host };
 }
 
 export async function GET() {
@@ -31,14 +31,14 @@ export async function GET() {
 
     return NextResponse.json({
       strategies: [
-        mk('patch-os', 'Patch OS', patchStatus, 'Keep the operating system patched.', `upgradable packages: ${upgradable}`),
-        mk('restrict-admin', 'Restrict Administrative Privileges', restrictStatus, 'Reduce attack surface for admin access.', restrictDetail),
-        mk('patch-apps', 'Patch Applications', patchAppsStatus, 'Keep application packages up to date.', unattended.trim() ? unattended.trim() : 'unattended-upgrades not clearly active'),
-        mk('user-app-hardening', 'User Application Hardening', hardeningStatus, 'Harden exposed services and user applications.', fail2ban.trim() || 'fail2ban/crowdsec/sshguard not detected'),
-        mk('mfa', 'MFA', 'manual', 'Configure multi-factor authentication where supported.', 'Manual review required to confirm MFA coverage.'),
-        mk('backups', 'Backups', backupStatus, 'Ensure backups exist and are tested.', backups.trim() || 'No backup tooling detected from quick checks'),
-        mk('application-control', 'Application Control', 'needs-review', 'Review application allowlisting and control options.', 'Manual review required.'),
-        mk('multi-factor', 'Multi-factor Authentication', 'manual', 'Same control area as MFA.', 'Manual review required to configure and verify MFA.'),
+        mk('patch-os', 'Patch OS', patchStatus, 'Keep the operating system patched.', `upgradable packages: ${upgradable}`, 'bazza'),
+        mk('restrict-admin', 'Restrict Administrative Privileges', restrictStatus, 'Reduce attack surface for admin access.', restrictDetail, 'bazza'),
+        mk('patch-apps', 'Patch Applications', patchAppsStatus, 'Keep application packages up to date.', unattended.trim() ? unattended.trim() : 'unattended-upgrades not clearly active', 'bazza'),
+        mk('user-app-hardening', 'User Application Hardening', hardeningStatus, 'Harden exposed services and user applications.', fail2ban.trim() || 'fail2ban/crowdsec/sshguard not detected', 'bazza'),
+        mk('mfa', 'MFA', 'manual', 'Configure multi-factor authentication where supported.', 'Manual review required to confirm MFA coverage.', 'bazza'),
+        mk('backups', 'Backups', backupStatus, 'Ensure backups exist and are tested.', backups.trim() || 'No backup tooling detected from quick checks', 'bazza'),
+        mk('application-control', 'Application Control', 'needs-review', 'Review application allowlisting and control options.', 'Manual review required.', 'bazza'),
+        mk('multi-factor', 'Multi-factor Authentication', 'manual', 'Same control area as MFA.', 'Manual review required to configure and verify MFA.', 'bazza'),
       ],
     });
   } catch {

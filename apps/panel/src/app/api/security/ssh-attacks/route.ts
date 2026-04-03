@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { readFirstExisting, safeExec } from '../_security-logs';
+import { readFirstExisting, runRemote, safeExec } from '../_security-logs';
 
 type Attack = { ts: string; ip: string; user: string };
+type LabeledAttack = Attack & { host: 'bazza' | 'prod' };
 
 type Bucket = { label: string; count: number };
 
@@ -24,15 +25,25 @@ function parseLine(line: string): Attack | null {
 
 export async function GET() {
   try {
-    let raw = await readFirstExisting(['/host-logs/auth.log', '/var/log/auth.log']);
-    if (!raw) {
-      raw = safeExec("journalctl -u ssh -u sshd --no-pager -n 2000 2>/dev/null");
-    }
-    const lines = raw.split('\n').filter(Boolean);
-    const attacks = lines.map(parseLine).filter((x): x is Attack => x !== null);
+    const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
+      if (host === 'bazza') {
+        let raw = await readFirstExisting(['/host-logs/auth.log', '/var/log/auth.log']);
+        if (!raw) raw = safeExec("journalctl -u ssh -u sshd --no-pager -n 2000 2>/dev/null");
+        return raw;
+      }
+      return runRemote('journalctl _SYSTEMD_UNIT=ssh.service --since "1 hour ago" --no-pager 2>/dev/null | grep -i "failed password\\|invalid user"');
+    };
+
+    const parseHost = async (host: 'bazza' | 'prod'): Promise<LabeledAttack[]> => {
+      const raw = await fetchRaw(host);
+      return raw.split('\n').filter(Boolean).map(parseLine).filter((x): x is Attack => x !== null).map((a) => ({ ...a, host }));
+    };
+
+    const [bazza, prod] = await Promise.all([parseHost('bazza'), parseHost('prod')]);
+    const attacks: LabeledAttack[] = [...bazza, ...prod];
     const now = Date.now();
     const hourAgo = now - 60 * 60 * 1000;
-    const recentWindow = attacks.filter((a) => new Date(a.ts).getTime() >= hourAgo);
+    const recentWindow = attacks.filter((a) => a.host === 'prod' || new Date(a.ts).getTime() >= hourAgo);
     const recent = recentWindow.slice().sort((a, b) => +new Date(b.ts) - +new Date(a.ts)).slice(0, 50);
     const ipCounts = new Map<string, number>();
     for (const a of attacks) ipCounts.set(a.ip, (ipCounts.get(a.ip) ?? 0) + 1);
