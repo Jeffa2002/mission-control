@@ -24,6 +24,15 @@ const COLORS = {
   border: 'rgba(255,255,255,0.08)',
 };
 
+// Numeric ISO 3166-1 → Alpha-2 mapping for world-atlas countries-110m.json
+const NUMERIC_TO_ALPHA2: Record<string, string> = {
+  '4':'AF','8':'AL','12':'DZ','24':'AO','32':'AR','36':'AU','40':'AT','50':'BD','56':'BE','64':'BT','68':'BO','76':'BR','100':'BG','116':'KH','120':'CM','124':'CA','152':'CL','156':'CN','170':'CO','178':'CG','180':'CD','191':'HR','192':'CU','196':'CY','203':'CZ','208':'DK','218':'EC','818':'EG','222':'SV','231':'ET','246':'FI','250':'FR','266':'GA','276':'DE','288':'GH','300':'GR','320':'GT','324':'GN','332':'HT','340':'HN','356':'IN','360':'ID','364':'IR','368':'IQ','372':'IE','376':'IL','380':'IT','388':'JM','392':'JP','400':'JO','398':'KZ','404':'KE','410':'KR','408':'KP','414':'KW','418':'LA','422':'LB','434':'LY','440':'LT','442':'LU','450':'MG','484':'MX','504':'MA','508':'MZ','524':'NP','528':'NL','540':'NC','554':'NZ','558':'NI','566':'NG','578':'NO','586':'PK','591':'PA','598':'PG','600':'PY','604':'PE','608':'PH','616':'PL','620':'PT','630':'PR','634':'QA','642':'RO','643':'RU','682':'SA','686':'SN','694':'SL','706':'SO','710':'ZA','724':'ES','144':'LK','729':'SD','752':'SE','756':'CH','760':'SY','158':'TW','764':'TH','768':'TG','788':'TN','792':'TR','800':'UG','804':'UA','784':'AE','826':'GB','840':'US','858':'UY','860':'UZ','862':'VE','704':'VN','887':'YE','894':'ZM','716':'ZW',
+};
+
+function getAlpha2(geo: any): string {
+  return geo.properties?.ISO_A2 || geo.properties?.iso_a2 || NUMERIC_TO_ALPHA2[String(geo.id)] || '';
+}
+
 function flagEmoji(code: string) {
   if (code.length !== 2) return '🏳️';
   return code.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
@@ -105,8 +114,8 @@ export function AttackMap() {
           )}
           <svg viewBox="0 0 820 420" style={{ width: '100%', height: '100%', position: 'relative', zIndex: 1 }}>
             {countries.map((geo: any) => {
-              const code = geo.properties?.ISO_A2 || geo.properties?.iso_a2 || geo.id;
-              const found = data.countries.find((c) => c.code === code);
+              const code = getAlpha2(geo);
+              const found = code ? data.countries.find((c) => c.code === code) : undefined;
               const fill = found ? colorForCount(found.count, max) : COLORS.empty;
               const d = path(geo);
               if (!d) return null;
@@ -125,7 +134,7 @@ export function AttackMap() {
             })}
 
             {data.activeCountries.slice(0, 6).map((c, idx) => {
-              const geo = countries.find((g: any) => (g.properties?.ISO_A2 || g.properties?.iso_a2 || g.id) === c.code);
+              const geo = countries.find((g: any) => getAlpha2(g) === c.code);
               const centroid = geo ? path.centroid(geo) : null;
               if (!centroid) return null;
               return (
