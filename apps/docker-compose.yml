@@ -9,7 +9,7 @@ services:
       - PORT=3020
       - HOSTNAME=0.0.0.0
     ports:
-      - "127.0.0.1:3020:3020"
+      - "0.0.0.0:3020:3020"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /root/.openclaw/workspace:/workspace

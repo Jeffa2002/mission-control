@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     value: cookieSecret,
     httpOnly: true,
     sameSite: 'lax',
-    secure: true,
+    secure: false,
     path: '/',
     maxAge: 60 * 60 * 24 * 30, // 30 days
   });
