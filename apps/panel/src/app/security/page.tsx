@@ -312,6 +312,8 @@ export default function SecurityPage() {
   const [firewall, setFirewall] = useState<FirewallData>({ recent: [], blockCount: 0, topSources: [] });
   const [authLog, setAuthLog] = useState<AuthData>({ recent: [], sudoCount: 0, failCount: 0, sshAcceptCount: 0, total: 0 });
   const [e8Loading, setE8Loading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   async function fetchE8() {
     try {
@@ -319,6 +321,7 @@ export default function SecurityPage() {
       if (r.ok) {
         const j = await r.json();
         setE8(j.strategies ?? []);
+        setLastUpdated(new Date());
       }
     } catch { /* silent */ }
     setE8Loading(false);
@@ -327,28 +330,28 @@ export default function SecurityPage() {
   async function fetchSsh() {
     try {
       const r = await fetch('/api/security/ssh-attacks', { cache: 'no-store' });
-      if (r.ok) setSsh(await r.json());
+      if (r.ok) { setSsh(await r.json()); setLastUpdated(new Date()); }
     } catch { /* silent */ }
   }
 
   async function fetchNginx() {
     try {
       const r = await fetch('/api/security/nginx-logs', { cache: 'no-store' });
-      if (r.ok) setNginx(await r.json());
+      if (r.ok) { setNginx(await r.json()); setLastUpdated(new Date()); }
     } catch { /* silent */ }
   }
 
   async function fetchFirewall() {
     try {
       const r = await fetch('/api/security/firewall', { cache: 'no-store' });
-      if (r.ok) setFirewall(await r.json());
+      if (r.ok) { setFirewall(await r.json()); setLastUpdated(new Date()); }
     } catch { /* silent */ }
   }
 
   async function fetchAuthLog() {
     try {
       const r = await fetch('/api/security/auth-log', { cache: 'no-store' });
-      if (r.ok) setAuthLog(await r.json());
+      if (r.ok) { setAuthLog(await r.json()); setLastUpdated(new Date()); }
     } catch { /* silent */ }
   }
 
@@ -363,13 +366,18 @@ export default function SecurityPage() {
     const t2 = setInterval(fetchNginx, 15_000);
     const t3 = setInterval(fetchFirewall, 15_000);
     const t4 = setInterval(fetchAuthLog, 15_000);
-    return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); clearInterval(t4); };
+    const t5 = setInterval(() => setNow(Date.now()), 1_000);
+    return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); clearInterval(t4); clearInterval(t5); };
   }, []);
 
   const nist = deriveNist(e8);
+  const lastUpdatedText = lastUpdated ? `Last updated: ${Math.max(0, Math.floor((now - lastUpdated.getTime()) / 1000))} seconds ago` : 'Last updated: —';
 
   return (
     <PageShell title="Cyber Security">
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -8, color: '#9fefff', opacity: 0.6, fontSize: 12 }}>
+        {lastUpdatedText}
+      </div>
 
       <AttackMap />
 
