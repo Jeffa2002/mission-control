@@ -1,87 +1,37 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { PageShell } from '../../components/PageShell';
-
-const SERVICES = ['nginx', 'postgresql', 'docker', 'ollama', 'openclaw'] as const;
-
-function isRunning(ps: string, service: string) {
-  if (!ps) return false;
-  const rx = new RegExp(`(^|\\n).*${service}.*`, 'i');
-  return rx.test(ps);
-}
+import { AppShell, SectionTitle, card } from '../../components/ops-ui';
+import { BaselineIndicator, SystemHealthCard } from '../../components/security-components';
 
 export default function SystemsPage() {
-  const [ps, setPs] = useState<string>('');
-  const [err, setErr] = useState<string | null>(null);
-
-  async function refresh() {
-    setErr(null);
-    try {
-      const res = await fetch('/api/systems', { cache: 'no-store' });
-      if (!res.ok) throw new Error(await res.text());
-      const j = await res.json();
-      setPs(j.ps || '');
-    } catch (e: any) {
-      setErr(String(e?.message || e));
-    }
-  }
-
-  useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 15_000);
-    return () => clearInterval(t);
-  }, []);
-
-  const services = useMemo(() => SERVICES.map((service) => ({ service, running: isRunning(ps, service) })), [ps]);
-
   return (
-    <PageShell title="Systems">
-      {err ? <div style={{ marginTop: 14, color: '#ff7aa8' }}>{err}</div> : null}
-
-      <section style={{ marginTop: 16 }}>
-        <div
-          style={{
-            fontSize: 12,
-            letterSpacing: 2,
-            color: '#9fefff',
-            opacity: 0.9,
-            marginBottom: 8,
-          }}
-        >
-          SERVICE STATUS
+    <AppShell>
+      <div className="space-y-8">
+        <SectionTitle title="Systems" subtitle="Host health and anomaly deltas" />
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <SystemHealthCard host="bazza" state="healthy" summary="Normal host health" anomalies={["memory within band", "auth stable"]} />
+          <SystemHealthCard host="prod" state="degraded" summary="Drift from baseline" anomalies={["+38% auth failures", "disk IO 2.1× baseline"]} />
+          <SystemHealthCard host="bazza" state="stale" summary="Agent check-in stale" anomalies={["last heartbeat 12m ago", "connectivity check needed"]} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-          {services.map(({ service, running }) => (
-            <div key={service} style={{ padding: 14, borderRadius: 14, border: '1px solid rgba(124,232,255,0.16)', background: 'rgba(0,0,0,0.22)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 999, background: running ? '#00ff88' : '#ff4466', boxShadow: `0 0 12px ${running ? '#00ff88' : '#ff4466'}` }} />
-                <div style={{ fontWeight: 800, textTransform: 'capitalize' }}>{service}</div>
-              </div>
-              <div style={{ color: running ? '#00ff88' : '#ff7aa8', fontSize: 13, fontWeight: 700 }}>
-                {running ? 'running' : 'stopped'}
-              </div>
+        <div className={card + ' p-5'}>
+          <SectionTitle title="Baseline vs anomaly" />
+          <div className="grid gap-3 md:grid-cols-3">
+            <BaselineIndicator state="normal" reason="CPU 4% within baseline" />
+            <BaselineIndicator state="watch" reason="Memory trending high" />
+            <BaselineIndicator state="alert" reason="Auth failures 2.1× baseline" />
+          </div>
+        </div>
+        <div className={card + ' p-5'}>
+          <SectionTitle title="Systems table" />
+          <div className="grid gap-2 text-[13px]">
+            <div className="grid grid-cols-[1fr_120px_160px_1fr] border-b border-white/10 pb-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+              <div>Host</div><div>Status</div><div>Last check</div><div>Notes</div>
             </div>
-          ))}
+            <div className="grid grid-cols-[1fr_120px_160px_1fr] py-2"><div>prod</div><div>degraded</div><div>20s ago</div><div>auth spike + disk IO</div></div>
+            <div className="grid grid-cols-[1fr_120px_160px_1fr] py-2"><div>bazza</div><div>healthy</div><div>18s ago</div><div>stable baseline</div></div>
+          </div>
         </div>
-
-        <details style={{ marginTop: 16, padding: 12, borderRadius: 14, border: '1px solid rgba(124,232,255,0.16)', background: 'rgba(0,0,0,0.18)' }}>
-          <summary style={{ cursor: 'pointer', color: '#9fefff', fontWeight: 700 }}>Raw process list</summary>
-          <pre
-            style={{
-              margin: '12px 0 0',
-              padding: 12,
-              borderRadius: 12,
-              border: '1px solid rgba(124,232,255,0.12)',
-              background: 'rgba(0,0,0,0.22)',
-              whiteSpace: 'pre-wrap',
-              overflowX: 'auto',
-            }}
-          >
-            {ps || '—'}
-          </pre>
-        </details>
-      </section>
-    </PageShell>
+      </div>
+    </AppShell>
   );
 }
