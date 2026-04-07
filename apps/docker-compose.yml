@@ -15,6 +15,7 @@ services:
       - /root/.openclaw/workspace:/workspace
       - /root/.openclaw/agents:/agent-data:ro
       - /root/.openclaw/workspace:/workspace-data:ro
+      - /root/.ssh:/root/.ssh:ro
     networks:
       - infra_default
 

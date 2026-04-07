@@ -52,11 +52,11 @@ let cache: CacheEntry | null = null;
 const AGENT_DEFS = [
   { id: 'main',     label: 'Bazza',   emoji: '🦞',  role: 'Lead Assistant',   model: 'anthropic/claude-sonnet-4-6' },
   { id: 'dev',      label: 'Dev',     emoji: '🧑‍💻', role: 'Developer',        model: 'anthropic/claude-sonnet-4-6' },
-  { id: 'writer',   label: 'Quinn',   emoji: '✍️',  role: 'Writer',           model: 'openai/gpt-5.2-pro'         },
+  { id: 'writer',   label: 'Quinn',   emoji: '✍️',  role: 'Writer / Docs',    model: 'openai/gpt-5.2-pro'         },
   { id: 'designer', label: 'Nova',    emoji: '🎨',  role: 'Designer',         model: 'anthropic/claude-sonnet-4-6' },
   { id: 'research', label: 'Scout',   emoji: '🔬',  role: 'Research Analyst', model: 'openai/gpt-5.1-codex'       },
-  { id: 'travel',   label: 'Travel',  emoji: '✈️',  role: 'Travel Assistant', model: 'openai/gpt-5.2-pro'         },
   { id: 'sec',      label: 'Secspy',  emoji: '🕵️', role: 'Security',         model: 'openai/gpt-5.4-mini'        },
+  { id: 'shazza',   label: 'Shazza',  emoji: '🤖',  role: 'Local AI (NUC)',   model: 'phi-4-mini-instruct'        },
 ];
 
 // ─── Session parsing ─────────────────────────────────────────────────────────
@@ -202,9 +202,29 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, ts: new Date().toISOString(), agents: cache.data });
   }
 
+  // Shazza is a remote bot on the NUC — check her service via SSH
+  async function getShazzaStatus(): Promise<{ lastTs: string | null; lastAssistantText: string | null; busy: boolean; sessionId: string | null }> {
+    try {
+      const { execSync } = await import('node:child_process');
+      const out = execSync(
+        "ssh -i /root/.ssh/prod_deploy_v3 -o StrictHostKeyChecking=no -o ConnectTimeout=5 jeffa@100.113.217.81 'systemctl is-active shazza-bot && uptime -s'",
+        { timeout: 8000, encoding: 'utf8' }
+      ).trim();
+      const lines = out.split('\n');
+      const active = lines[0]?.trim() === 'active';
+      const sinceStr = lines[1]?.trim();
+      const lastTs = sinceStr ? new Date(sinceStr).toISOString() : new Date().toISOString();
+      return { lastTs, lastAssistantText: active ? 'Listening for Telegram messages' : 'Service inactive', busy: false, sessionId: null };
+    } catch {
+      return { lastTs: null, lastAssistantText: 'Unreachable', busy: false, sessionId: null };
+    }
+  }
+
   const results: AgentStatus[] = await Promise.all(
     AGENT_DEFS.map(async (def) => {
-      const { lastTs, lastAssistantText, busy, sessionId } = await getAgentStatus(def.id);
+      const { lastTs, lastAssistantText, busy, sessionId } = def.id === 'shazza'
+        ? await getShazzaStatus()
+        : await getAgentStatus(def.id);
 
       let status: AgentStatus['status'] = 'Offline';
       if (lastTs) {
