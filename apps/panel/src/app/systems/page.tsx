@@ -20,6 +20,18 @@ interface ShazzaData {
   checkedAt: string;
 }
 
+interface Crm8Data {
+  ok: boolean;
+  reachable: boolean;
+  service: string;
+  label: string;
+  uptime?: { seconds: number; pretty: string };
+  memory?: { totalMb: number; usedMb: number; freeMb: number; pct: number };
+  nodeVersion?: string;
+  error?: string;
+  checkedAt: string;
+}
+
 interface AgentStatus {
   id: string;
   label: string;
@@ -71,16 +83,19 @@ function StatRow({ label, value, sub }: { label: string; value: string; sub?: st
 
 export default function SystemsPage() {
   const [shazza, setShazza] = useState<ShazzaData | null>(null);
+  const [crm8, setCrm8] = useState<Crm8Data | null>(null);
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const [shazzaRes, agentsRes] = await Promise.allSettled([
+      const [shazzaRes, crm8Res, agentsRes] = await Promise.allSettled([
         fetch('/api/shazza', { cache: 'no-store' }).then(r => r.json()),
+        fetch('/api/crm8', { cache: 'no-store' }).then(r => r.json()),
         fetch('/api/agents/status', { cache: 'no-store' }).then(r => r.json()),
       ]);
       if (shazzaRes.status === 'fulfilled') setShazza(shazzaRes.value);
+      if (crm8Res.status === 'fulfilled') setCrm8(crm8Res.value);
       if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value.agents || []);
       setLoading(false);
     }
@@ -100,6 +115,15 @@ export default function SystemsPage() {
 
   const diskPct = shazza?.disk?.pct ? parseInt(shazza.disk.pct) : 0;
   const diskColor = diskPct > 85 ? '#EF4444' : diskPct > 65 ? '#F59E0B' : '#10B981';
+
+  const crm8State = !crm8 ? 'unknown'
+    : !crm8.reachable ? 'down'
+    : crm8.memory && crm8.memory.pct > 85 ? 'degraded'
+    : 'healthy';
+
+  const crm8MemColor = crm8?.memory
+    ? crm8.memory.pct > 85 ? '#EF4444' : crm8.memory.pct > 65 ? '#F59E0B' : '#10B981'
+    : '#10B981';
 
   return (
     <AppShell>
@@ -125,7 +149,7 @@ export default function SystemsPage() {
                 <StatusDot state="down" />
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: '#F87171' }}>Unreachable</div>
-                  <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>{shazza?.error || 'SSH connection failed'}</div>
+                  <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>{shazza?.error || 'Health check failed'}</div>
                 </div>
               </div>
             </div>
@@ -198,9 +222,64 @@ export default function SystemsPage() {
           </div>
           <div className={card + ' p-5'}>
             <StatRow label="Host" value="203.57.50.240" sub="Sydney VPS" />
-            <StatRow label="Apps running" value="PM2 + systemd" sub="crossbench, mission-panel, nurturerecord, projectxify" />
+            <StatRow label="Apps running" value="PM2 + Docker" sub="crossbench, abea-ndh, nurturerecord, projectxify, mission-panel" />
             <StatRow label="SSH port" value="2222" sub="non-standard (good)" />
           </div>
+        </div>
+
+        {/* ── CRM8 Server ── */}
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#F1F5F9' }}>🗄️ CRM8</span>
+            <span style={{ fontSize: 12, color: '#64748B' }}>103.230.159.104 · crm8.effectx.com.au</span>
+            {!loading && <StatusDot state={crm8State} />}
+            {!loading && <span style={{ fontSize: 11, color: crm8State === 'healthy' ? '#10B981' : crm8State === 'degraded' ? '#F59E0B' : '#EF4444' }}>
+              {crm8State.charAt(0).toUpperCase() + crm8State.slice(1)}
+            </span>}
+          </div>
+
+          {loading ? (
+            <div className={card + ' p-5'} style={{ color: '#64748B', fontSize: 13 }}>Connecting to CRM8…</div>
+          ) : !crm8?.reachable ? (
+            <div className={card + ' p-5'}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <StatusDot state="down" />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#F87171' }}>Unreachable</div>
+                  <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>{crm8?.error || 'Health check failed'}</div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {/* Uptime card */}
+              <div className={card + ' p-5'}>
+                <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Uptime</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#F1F5F9', marginBottom: 4 }}>{crm8?.uptime?.pretty || 'N/A'}</div>
+                <div style={{ fontSize: 11, color: '#64748B' }}>Node {crm8?.nodeVersion || '—'}</div>
+              </div>
+
+              {/* Memory card */}
+              <div className={card + ' p-5'}>
+                <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Process Memory</div>
+                {crm8?.memory ? (
+                  <>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#F1F5F9' }}>{crm8.memory.usedMb.toLocaleString()} <span style={{ fontSize: 12, fontWeight: 400, color: '#64748B' }}>/ {crm8.memory.totalMb.toLocaleString()} MB</span></div>
+                    <Bar pct={crm8.memory.pct} color={crm8MemColor} />
+                    <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>{crm8.memory.pct}% used</div>
+                  </>
+                ) : <div style={{ fontSize: 13, color: '#64748B' }}>Unavailable</div>}
+              </div>
+
+              {/* App info card */}
+              <div className={card + ' p-5'}>
+                <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>App</div>
+                <StatRow label="Service" value="crm8" sub="PM2 · port 3044" />
+                <StatRow label="Domain" value="crm8.effectx.com.au" />
+                <StatRow label="SSH" value="port 2222" sub="id_ed25519 key" />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Bazza ── */}
@@ -214,21 +293,6 @@ export default function SystemsPage() {
             <StatRow label="Role" value="Dev workstation + AI host" />
             <StatRow label="OpenClaw" value="Running" sub="main agent + crew" />
             <StatRow label="Access" value="Tailscale only" sub="bazza.taile9fed9.ts.net" />
-          </div>
-        </div>
-
-
-        {/* ── CRM8 Server ── */}
-        <div>
-          <div className="flex items-center gap-2 mb-4">
-            <span style={{ fontSize: 14, fontWeight: 700, color: '#F1F5F9' }}>🗄️ CRM8</span>
-            <span style={{ fontSize: 12, color: '#64748B' }}>103.230.159.104 · port 2222 · crm8.effectx.com.au</span>
-            <StatusDot state="healthy" />
-          </div>
-          <div className={card + ' p-5'}>
-            <StatRow label="App" value="CRM8" sub="CRM & sales pipeline — PM2 process crm8" />
-            <StatRow label="Port" value="3044" sub="nginx → crm8.effectx.com.au" />
-            <StatRow label="SSH" value="port 2222" sub="id_ed25519 key" />
           </div>
         </div>
 
