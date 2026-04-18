@@ -217,6 +217,21 @@ export default function SystemsPage() {
           </div>
         </div>
 
+
+        {/* ── CRM8 Server ── */}
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#F1F5F9' }}>🗄️ CRM8</span>
+            <span style={{ fontSize: 12, color: '#64748B' }}>103.230.159.104 · port 2222 · crm8.effectx.com.au</span>
+            <StatusDot state="healthy" />
+          </div>
+          <div className={card + ' p-5'}>
+            <StatRow label="App" value="CRM8" sub="CRM & sales pipeline — PM2 process crm8" />
+            <StatRow label="Port" value="3044" sub="nginx → crm8.effectx.com.au" />
+            <StatRow label="SSH" value="port 2222" sub="id_ed25519 key" />
+          </div>
+        </div>
+
         {/* ── Agents ── */}
         {agents.length > 0 && (
           <div>
