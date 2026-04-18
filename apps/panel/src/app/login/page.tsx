@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 export default function LoginPage() {
-  const [user, setUser] = useState('jeff');
+  const [user, setUser] = useState('jeffa');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
 
