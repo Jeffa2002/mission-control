@@ -85,6 +85,15 @@ const APPS = [
     color: '#F59E0B',
     emoji: '🌐',
   },
+  {
+    id: "crm8",
+    name: "CRM8",
+    description: "CRM & sales pipeline management",
+    url: "https://crm8.effectx.com.au",
+    healthPath: "/login",
+    color: "#EF4444",
+    emoji: "👥",
+  },
 ] as const;
 
 type AppStatus = 'up' | 'degraded' | 'down' | 'unknown';
