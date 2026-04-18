@@ -8,7 +8,7 @@ type AgentStatus = {
   label: string;
   emoji: string;
   busy: boolean;
-  status: 'working' | 'idle' | 'offline';
+  status: 'Working' | 'Idle' | 'Offline';
   lastSeen: string | null;
   currentTask: string | null;
   sessionId: string | null;
@@ -31,7 +31,7 @@ const MEMBERS: TeamMember[] = [
     key: 'jeff',
     type: 'human',
     label: 'Jeffa',
-    emoji: '🧑‍💼',
+    emoji: '🧑💼',
     role: 'Owner / Operator',
     responsibilities: ['Direction & priorities', 'Approvals', 'Ops oversight'],
   },
@@ -43,6 +43,16 @@ const MEMBERS: TeamMember[] = [
     emoji: '🤖',
     role: 'Lead Assistant',
     responsibilities: ['Plan & coordinate work', 'Orchestrate the crew', 'Ship end-to-end slices'],
+    model: 'anthropic/claude-sonnet-4-6',
+  },
+  {
+    key: 'archie-pro',
+    type: 'agent',
+    agentId: 'archie-pro',
+    label: 'ArchiePro',
+    emoji: '⚡',
+    role: 'Pro Assistant',
+    responsibilities: ['Separate Telegram channel', 'Parallel task handling', 'Independent context'],
     model: 'anthropic/claude-sonnet-4-6',
   },
   {
@@ -110,6 +120,7 @@ const MEMBERS: TeamMember[] = [
 const ROLE_ORDER = [
   'Owner / Operator',
   'Lead Assistant',
+  'Pro Assistant',
   'Developer',
   'Writer',
   'Designer',
@@ -133,7 +144,7 @@ function pill(status: string, busy: boolean) {
     color: '#9fefff',
   };
 
-  if (status === 'working') {
+  if (status === 'Working') {
     return (
       <span style={{ ...base, background: 'rgba(0,200,255,0.16)', color: '#d6f6ff' }}>
         <span style={{ width: 8, height: 8, borderRadius: 999, background: '#00c8ff' }} />
@@ -142,7 +153,7 @@ function pill(status: string, busy: boolean) {
     );
   }
 
-  if (status === 'idle') {
+  if (status === 'Idle') {
     return (
       <span style={base}>
         <span style={{ width: 8, height: 8, borderRadius: 999, background: '#7CE8FF' }} />
@@ -171,7 +182,8 @@ export default function TeamsClient() {
         const j = await res.json();
         if (!alive) return;
         const map: Record<string, AgentStatus> = {};
-        (Array.isArray(j) ? j : []).forEach((a: AgentStatus) => (map[a.id] = a));
+        const list = j.agents ?? (Array.isArray(j) ? j : []);
+        list.forEach((a: AgentStatus) => (map[a.id] = a));
         setAgents(map);
       } catch {
         // ignore
@@ -213,7 +225,7 @@ export default function TeamsClient() {
       </h1>
       <Nav />
       <p style={{ marginTop: 14, color: '#9fefff', maxWidth: 980, lineHeight: 1.6 }}>
-        This is your active crew plus the roles we can spin up on demand. The live status badges update every ~15 seconds.
+        Your active crew. Live status badges update every 15 seconds.
       </p>
 
       <div style={{ display: 'grid', gap: 14, marginTop: 18 }}>
@@ -237,7 +249,7 @@ export default function TeamsClient() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginTop: 12 }}>
                 {members.map((m) => {
                   const live = m.agentId ? agents[m.agentId] : null;
-                  const status = m.planned ? 'offline' : live?.status || 'offline';
+                  const status = m.planned ? 'Offline' : (live?.status || 'Offline');
                   const busy = Boolean(live?.busy);
 
                   return (
