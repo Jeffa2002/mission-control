@@ -1,7 +1,10 @@
 // @ts-nocheck
 import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { requireSessionAuth } from '../../_session-auth';
+
+const require = createRequire(import.meta.url);
 
 type Country = { code: string; name: string; count: number; active?: boolean };
 
@@ -44,7 +47,6 @@ export async function GET(req: Request) {
   }
 
   try {
-    // Read auth logs from bind-mounted /host-logs
     let raw = '';
     for (const p of AUTH_LOG_PATHS) {
       try {
@@ -57,7 +59,6 @@ export async function GET(req: Request) {
       return NextResponse.json(buildResponse([]));
     }
 
-    // Extract IPs from failed auth lines
     const ipCounts = new Map<string, number>();
     for (const line of raw.split('\n')) {
       if (!line.includes('Failed password') && !line.includes('Invalid user')) continue;
@@ -69,8 +70,9 @@ export async function GET(req: Request) {
       return NextResponse.json(buildResponse([]));
     }
 
-    // Resolve top 40 IPs with fast-geoip (pure JS, no binary needed)
-    const geoip = await import('fast-geoip');
+    // Use createRequire to load CJS module in ESM context
+    const geoip = require('fast-geoip') as { lookup: (ip: string) => Promise<{ country?: string } | null> };
+
     const topIPs = [...ipCounts.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 40)
