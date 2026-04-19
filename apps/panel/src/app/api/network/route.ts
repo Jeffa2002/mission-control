@@ -26,6 +26,8 @@ const LINK_DEFS = [
 
 const history: Record<string, number[]> = {};
 let inFlight = false;
+let lastRefresh = 0;
+const REFRESH_INTERVAL_MS = 60_000; // only ping once per minute
 
 function ping(ip: string): number | null {
   try {
@@ -104,9 +106,11 @@ export async function GET(req: Request) {
     cached = JSON.parse(raw);
   } catch {}
 
-  // Kick off background refresh if not already running
-  if (!inFlight) {
+  // Kick off background refresh at most once per minute
+  const now = Date.now();
+  if (!inFlight && (now - lastRefresh) > REFRESH_INTERVAL_MS) {
     inFlight = true;
+    lastRefresh = now;
     loadIperf().then(iperf => buildData(iperf)).then(async data => {
       try { await writeFile(CACHE_FILE, JSON.stringify(data)); } catch {}
       inFlight = false;
