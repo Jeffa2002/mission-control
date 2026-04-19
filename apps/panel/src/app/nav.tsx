@@ -58,6 +58,8 @@ export function Nav() {
           </>
         );
       })}
+      <span style={{ width: 1, height: 24, background: 'rgba(124,232,255,0.18)', margin: '0 2px' }} />
+      <a href="/api/logout" style={{ textDecoration: 'none', padding: '8px 12px', borderRadius: 999, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontWeight: 800, letterSpacing: 0.5, fontSize: 12 }}>⏏ Logout</a>
     </div>
   );
 }

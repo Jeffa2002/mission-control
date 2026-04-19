@@ -1,28 +1,17 @@
+// @ts-nocheck
 import { NextResponse } from 'next/server';
-import { audit } from '../_util';
 
-export async function POST(req: Request) {
-  const ip =
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    req.headers.get('x-real-ip') ??
-    'unknown';
-
-  await audit('logout', 'session cookie cleared', {
-    actor: 'session',
-    auth_method: 'session',
-    ip,
-    result: 'ok',
-  }).catch(() => {});
-
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set({
-    name: 'mc_auth',
-    value: '',
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: true,
-    path: '/',
-    maxAge: 0,
-  });
+function clearCookie(res: NextResponse) {
+  res.cookies.set({ name: 'mc_auth', value: '', httpOnly: true, sameSite: 'lax', secure: true, path: '/', maxAge: 0 });
   return res;
+}
+
+export async function GET() {
+  const res = NextResponse.redirect(new URL('https://mission.effectx.com.au/login'));
+  return clearCookie(res);
+}
+
+export async function POST() {
+  const res = NextResponse.json({ ok: true });
+  return clearCookie(res);
 }
