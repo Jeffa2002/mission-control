@@ -1,0 +1,35 @@
+{
+  "measuredAt": "2026-04-19T04:32:03Z",
+  "testedFrom": "bazza",
+  "results": [
+    {
+      "id": "prod",
+      "status": "ok",
+      "mbpsSend": 506.56,
+      "mbpsRecv": 501.82,
+      "retransmits": 0,
+      "rttMs": 5.63
+    },
+    {
+      "id": "crm8",
+      "status": "ok",
+      "mbpsSend": 507.74,
+      "mbpsRecv": 501.99,
+      "retransmits": 0,
+      "rttMs": 7.71
+    },
+    {
+      "id": "backup-melb",
+      "status": "ok",
+      "mbpsSend": 540.15,
+      "mbpsRecv": 493.93,
+      "retransmits": 14416,
+      "rttMs": 142.09
+    }
+  ],
+  "summary": {
+    "totalTests": 3,
+    "passed": 3,
+    "avgMbps": 518.15
+  }
+}

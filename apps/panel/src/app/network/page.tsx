@@ -10,6 +10,7 @@ interface NodeData {
   location: string; role: string;
   latencyMs: number | null; status: 'online' | 'degraded' | 'offline';
   history: number[];
+  iperf?: { mbpsSend: number; mbpsRecv: number; rttMs: number; retransmits: number; measuredAt: string } | null;
 }
 interface LinkData {
   from: string; to: string; label: string; direction: string;
@@ -313,6 +314,27 @@ export default function NetworkPage() {
                         </div>
                       ))}
                     </div>
+                    {selectedNodeData.iperf && (
+                      <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, background: 'rgba(124,232,255,0.06)', border: '1px solid rgba(124,232,255,0.15)' }}>
+                        <div style={{ fontSize: 10, color: '#7ce8ff', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8, fontWeight: 700 }}>⚡ iperf3 Throughput</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          {[
+                            ['↑ Send', `${selectedNodeData.iperf.mbpsSend} Mbps`],
+                            ['↓ Recv', `${selectedNodeData.iperf.mbpsRecv} Mbps`],
+                            ['RTT', `${selectedNodeData.iperf.rttMs}ms`],
+                            ['Retransmits', `${selectedNodeData.iperf.retransmits}`],
+                          ].map(([k, v]) => (
+                            <div key={k} style={{ textAlign: 'center', padding: '6px 4px', borderRadius: 8, background: 'rgba(0,0,0,0.2)' }}>
+                              <div style={{ fontSize: 10, color: '#475569' }}>{k}</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: '#7ce8ff', marginTop: 2 }}>{v}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 9, color: '#374151', marginTop: 6, textAlign: 'right' }}>
+                          tested {selectedNodeData.iperf.measuredAt ? new Date(selectedNodeData.iperf.measuredAt).toLocaleString() : '—'}
+                        </div>
+                      </div>
+                    )}
                     {selectedNodeData.history.length > 1 && (
                       <div style={{ marginTop: 12 }}>
                         <div style={{ fontSize: 10, color: '#475569', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Latency history</div>
@@ -346,6 +368,24 @@ export default function NetworkPage() {
                     </div>
                   </>
                 )}
+                    {selectedLinkData.iperf && (
+                      <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, background: 'rgba(124,232,255,0.06)', border: '1px solid rgba(124,232,255,0.15)' }}>
+                        <div style={{ fontSize: 10, color: '#7ce8ff', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8, fontWeight: 700 }}>⚡ iperf3 Throughput</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          {[
+                            ['↑ Send', `${selectedLinkData.iperf.mbpsSend} Mbps`],
+                            ['↓ Recv', `${selectedLinkData.iperf.mbpsRecv} Mbps`],
+                            ['RTT', `${selectedLinkData.iperf.rttMs}ms`],
+                            ['Retransmits', `${selectedLinkData.iperf.retransmits}`],
+                          ].map(([k, v]) => (
+                            <div key={k} style={{ textAlign: 'center', padding: '6px 4px', borderRadius: 8, background: 'rgba(0,0,0,0.2)' }}>
+                              <div style={{ fontSize: 10, color: '#475569' }}>{k}</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: '#7ce8ff', marginTop: 2 }}>{v}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
               </div>
             )}
 
