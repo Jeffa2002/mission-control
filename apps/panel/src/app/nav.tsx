@@ -11,6 +11,7 @@ const tabs: Tab[] = [
   { href: '/office', label: '🏢 Office', group: 'ops' },
   { href: '/teams', label: '🧑‍🤝‍🧑 Teams', group: 'ops' },
   { href: '/memory', label: '🧠 Memory', group: 'ops' },
+  { href: '/network', label: '🌐 Network', group: 'monitoring' },
   { href: '/systems', label: '🖥️ Systems', group: 'monitoring' },
   { href: '/incidents', label: '🚨 Incidents', group: 'monitoring' },
   { href: '/security', label: '🔒 Security', group: 'monitoring' },

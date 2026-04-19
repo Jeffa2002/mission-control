@@ -1,0 +1,437 @@
+// @ts-nocheck
+'use client';
+
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { AppShell, SectionTitle, card } from '../../components/ops-ui';
+
+/* ─── Types ─────────────────────────────────────────────────────────── */
+interface NodeData {
+  id: string; label: string; emoji: string; ip: string;
+  location: string; role: string;
+  latencyMs: number | null; status: 'online' | 'degraded' | 'offline';
+  history: number[];
+}
+interface LinkData {
+  from: string; to: string; label: string; direction: string;
+  latencyMs: number | null; active: boolean; packetLoss: number;
+}
+interface NetworkData {
+  nodes: NodeData[]; links: LinkData[]; measuredAt: string;
+}
+
+/* ─── Node positions (SVG viewBox 0 0 600 340) ──────────────────────── */
+const NODE_POS: Record<string, { x: number; y: number }> = {
+  bazza:        { x: 120, y: 90  },
+  shazza:       { x: 120, y: 250 },
+  prod:         { x: 300, y: 80  },
+  crm8:         { x: 480, y: 170 },
+  'backup-melb':{ x: 300, y: 270 },
+};
+
+/* ─── Helpers ────────────────────────────────────────────────────────── */
+function latencyColor(ms: number | null) {
+  if (ms === null) return '#6B7280';
+  if (ms < 20)  return '#10B981';
+  if (ms < 50)  return '#F59E0B';
+  return '#EF4444';
+}
+function statusColor(s: string) {
+  if (s === 'online')   return '#10B981';
+  if (s === 'degraded') return '#F59E0B';
+  return '#EF4444';
+}
+function fmtMs(ms: number | null) { return ms === null ? '—' : `${ms.toFixed(1)}ms`; }
+
+/* ─── Sparkline ──────────────────────────────────────────────────────── */
+function Sparkline({ data, color = '#7ce8ff', w = 80, h = 28 }: { data: number[]; color?: string; w?: number; h?: number }) {
+  if (!data.length) return <svg width={w} height={h}><text x={4} y={h/2+4} fontSize={10} fill="#475569">no data</text></svg>;
+  const min = Math.min(...data);
+  const max = Math.max(...data) || 1;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1 || 1)) * (w - 4) + 2;
+    const y = h - 4 - ((v - min) / (max - min || 1)) * (h - 8);
+    return `${x},${y}`;
+  }).join(' ');
+  return (
+    <svg width={w} height={h} style={{ overflow: 'visible' }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      {data.length > 0 && (() => {
+        const last = data[data.length - 1];
+        const lx = w - 2;
+        const ly = h - 4 - ((last - min) / (max - min || 1)) * (h - 8);
+        return <circle cx={lx} cy={ly} r={2.5} fill={color} />;
+      })()}
+    </svg>
+  );
+}
+
+/* ─── Animated dash for SVG links ──────────────────────────────────── */
+function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, selected, onClick }: any) {
+  const id = `link-${x1}-${y1}-${x2}-${y2}`;
+  const mid = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
+  const len = Math.sqrt((x2-x1)**2 + (y2-y1)**2);
+
+  return (
+    <g onClick={onClick} style={{ cursor: 'pointer' }}>
+      {/* Hit area */}
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={16} />
+      {/* Base line */}
+      <line x1={x1} y1={y1} x2={x2} y2={y2}
+        stroke={color} strokeWidth={selected ? 2.5 : 1.5}
+        strokeOpacity={active ? 0.85 : 0.25}
+        strokeDasharray={active ? 'none' : '4 4'}
+      />
+      {/* Animated traffic pulse */}
+      {active && (
+        <circle r={4} fill={color} fillOpacity={0.9}>
+          <animateMotion dur={`${(len / 80).toFixed(1)}s`} repeatCount="indefinite"
+            path={`M${x1},${y1} L${x2},${y2}`} />
+        </circle>
+      )}
+      {/* Latency label */}
+      {latencyMs !== null && (
+        <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize={9}
+          fill={color} fontWeight={600} style={{ pointerEvents: 'none' }}>
+          {fmtMs(latencyMs)}
+        </text>
+      )}
+      {/* Selected glow */}
+      {selected && (
+        <line x1={x1} y1={y1} x2={x2} y2={y2}
+          stroke={color} strokeWidth={6} strokeOpacity={0.15} />
+      )}
+    </g>
+  );
+}
+
+/* ─── Node circle ────────────────────────────────────────────────────── */
+function NodeCircle({ node, selected, onClick }: { node: NodeData; selected: boolean; onClick: () => void }) {
+  const pos = NODE_POS[node.id];
+  if (!pos) return null;
+  const sc = statusColor(node.status);
+  const r = 28;
+
+  return (
+    <g onClick={onClick} style={{ cursor: 'pointer' }}>
+      {/* Glow */}
+      <circle cx={pos.x} cy={pos.y} r={r + 10} fill={sc} fillOpacity={selected ? 0.15 : 0.07}>
+        {node.status === 'online' && (
+          <animate attributeName="r" values={`${r+8};${r+14};${r+8}`} dur="3s" repeatCount="indefinite" />
+        )}
+      </circle>
+      {/* Ring */}
+      <circle cx={pos.x} cy={pos.y} r={r} fill="#0b1020"
+        stroke={selected ? '#7ce8ff' : sc} strokeWidth={selected ? 2 : 1.5} />
+      {/* Emoji */}
+      <text x={pos.x} y={pos.y - 4} textAnchor="middle" fontSize={16} dominantBaseline="middle">
+        {node.emoji}
+      </text>
+      {/* Label */}
+      <text x={pos.x} y={pos.y + 14} textAnchor="middle" fontSize={9}
+        fill="#CBD5E1" fontWeight={700} letterSpacing={0.5}>
+        {node.label.toUpperCase()}
+      </text>
+      {/* Status dot */}
+      <circle cx={pos.x + r - 4} cy={pos.y - r + 4} r={5} fill={sc}
+        stroke="#0b1020" strokeWidth={1.5} />
+    </g>
+  );
+}
+
+/* ─── Main page ──────────────────────────────────────────────────────── */
+export default function NetworkPage() {
+  const [data, setData] = useState<NetworkData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [selectedLink, setSelectedLink] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch('/api/network', { cache: 'no-store' });
+      if (r.ok) {
+        const d = await r.json();
+        setData(d);
+        setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      }
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 15_000);
+    return () => clearInterval(iv);
+  }, [load]);
+
+  const nodeMap = Object.fromEntries((data?.nodes || []).map(n => [n.id, n]));
+  const selectedNodeData = selectedNode ? nodeMap[selectedNode] : null;
+  const selectedLinkData = selectedLink
+    ? data?.links.find(l => `${l.from}-${l.to}` === selectedLink)
+    : null;
+
+  const onlineCount = data?.nodes.filter(n => n.status === 'online').length ?? 0;
+  const avgLatency = data?.nodes.filter(n => n.latencyMs !== null).reduce((a, n, _, arr) =>
+    a + (n.latencyMs! / arr.length), 0) ?? 0;
+
+  return (
+    <AppShell>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: '#F1F5F9', letterSpacing: -0.5 }}>
+              🌐 Network Operations Centre
+            </div>
+            <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>
+              Tailscale mesh · 5 nodes · auto-refresh 15s
+              {lastUpdated && <span style={{ color: '#64748B', marginLeft: 12 }}>last ping: {lastUpdated}</span>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', fontSize: 12, fontWeight: 700, color: '#10B981' }}>
+              {onlineCount}/5 ONLINE
+            </div>
+            <div style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(124,232,255,0.08)', border: '1px solid rgba(124,232,255,0.2)', fontSize: 12, fontWeight: 700, color: '#7ce8ff' }}>
+              AVG {avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* Main grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
+
+          {/* Topology canvas */}
+          <div style={{ borderRadius: 14, border: '1px solid rgba(124,232,255,0.12)', background: '#090d1a', padding: 8, position: 'relative', minHeight: 380 }}>
+            {/* Scanline overlay */}
+            <div style={{
+              position: 'absolute', inset: 0, borderRadius: 14, pointerEvents: 'none',
+              background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.05) 2px, rgba(0,0,0,0.05) 4px)',
+              zIndex: 1,
+            }} />
+            {/* Grid dots */}
+            <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0 }}>
+              <defs>
+                <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+                  <circle cx={15} cy={15} r={1} fill="rgba(124,232,255,0.08)" />
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#grid)" />
+            </svg>
+
+            <svg
+              viewBox="0 0 600 340"
+              style={{ width: '100%', height: '100%', minHeight: 340, position: 'relative', zIndex: 2 }}
+            >
+              <defs>
+                <filter id="glow">
+                  <feGaussianBlur stdDeviation="3" result="blur" />
+                  <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+              </defs>
+
+              {/* Links */}
+              {(data?.links || []).map(link => {
+                const fromPos = NODE_POS[link.from];
+                const toPos = NODE_POS[link.to];
+                if (!fromPos || !toPos) return null;
+                const key = `${link.from}-${link.to}`;
+                return (
+                  <AnimatedLink key={key}
+                    x1={fromPos.x} y1={fromPos.y}
+                    x2={toPos.x} y2={toPos.y}
+                    color={latencyColor(link.latencyMs)}
+                    active={link.active}
+                    latencyMs={link.latencyMs}
+                    selected={selectedLink === key}
+                    onClick={() => {
+                      setSelectedLink(selectedLink === key ? null : key);
+                      setSelectedNode(null);
+                    }}
+                  />
+                );
+              })}
+
+              {/* Nodes */}
+              {(data?.nodes || []).map(node => (
+                <NodeCircle key={node.id} node={node}
+                  selected={selectedNode === node.id}
+                  onClick={() => {
+                    setSelectedNode(selectedNode === node.id ? null : node.id);
+                    setSelectedLink(null);
+                  }}
+                />
+              ))}
+
+              {/* Legend */}
+              {[
+                { color: '#10B981', label: '< 20ms' },
+                { color: '#F59E0B', label: '20–50ms' },
+                { color: '#EF4444', label: '> 50ms' },
+                { color: '#6B7280', label: 'offline' },
+              ].map(({ color, label }, i) => (
+                <g key={label} transform={`translate(${12 + i * 72}, 320)`}>
+                  <line x1={0} y1={6} x2={16} y2={6} stroke={color} strokeWidth={2} />
+                  <text x={20} y={10} fontSize={9} fill="#64748B">{label}</text>
+                </g>
+              ))}
+            </svg>
+
+            {loading && (
+              <div style={{
+                position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                borderRadius: 14, background: 'rgba(9,13,26,0.8)', zIndex: 10,
+              }}>
+                <div style={{ fontSize: 13, color: '#475569' }}>Pinging nodes…</div>
+              </div>
+            )}
+          </div>
+
+          {/* Right panel */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+            {/* Detail panel — node or link */}
+            {(selectedNodeData || selectedLinkData) && (
+              <div style={{ borderRadius: 14, border: '1px solid rgba(124,232,255,0.2)', background: '#0d1424', padding: 16 }}>
+                {selectedNodeData && (
+                  <>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: '#F1F5F9', marginBottom: 10 }}>
+                      {selectedNodeData.emoji} {selectedNodeData.label}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {[
+                        ['IP',       selectedNodeData.ip],
+                        ['Location', selectedNodeData.location],
+                        ['Role',     selectedNodeData.role],
+                        ['Latency',  fmtMs(selectedNodeData.latencyMs)],
+                        ['Status',   selectedNodeData.status.toUpperCase()],
+                      ].map(([k, v]) => (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                          <span style={{ color: '#64748B' }}>{k}</span>
+                          <span style={{ color: k === 'Status' ? statusColor(selectedNodeData.status) : '#CBD5E1', fontWeight: 600 }}>{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {selectedNodeData.history.length > 1 && (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontSize: 10, color: '#475569', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Latency history</div>
+                        <Sparkline data={selectedNodeData.history} color={latencyColor(selectedNodeData.latencyMs)} w={252} h={36} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#475569', marginTop: 2 }}>
+                          <span>min: {Math.min(...selectedNodeData.history).toFixed(1)}ms</span>
+                          <span>max: {Math.max(...selectedNodeData.history).toFixed(1)}ms</span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+                {selectedLinkData && (
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: '#F1F5F9', marginBottom: 10 }}>
+                      🔗 {nodeMap[selectedLinkData.from]?.emoji} {nodeMap[selectedLinkData.from]?.label} → {nodeMap[selectedLinkData.to]?.emoji} {nodeMap[selectedLinkData.to]?.label}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#7ce8ff', marginBottom: 10, fontWeight: 600 }}>{selectedLinkData.label}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {[
+                        ['Direction',   selectedLinkData.direction],
+                        ['Latency',     fmtMs(selectedLinkData.latencyMs)],
+                        ['Packet loss', `${selectedLinkData.packetLoss}%`],
+                        ['Status',      selectedLinkData.active ? 'ACTIVE' : 'DOWN'],
+                      ].map(([k, v]) => (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                          <span style={{ color: '#64748B' }}>{k}</span>
+                          <span style={{ color: k === 'Status' ? (selectedLinkData.active ? '#10B981' : '#EF4444') : '#CBD5E1', fontWeight: 600 }}>{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Node list */}
+            <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: '#0d1424', padding: 14 }}>
+              <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>Node Status</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {(data?.nodes || []).map(node => (
+                  <div key={node.id}
+                    onClick={() => { setSelectedNode(selectedNode === node.id ? null : node.id); setSelectedLink(null); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                      borderRadius: 10, cursor: 'pointer',
+                      background: selectedNode === node.id ? 'rgba(124,232,255,0.07)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${selectedNode === node.id ? 'rgba(124,232,255,0.2)' : 'transparent'}`,
+                      transition: 'all 0.15s',
+                    }}>
+                    <span style={{ fontSize: 16 }}>{node.emoji}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#F1F5F9' }}>{node.label}</div>
+                      <div style={{ fontSize: 10, color: '#475569' }}>{node.location} · {node.ip}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: latencyColor(node.latencyMs) }}>{fmtMs(node.latencyMs)}</div>
+                      <div style={{ fontSize: 9, color: statusColor(node.status), textTransform: 'uppercase', letterSpacing: '0.06em' }}>{node.status}</div>
+                    </div>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(node.status), flexShrink: 0,
+                      boxShadow: node.status === 'online' ? `0 0 6px ${statusColor(node.status)}` : 'none' }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Latency sparklines */}
+            <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: '#0d1424', padding: 14 }}>
+              <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>Latency Trends</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {(data?.nodes || []).filter(n => n.history?.length > 0).map(node => (
+                  <div key={node.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, width: 20 }}>{node.emoji}</span>
+                    <Sparkline data={node.history} color={latencyColor(node.latencyMs)} w={150} h={24} />
+                    <span style={{ fontSize: 11, color: latencyColor(node.latencyMs), fontWeight: 700, minWidth: 40, textAlign: 'right' }}>
+                      {fmtMs(node.latencyMs)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Connections list */}
+            <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: '#0d1424', padding: 14 }}>
+              <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>Active Links</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(data?.links || []).map(link => {
+                  const key = `${link.from}-${link.to}`;
+                  return (
+                    <div key={key}
+                      onClick={() => { setSelectedLink(selectedLink === key ? null : key); setSelectedNode(null); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
+                        borderRadius: 8, cursor: 'pointer',
+                        background: selectedLink === key ? 'rgba(124,232,255,0.07)' : 'rgba(255,255,255,0.02)',
+                        border: `1px solid ${selectedLink === key ? 'rgba(124,232,255,0.2)' : 'transparent'}`,
+                      }}>
+                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: link.active ? latencyColor(link.latencyMs) : '#374151', flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 10, color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {nodeMap[link.from]?.emoji} {nodeMap[link.from]?.label} → {nodeMap[link.to]?.emoji} {nodeMap[link.to]?.label}
+                        </div>
+                        <div style={{ fontSize: 9, color: '#475569' }}>{link.label}</div>
+                      </div>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: latencyColor(link.latencyMs) }}>{fmtMs(link.latencyMs)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div style={{ fontSize: 11, color: '#374151', textAlign: 'right' }}>
+          Pings measured from prod · Tailscale mesh · refreshes every 15s
+          {data?.measuredAt && <span style={{ marginLeft: 8 }}>measured {new Date(data.measuredAt).toLocaleTimeString()}</span>}
+        </div>
+      </div>
+    </AppShell>
+  );
+}
