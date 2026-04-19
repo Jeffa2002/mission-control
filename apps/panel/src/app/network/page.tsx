@@ -67,39 +67,46 @@ function Sparkline({ data, color = '#7ce8ff', w = 80, h = 28 }: { data: number[]
 }
 
 /* ─── Animated dash for SVG links ──────────────────────────────────── */
-function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, selected, onClick }: any) {
-  const id = `link-${x1}-${y1}-${x2}-${y2}`;
+function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, selected, onClick }: any) {
   const mid = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
   const len = Math.sqrt((x2-x1)**2 + (y2-y1)**2);
+  // Offset labels perpendicular to line so they don't overlap
+  const dx = x2 - x1, dy = y2 - y1;
+  const nx = -dy / len, ny = dx / len;
+  const off = 9;
 
   return (
     <g onClick={onClick} style={{ cursor: 'pointer' }}>
-      {/* Hit area */}
       <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={16} />
-      {/* Base line */}
+      {selected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={8} strokeOpacity={0.12} />}
       <line x1={x1} y1={y1} x2={x2} y2={y2}
         stroke={color} strokeWidth={selected ? 2.5 : 1.5}
         strokeOpacity={active ? 0.85 : 0.25}
         strokeDasharray={active ? 'none' : '4 4'}
       />
-      {/* Animated traffic pulse */}
       {active && (
         <circle r={4} fill={color} fillOpacity={0.9}>
           <animateMotion dur={`${(len / 80).toFixed(1)}s`} repeatCount="indefinite"
             path={`M${x1},${y1} L${x2},${y2}`} />
         </circle>
       )}
-      {/* Latency label */}
+      {/* Latency label — above line */}
       {latencyMs !== null && (
-        <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize={9}
-          fill={color} fontWeight={600} style={{ pointerEvents: 'none' }}>
+        <text
+          x={mid.x + nx * off} y={mid.y + ny * off - 5}
+          textAnchor="middle" fontSize={9} fill={color} fontWeight={700}
+          style={{ pointerEvents: 'none' }}>
           {fmtMs(latencyMs)}
         </text>
       )}
-      {/* Selected glow */}
-      {selected && (
-        <line x1={x1} y1={y1} x2={x2} y2={y2}
-          stroke={color} strokeWidth={6} strokeOpacity={0.15} />
+      {/* Mbps label — below latency */}
+      {mbps != null && mbps > 0 && (
+        <text
+          x={mid.x + nx * off} y={mid.y + ny * off + 6}
+          textAnchor="middle" fontSize={8} fill={color} fontWeight={600} fillOpacity={0.75}
+          style={{ pointerEvents: 'none' }}>
+          {mbps >= 1000 ? `${(mbps/1000).toFixed(1)}Gbps` : `${mbps}Mbps`}
+        </text>
       )}
     </g>
   );
@@ -187,7 +194,7 @@ export default function NetworkPage() {
             </div>
             <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>
               Tailscale mesh · 5 nodes · auto-refresh 15s
-              {lastUpdated && <span style={{ color: '#64748B', marginLeft: 12 }}>last ping: {lastUpdated}</span>}
+              {lastUpdated && <span style={{ color: '#64748B', marginLeft: 12 }}>last ping: {lastUpdated}</span>}{data?.stale && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 11 }}>↻ refreshing…</span>}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -245,6 +252,7 @@ export default function NetworkPage() {
                     color={latencyColor(link.latencyMs)}
                     active={link.active}
                     latencyMs={link.latencyMs}
+                    mbps={link.iperf?.mbpsSend ?? null}
                     selected={selectedLink === key}
                     onClick={() => {
                       setSelectedLink(selectedLink === key ? null : key);
