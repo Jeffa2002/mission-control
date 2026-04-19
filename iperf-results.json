@@ -1,35 +1,43 @@
 {
-  "measuredAt": "2026-04-19T04:32:03Z",
+  "measuredAt": "2026-04-19T04:36:46Z",
   "testedFrom": "bazza",
   "results": [
     {
       "id": "prod",
       "status": "ok",
-      "mbpsSend": 506.56,
-      "mbpsRecv": 501.82,
+      "mbpsSend": 501.75,
+      "mbpsRecv": 495.9,
       "retransmits": 0,
-      "rttMs": 5.63
+      "rttMs": 5.7
     },
     {
       "id": "crm8",
       "status": "ok",
-      "mbpsSend": 507.74,
-      "mbpsRecv": 501.99,
+      "mbpsSend": 546.6,
+      "mbpsRecv": 538.42,
       "retransmits": 0,
-      "rttMs": 7.71
+      "rttMs": 13.01
     },
     {
       "id": "backup-melb",
       "status": "ok",
-      "mbpsSend": 540.15,
-      "mbpsRecv": 493.93,
-      "retransmits": 14416,
-      "rttMs": 142.09
+      "mbpsSend": 551.04,
+      "mbpsRecv": 505.89,
+      "retransmits": 9315,
+      "rttMs": 40.79
+    },
+    {
+      "id": "shazza",
+      "status": "ok",
+      "mbpsSend": 106.5,
+      "mbpsRecv": 100.87,
+      "retransmits": 0,
+      "rttMs": 22.74
     }
   ],
   "summary": {
-    "totalTests": 3,
-    "passed": 3,
-    "avgMbps": 518.15
+    "totalTests": 4,
+    "passed": 4,
+    "avgMbps": 426.47
   }
 }
