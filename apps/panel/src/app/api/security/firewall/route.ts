@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { readFirstExisting, runRemote, safeExec } from '../_security-logs';
+import { requireSessionAuth } from '../../_session-auth';
 
 type Event = { ts: string; src: string; dst: string; dpt: string; proto: string };
 
@@ -14,7 +15,10 @@ function parseEvent(line: string): Event | null {
   return { ts, src, dst, dpt, proto };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   try {
     const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
       if (host === 'bazza') {

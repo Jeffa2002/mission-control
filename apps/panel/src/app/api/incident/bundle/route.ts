@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server';
 import JSZip from 'jszip';
 import { readFile } from 'node:fs/promises';
 import { sh } from '../../_util';
+import { requireSessionAuth } from '../../_session-auth';
 
 function safeName(s: string) {
   return s.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
 export async function GET(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   try {
     const url = new URL(req.url);
     const minutes = Math.min(240, Math.max(5, Number(url.searchParams.get('minutes') || '30')));

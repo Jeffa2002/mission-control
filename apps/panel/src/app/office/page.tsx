@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Nav } from '../nav';
+import { AppShell } from '../../components/ops-ui';
 import { AgentActivityDrawer } from '../../components/AgentActivityDrawer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -446,30 +446,19 @@ export default function OfficePage() {
     return () => clearInterval(t);
   }, []);
 
-  const BG = 'radial-gradient(1200px 700px at 20% 10%, rgba(0,255,255,0.14), transparent 60%), radial-gradient(1000px 600px at 80% 30%, rgba(0,140,255,0.12), transparent 55%), radial-gradient(900px 600px at 50% 80%, rgba(140,0,255,0.10), transparent 60%), linear-gradient(180deg, #040814 0%, #030513 55%, #02030a 100%)';
-
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        padding: 24,
-        fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
-        color: '#d6f6ff',
-        background: BG,
-      }}
-    >
+    <AppShell>
       {/* Inject keyframes */}
       <style dangerouslySetInnerHTML={{ __html: KEYFRAMES }} />
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
         <div>
-          <div style={{ letterSpacing: 3, fontSize: 12, color: '#7ce8ff', opacity: 0.9 }}>MISSION CONTROL</div>
-          <h1 style={{ margin: '6px 0 0', fontSize: 34, textShadow: '0 0 18px rgba(0,220,255,0.25)' }}>
+          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: 'var(--text-1)' }}>
             Digital Office
           </h1>
         </div>
-        <div style={{ textAlign: 'right', fontSize: 12, color: '#9fefff' }}>
+        <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-3)' }}>
           <div>{loading ? 'syncing…' : 'live · 10s refresh'}</div>
           {lastFetch && (
             <div style={{ opacity: 0.7, marginTop: 4 }}>
@@ -478,8 +467,6 @@ export default function OfficePage() {
           )}
         </div>
       </div>
-
-      <Nav />
 
       {/* Floor summary */}
       {agents.length > 0 && <FloorSummary agents={agents} />}
@@ -537,11 +524,10 @@ export default function OfficePage() {
           marginTop: 32,
           padding: '10px 16px',
           borderRadius: 10,
-          border: '1px solid rgba(124,232,255,0.10)',
+          border: '1px solid var(--border)',
           background: 'rgba(0,0,0,0.2)',
           fontSize: 11,
-          color: '#9fefff',
-          opacity: 0.7,
+          color: 'var(--text-3)',
           display: 'flex',
           gap: 20,
           flexWrap: 'wrap',
@@ -558,6 +544,6 @@ export default function OfficePage() {
         </span>
         <span style={{ marginLeft: 'auto' }}>Source: <code>/agent-data/{'{agent}'}/sessions/*.jsonl</code></span>
       </div>
-    </main>
+    </AppShell>
   );
 }

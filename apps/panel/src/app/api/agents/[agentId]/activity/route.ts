@@ -155,7 +155,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ agentId:
   const authErr = requireSessionAuth(req);
   if (authErr) return authErr;
 
-  const { agentId } = await params;
+  const { agentId: rawAgentId } = await params;
+  // Sanitise agentId — only allow alphanumeric, underscore, hyphen
+  const agentId = rawAgentId.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!agentId) {
+    return NextResponse.json({ error: 'Invalid agentId' }, { status: 400 });
+  }
+
   const since = new URL(req.url).searchParams.get('since');
   try {
     const { sessionFile, events } = await readLatestSession(agentId);

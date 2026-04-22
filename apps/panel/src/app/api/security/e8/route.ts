@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { safeExec } from '../_security-logs';
+import { requireSessionAuth } from '../../_session-auth';
 
 type Status = 'compliant' | 'partial' | 'at-risk' | 'manual' | 'needs-review';
 
@@ -9,7 +10,10 @@ function mk(id: string, name: string, status: Status, description: string, detai
   return { id, name, status, description, detail, host };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   try {
     const upgradableRaw = safeExec("apt list --upgradable 2>/dev/null | wc -l");
     const upgradable = Math.max(0, Number.parseInt(upgradableRaw.trim(), 10) - 1 || 0);

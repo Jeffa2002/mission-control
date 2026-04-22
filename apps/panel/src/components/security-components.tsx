@@ -16,7 +16,7 @@ export function SystemHealthCard({ host, state, summary, anomalies }: { host: 'b
   return <div className={cn(card,'p-4 border-l-2', state==='critical' ? 'border-l-[#ef4444]' : state==='degraded' ? 'border-l-[#f59e0b]' : state==='stale' ? 'border-l-slate-500' : 'border-l-[#22c55e]')}><div className="flex items-center justify-between"><span className={cn(pill, hostPill(host))}>{host}</span><span className={sevPill(state)}>{state}</span></div><div className="mt-3 text-[15px] font-semibold">{summary}</div><ul className="mt-3 space-y-1 text-[13px] text-slate-400">{anomalies.map((a) => <li key={a}>• {a}</li>)}</ul></div>;
 }
 
-export function ThreatTimeline() { return <div className={cn(card,'p-4')}><div className="mb-3 text-[11px] uppercase tracking-[0.24em] text-slate-500">Threat timeline</div><div className="grid grid-cols-12 gap-1">{Array.from({length:12}).map((_,i)=><div key={i} className={cn('h-20 rounded-md border', i%4===0?'border-[#ef4444]/40 bg-[#ef4444]/15':i%3===0?'border-[#f59e0b]/40 bg-[#f59e0b]/15':'border-white/10 bg-white/5')} />)}</div></div>; }
+export function ThreatTimeline() { return <div className={cn(card,'p-4')}><div className="mb-3 text-[11px] uppercase tracking-[0.24em] text-slate-500">Threat timeline</div><div className="flex items-center justify-center h-20"><div className="text-[13px] text-slate-500">No timeline data</div></div></div>; }
 
 export function AlertTriageCard({ title, host, severity, evidence }: { title: string; host: 'bazza' | 'prod'; severity: 'info' | 'warning' | 'critical'; evidence: string[] }) {
   const [status, setStatus] = useState('open');

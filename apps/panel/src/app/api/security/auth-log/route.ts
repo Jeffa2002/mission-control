@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { readFirstExisting, runRemote, safeExec } from '../_security-logs';
+import { requireSessionAuth } from '../../_session-auth';
 
 type AuthEvent = { ts: string; type: 'sudo' | 'ssh-accept' | 'auth-fail' | 'su'; user: string; detail: string };
 
@@ -34,7 +35,10 @@ function parseLine(line: string): AuthEvent | null {
   return null;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   try {
     const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
       if (host === 'bazza') {

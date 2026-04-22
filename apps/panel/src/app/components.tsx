@@ -396,40 +396,7 @@ export function OpsStrip() {
         />
       </div>
 
-      {/* ── Row 2: Trading ops ───────────────────────────────────── */}
-      <div style={{ fontSize: 10, letterSpacing: 2, opacity: 0.55, marginBottom: 6 }}>TRADING OPS</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <Pill
-          label="PNL TODAY"
-          value={fmtPnl(ops.pnlUsdt)}
-          color={
-            ops.pnlUsdt == null ? 'default'
-            : ops.pnlUsdt >= 0  ? 'green'
-            : 'red'
-          }
-        />
-        <Pill
-          label="TRADES TODAY"
-          value={ops.tradesToday != null ? String(ops.tradesToday) : '—'}
-        />
-        <Pill
-          label="POSITIONS"
-          value={ops.positionsCount != null ? String(ops.positionsCount) : '—'}
-          color={ops.positionsCount > 0 ? 'blue' : 'default'}
-        />
-        <Pill
-          label="LAST TRADE"
-          value={lastTradeSec != null ? fmtAge(lastTradeSec) : '—'}
-          title={lastTradeAt ?? undefined}
-          color={lastTradeSec != null && lastTradeSec < 300 ? 'blue' : 'default'}
-        />
-        <Pill
-          label="DATA AGE"
-          value={fmtAge(freshnessSec)}
-          color={isStale ? 'red' : freshnessSec != null ? 'green' : 'default'}
-          title={isStale ? 'State data may be stale' : undefined}
-        />
-      </div>
+      {/* Trading ops section removed */}
 
       {err ? (
         <div style={{ marginTop: 8, fontSize: 12, color: '#ff7aa8' }}>Status error: {err}</div>

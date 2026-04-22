@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { readFirstExisting, runRemote, safeExec } from '../_security-logs';
+import { requireSessionAuth } from '../../_session-auth';
 
 type Attack = { ts: string; ip: string; user: string };
 type LabeledAttack = Attack & { host: 'bazza' | 'prod' };
@@ -23,7 +24,10 @@ function parseLine(line: string): Attack | null {
   return { ts, ip, user };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   try {
     const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
       if (host === 'bazza') {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { readdirSync } from 'node:fs';
 import { readFirstExisting, readGlobbed, runRemote } from '../_security-logs';
+import { requireSessionAuth } from '../../_session-auth';
 
 type Item = { ts: string; ip: string; method: string; path: string; status: number; bytes: number };
 
@@ -12,7 +13,10 @@ function parseCombined(line: string): Item | null {
   return { ts, ip, method, path, status: Number(statusRaw), bytes: bytesRaw === '-' ? 0 : Number(bytesRaw) || 0 };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   try {
     const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
       if (host === 'bazza') {

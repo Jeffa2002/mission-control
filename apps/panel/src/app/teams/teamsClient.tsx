@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Nav } from '../nav';
+import { AppShell } from '../../components/ops-ui';
 
 type AgentStatus = {
   id: string;
   label: string;
   emoji: string;
   busy: boolean;
-  status: 'Working' | 'Idle' | 'Offline';
+  status: 'working' | 'idle' | 'offline';
   lastSeen: string | null;
   currentTask: string | null;
   sessionId: string | null;
@@ -31,7 +31,7 @@ const MEMBERS: TeamMember[] = [
     key: 'jeff',
     type: 'human',
     label: 'Jeffa',
-    emoji: '🧑💼',
+    emoji: '🧑‍💼',
     role: 'Owner / Operator',
     responsibilities: ['Direction & priorities', 'Approvals', 'Ops oversight'],
   },
@@ -43,16 +43,6 @@ const MEMBERS: TeamMember[] = [
     emoji: '🤖',
     role: 'Lead Assistant',
     responsibilities: ['Plan & coordinate work', 'Orchestrate the crew', 'Ship end-to-end slices'],
-    model: 'anthropic/claude-sonnet-4-6',
-  },
-  {
-    key: 'archie-pro',
-    type: 'agent',
-    agentId: 'archie-pro',
-    label: 'ArchiePro',
-    emoji: '⚡',
-    role: 'Pro Assistant',
-    responsibilities: ['Separate Telegram channel', 'Parallel task handling', 'Independent context'],
     model: 'anthropic/claude-sonnet-4-6',
   },
   {
@@ -120,7 +110,6 @@ const MEMBERS: TeamMember[] = [
 const ROLE_ORDER = [
   'Owner / Operator',
   'Lead Assistant',
-  'Pro Assistant',
   'Developer',
   'Writer',
   'Designer',
@@ -144,7 +133,7 @@ function pill(status: string, busy: boolean) {
     color: '#9fefff',
   };
 
-  if (status === 'Working') {
+  if (status === 'working') {
     return (
       <span style={{ ...base, background: 'rgba(0,200,255,0.16)', color: '#d6f6ff' }}>
         <span style={{ width: 8, height: 8, borderRadius: 999, background: '#00c8ff' }} />
@@ -153,7 +142,7 @@ function pill(status: string, busy: boolean) {
     );
   }
 
-  if (status === 'Idle') {
+  if (status === 'idle') {
     return (
       <span style={base}>
         <span style={{ width: 8, height: 8, borderRadius: 999, background: '#7CE8FF' }} />
@@ -182,8 +171,7 @@ export default function TeamsClient() {
         const j = await res.json();
         if (!alive) return;
         const map: Record<string, AgentStatus> = {};
-        const list = j.agents ?? (Array.isArray(j) ? j : []);
-        list.forEach((a: AgentStatus) => (map[a.id] = a));
+        (Array.isArray(j) ? j : []).forEach((a: AgentStatus) => (map[a.id] = a));
         setAgents(map);
       } catch {
         // ignore
@@ -209,26 +197,15 @@ export default function TeamsClient() {
   }, []);
 
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        padding: 24,
-        fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
-        color: '#d6f6ff',
-        background:
-          'radial-gradient(1200px 700px at 20% 10%, rgba(0,255,255,0.14), transparent 60%), radial-gradient(1000px 600px at 80% 30%, rgba(0,140,255,0.12), transparent 55%), radial-gradient(900px 600px at 50% 80%, rgba(140,0,255,0.10), transparent 60%), linear-gradient(180deg, #040814 0%, #030513 55%, #02030a 100%)',
-      }}
-    >
-      <div style={{ letterSpacing: 3, fontSize: 12, color: '#7ce8ff', opacity: 0.9 }}>MISSION CONTROL</div>
-      <h1 style={{ margin: '6px 0 0', fontSize: 28, textShadow: '0 0 18px rgba(0,220,255,0.25)' }}>
+    <AppShell>
+      <h1 style={{ margin: '0 0 8px', fontSize: 26, fontWeight: 700, color: 'var(--text-1)' }}>
         Team Structure
       </h1>
-      <Nav />
-      <p style={{ marginTop: 14, color: '#9fefff', maxWidth: 980, lineHeight: 1.6 }}>
-        Your active crew. Live status badges update every 15 seconds.
+      <p style={{ marginTop: 0, marginBottom: 18, color: 'var(--text-3)', maxWidth: 980, lineHeight: 1.6 }}>
+        This is your active crew plus the roles we can spin up on demand. The live status badges update every ~15 seconds.
       </p>
 
-      <div style={{ display: 'grid', gap: 14, marginTop: 18 }}>
+      <div style={{ display: 'grid', gap: 14 }}>
         {[...grouped.entries()].map(([role, members]) => {
           if (members.length === 0) return null;
           return (
@@ -249,7 +226,7 @@ export default function TeamsClient() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginTop: 12 }}>
                 {members.map((m) => {
                   const live = m.agentId ? agents[m.agentId] : null;
-                  const status = m.planned ? 'Offline' : (live?.status || 'Offline');
+                  const status = m.planned ? 'offline' : live?.status || 'offline';
                   const busy = Boolean(live?.busy);
 
                   return (
@@ -313,6 +290,6 @@ export default function TeamsClient() {
           );
         })}
       </div>
-    </main>
+    </AppShell>
   );
 }

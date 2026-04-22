@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Nav } from '../nav';
+import { AppShell } from '../../components/ops-ui';
 
 type DocMeta = {
   id: string;
@@ -76,22 +76,11 @@ export default function MemoryClient() {
   }, [docs, hits]);
 
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        padding: 24,
-        fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
-        color: '#d6f6ff',
-        background:
-          'radial-gradient(1200px 700px at 20% 10%, rgba(0,255,255,0.14), transparent 60%), radial-gradient(1000px 600px at 80% 30%, rgba(0,140,255,0.12), transparent 55%), radial-gradient(900px 600px at 50% 80%, rgba(140,0,255,0.10), transparent 60%), linear-gradient(180deg, #040814 0%, #030513 55%, #02030a 100%)',
-      }}
-    >
-      <div style={{ letterSpacing: 3, fontSize: 12, color: '#7ce8ff', opacity: 0.9 }}>MISSION CONTROL</div>
-      <h1 style={{ margin: '6px 0 0', fontSize: 28, textShadow: '0 0 18px rgba(0,220,255,0.25)' }}>
+    <AppShell>
+      <h1 style={{ margin: '0 0 8px', fontSize: 26, fontWeight: 700, color: 'var(--text-1)' }}>
         Memory
       </h1>
-      <Nav />
-      <p style={{ marginTop: 14, color: '#9fefff', maxWidth: 980, lineHeight: 1.6 }}>
+      <p style={{ marginTop: 0, marginBottom: 14, color: 'var(--text-3)', maxWidth: 980, lineHeight: 1.6 }}>
         Browse and search Bazza&rsquo;s long-term memory and daily logs. Click a document to view it.
       </p>
 
@@ -220,6 +209,6 @@ export default function MemoryClient() {
           </div>
         </div>
       </div>
-    </main>
+    </AppShell>
   );
 }

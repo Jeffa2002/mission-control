@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { requireSessionAuth } from '../_session-auth';
 
 const DIR = '/workspace/mission-control/runbooks';
 
 export async function GET(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   try {
     const url = new URL(req.url);
     const name = url.searchParams.get('name');
