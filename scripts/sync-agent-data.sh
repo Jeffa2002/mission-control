@@ -127,6 +127,75 @@ if [ -f "$IPERF_SRC" ]; then
       "${PROD_HOST}:${PROD_AGENT_DATA}/iperf-results.json" 2>/dev/null
 fi
 
-echo "Sync complete at $(date)"
+# ── 6. Collect real security data from prod and sync ──────────────────────────
+python3 - <<'SECEOF'
+import subprocess, json, re
+from datetime import datetime, timezone
 
-chmod +x /root/.openclaw/workspace/mission-control/scripts/sync-agent-data.sh
+SSH = ["ssh", "-i", "/root/.ssh/prod_deploy_v3", "-p", "2222",
+       "-o", "StrictHostKeyChecking=no", "root@203.57.50.240"]
+
+def run(cmd):
+    try:
+        result = subprocess.run(SSH + [cmd], timeout=15, capture_output=True, shell=False)
+        return result.stdout.decode()
+    except Exception:
+        try:
+            return subprocess.check_output(SSH + ["bash", "-c", cmd],
+                                           timeout=15, stderr=subprocess.DEVNULL).decode()
+        except Exception:
+            return ""
+
+# fail2ban
+f2b_raw = run("/usr/bin/fail2ban-client status sshd 2>/dev/null || echo UNAVAILABLE")
+f2b = {"available": False, "banned": 0, "totalFailed": 0, "bannedIPs": []}
+if "UNAVAILABLE" not in f2b_raw and f2b_raw.strip():
+    f2b["available"] = True
+    m = re.search(r"Currently banned:\s+(\d+)", f2b_raw)
+    if m: f2b["banned"] = int(m.group(1))
+    m = re.search(r"Total failed:\s+(\d+)", f2b_raw)
+    if m: f2b["totalFailed"] = int(m.group(1))
+    m = re.search(r"Banned IP list:\s+(.+)", f2b_raw)
+    if m: f2b["bannedIPs"] = m.group(1).strip().split()
+
+# nginx errors
+nginx_raw = run("grep -cE ' [45][0-9]{2} ' /var/log/nginx/access.log")
+nginx_count = int(nginx_raw.strip()) if nginx_raw.strip().isdigit() else 0
+
+# recent nginx error lines (last 10 4xx/5xx)
+nginx_errors = [l.strip() for l in run(
+    "grep -E ' [45][0-9]{2} ' /var/log/nginx/access.log | tail -10"
+).splitlines() if l.strip()]
+
+# auth failures
+auth_raw = run("grep -c 'Failed password' /var/log/auth.log")
+auth_count = int(auth_raw.strip()) if auth_raw.strip().isdigit() else 0
+auth_recent = [l.strip() for l in run(
+    "grep 'Failed password' /var/log/auth.log | tail -10"
+).splitlines() if l.strip()]
+
+# banned IPs detail
+has_threats = f2b["banned"] > 0 or auth_count > 50 or nginx_count > 5000
+
+data = {
+    "ok": True,
+    "checkedAt": datetime.now(timezone.utc).isoformat(),
+    "hasThreats": has_threats,
+    "fail2ban": f2b,
+    "nginx": {"errorCount": nginx_count, "recentErrors": nginx_errors[-10:]},
+    "auth": {"failCount": auth_count, "recent": auth_recent},
+}
+
+with open("/tmp/security-data.json", "w") as f:
+    json.dump(data, f)
+print(f"Security: {f2b['banned']} banned, {nginx_count} nginx errors, {auth_count} auth failures")
+SECEOF
+
+# Sync security data to prod
+if [ -f "/tmp/security-data.json" ]; then
+  scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
+      /tmp/security-data.json \
+      "${PROD_HOST}:${PROD_AGENT_DATA}/security-data.json" 2>/dev/null
+fi
+
+echo "Sync complete at $(date)"
