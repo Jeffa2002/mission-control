@@ -4,8 +4,8 @@ import { execSync } from 'child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { requireSessionAuth } from '../_session-auth';
 
-const CACHE_FILE = '/var/www/mission-control/network-cache.json';
-const IPERF_FILE = '/var/www/mission-control/iperf-results.json';
+const CACHE_FILE = '/agent-data/network-cache.json';
+const IPERF_FILE = '/agent-data/iperf-results.json';
 
 const NODES = [
   { id: 'bazza',       label: 'Bazza',      emoji: '💻', ip: '100.125.171.52', location: 'Perth',     role: 'OpenClaw Host' },

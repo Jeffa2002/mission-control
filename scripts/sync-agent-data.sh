@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync-agent-data.sh — runs on bazza, syncs agent status + sessions to prod
+# sync-agent-data.sh - runs on bazza, syncs agent status + sessions to prod
 # Called every 15s via cron
 
 set -euo pipefail
@@ -114,10 +114,18 @@ rsync -az --delete \
     "$AGENTS_DIR/" \
     "${PROD_HOST}:${PROD_AGENT_DATA}/" 2>/dev/null
 
-# ── 4. Write status JSON after rsync (so --delete doesn’t wipe it) ────────────
+# ── 4. Write status JSON after rsync (so --delete doesn't wipe it) ────────────
 scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
     "$STATUS_FILE" \
     "${PROD_HOST}:${PROD_AGENT_DATA}/agent-status.json" 2>/dev/null
+
+# ── 5. Sync iperf-results.json to prod agents dir ──────────────────────────────
+IPERF_SRC="/root/.openclaw/workspace/mission-control/iperf-results.json"
+if [ -f "$IPERF_SRC" ]; then
+  scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
+      "$IPERF_SRC" \
+      "${PROD_HOST}:${PROD_AGENT_DATA}/iperf-results.json" 2>/dev/null
+fi
 
 echo "Sync complete at $(date)"
 
