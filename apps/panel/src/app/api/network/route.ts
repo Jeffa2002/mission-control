@@ -9,8 +9,8 @@ const IPERF_FILE = '/agent-data/iperf-results.json';
 
 const NODES = [
   { id: 'bazza',       label: 'Bazza',      emoji: '💻', ip: '100.125.171.52', location: 'Perth',     role: 'OpenClaw Host' },
-  { id: 'prod',        label: 'Prod',        emoji: '🚀', ip: '100.95.166.47',  location: 'Sydney',    role: 'App Server' },
-  { id: 'crm8',        label: 'CRM8',        emoji: '🏢', ip: '100.112.179.70', location: 'Melbourne', role: 'CRM Server' },
+  { id: 'prod',        label: 'Prod',        emoji: '🚀', ip: '100.95.166.47',  location: 'Perth',     role: 'App Server' },
+  { id: 'crm8',        label: 'CRM8',        emoji: '🏢', ip: '100.112.179.70', location: 'Perth',     role: 'CRM Server' },
   { id: 'shazza',      label: 'Shazza',      emoji: '🖥️', ip: '100.113.217.81', location: 'Perth',     role: 'AI / GPU' },
   { id: 'backup-melb', label: 'Backup Melb', emoji: '💾', ip: '100.110.100.97', location: 'Melbourne', role: 'Backup' },
 ];
