@@ -7,6 +7,7 @@ interface SecurityData {
   ok: boolean;
   checkedAt: string;
   hasThreats: boolean;
+  stale?: boolean;
   fail2ban: {
     available: boolean;
     banned: number;
@@ -14,16 +15,13 @@ interface SecurityData {
     bannedIPs: string[];
   };
   nginx: {
-    prodErrors: number;
-    bazzaErrors: number;
-    totalErrors: number;
+    errorCount: number;
+    recentErrors: string[];
   };
-  authFailures: {
-    prod: number;
-    bazza: number;
-    total: number;
+  auth: {
+    failCount: number;
+    recent: string[];
   };
-  recentBans: Array<{ ts: string; ip: string; jail: string }>;
 }
 
 function ThreatLevel({ hasThreats, data }: { hasThreats: boolean; data: SecurityData }) {
@@ -101,15 +99,15 @@ export default function SecurityPage() {
               />
               <Metric
                 label="Auth failures"
-                value={String(data.authFailures.total)}
-                delta={`prod: ${data.authFailures.prod} · bazza: ${data.authFailures.bazza}`}
-                status={data.authFailures.total > 50 ? 'critical' : data.authFailures.total > 10 ? 'warning' : 'healthy'}
+                value={String(data.auth.failCount)}
+                delta={data.auth.failCount > 0 ? `${data.auth.failCount} failed password events` : 'None detected'}
+                status={data.auth.failCount > 50 ? 'critical' : data.auth.failCount > 10 ? 'warning' : 'healthy'}
               />
               <Metric
                 label="Nginx 4xx/5xx"
-                value={String(data.nginx.totalErrors)}
-                delta={`prod: ${data.nginx.prodErrors} · bazza: ${data.nginx.bazzaErrors}`}
-                status={data.nginx.totalErrors > 200 ? 'critical' : data.nginx.totalErrors > 50 ? 'warning' : 'healthy'}
+                value={String(data.nginx.errorCount)}
+                delta={data.nginx.errorCount > 0 ? `${data.nginx.errorCount} error responses` : 'No errors'}
+                status={data.nginx.errorCount > 5000 ? 'critical' : data.nginx.errorCount > 1000 ? 'warning' : 'healthy'}
               />
               <Metric
                 label="Threat level"
@@ -156,24 +154,22 @@ export default function SecurityPage() {
               </div>
             )}
 
-            {/* Recent bans timeline */}
-            {data.recentBans.length > 0 && (
+            {/* Recent nginx errors */}
+            {data.nginx.recentErrors.length > 0 && (
               <div className={card + ' p-5'}>
-                <SectionTitle title="Recent Ban Events" subtitle="From /var/log/fail2ban.log on prod" />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {data.recentBans.map((ban, i) => (
+                <SectionTitle title="Recent Nginx Errors" subtitle="Last 10 4xx/5xx responses on prod" />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {data.nginx.recentErrors.map((line, i) => (
                     <div
                       key={i}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        padding: '8px 12px', borderRadius: 8,
-                        background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.15)',
+                        padding: '6px 10px', borderRadius: 6, fontSize: 11,
+                        fontFamily: 'ui-monospace, monospace', color: 'var(--text-3)',
+                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}
                     >
-                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--sev-critical)', flexShrink: 0 }} />
-                      <span style={{ fontSize: 11, color: 'var(--text-3)', minWidth: 140, fontFamily: 'ui-monospace, monospace' }}>{ban.ts}</span>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--sev-critical)', fontFamily: 'ui-monospace, monospace' }}>{ban.ip}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>banned in [{ban.jail}]</span>
+                      {line}
                     </div>
                   ))}
                 </div>
@@ -181,30 +177,23 @@ export default function SecurityPage() {
             )}
 
             {/* Auth failures detail */}
-            {data.authFailures.total > 0 && (
+            {data.auth.failCount > 0 && (
               <div className={card + ' p-5'}>
-                <SectionTitle title="Auth Failures" subtitle="Failed password attempts (last 100 on prod)" />
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div style={{
-                    padding: '16px', borderRadius: 10,
-                    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
-                  }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 6 }}>prod</div>
-                    <div style={{ fontSize: 28, fontWeight: 700, color: data.authFailures.prod > 20 ? 'var(--sev-critical)' : 'var(--text-1)' }}>
-                      {data.authFailures.prod}
+                <SectionTitle title="Auth Failures" subtitle="Failed password attempts on prod" />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {data.auth.recent.map((line, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        padding: '6px 10px', borderRadius: 6, fontSize: 11,
+                        fontFamily: 'ui-monospace, monospace', color: 'var(--sev-warning)',
+                        background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.15)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {line}
                     </div>
-                    <div className={'mt-1 text-xs ' + muted}>Failed password events</div>
-                  </div>
-                  <div style={{
-                    padding: '16px', borderRadius: 10,
-                    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
-                  }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 6 }}>bazza</div>
-                    <div style={{ fontSize: 28, fontWeight: 700, color: data.authFailures.bazza > 20 ? 'var(--sev-critical)' : 'var(--text-1)' }}>
-                      {data.authFailures.bazza}
-                    </div>
-                    <div className={'mt-1 text-xs ' + muted}>Failed password events</div>
-                  </div>
+                  ))}
                 </div>
               </div>
             )}
