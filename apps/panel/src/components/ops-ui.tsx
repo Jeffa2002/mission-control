@@ -49,17 +49,15 @@ export interface Route {
 export const ROUTES: Route[] = [
   // MONITOR group
   { href: '/', label: 'Overview', icon: 'overview', group: 'MONITOR' },
-  { href: '/security', label: 'Security', icon: 'security', group: 'MONITOR' },
-  { href: '/incidents', label: 'Incidents', icon: 'incidents', group: 'MONITOR' },
+  { href: '/apps', label: 'App Health', icon: 'agents', group: 'MONITOR' },
   { href: '/systems', label: 'Systems', icon: 'systems', group: 'MONITOR' },
   { href: '/network', label: 'Network', icon: 'network', group: 'MONITOR' },
+  { href: '/security', label: 'Uptime', icon: 'security', group: 'MONITOR' },
   // OPS group
-  { href: '/apps', label: 'Agents', icon: 'agents', group: 'OPS' },
-  { href: '/teams', label: 'Teams', icon: 'teams', group: 'OPS' },
   { href: '/office', label: 'Office', icon: 'office', group: 'OPS' },
-  { href: '/memory', label: 'Memory', icon: 'memory', group: 'OPS' },
-  { href: '/actions', label: 'Audit Log', icon: 'audit', group: 'OPS' },
+  { href: '/teams', label: 'Agents', icon: 'agents', group: 'OPS' },
   { href: '/deploys', label: 'Deploys', icon: 'agents', group: 'OPS' },
+  { href: '/actions', label: 'Audit Log', icon: 'audit', group: 'OPS' },
 ];
 
 // ─── Nav icons (inline SVG, no imports) ──────────────────────────────────────
