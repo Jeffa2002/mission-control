@@ -127,6 +127,55 @@ if [ -f "$IPERF_SRC" ]; then
       "${PROD_HOST}:${PROD_AGENT_DATA}/iperf-results.json" 2>/dev/null
 fi
 
+# ── 6b. Collect ping history and append to network-history.db ────────────────
+DB="/root/.openclaw/workspace/mission-control/network-history.db"
+if [ -f "$DB" ]; then
+  python3 - <<'PINGEOF'
+import subprocess, sqlite3, time
+from datetime import datetime, timezone
+
+NODES = {
+    "prod":        "203.57.50.240",
+    "crm8":        "103.230.159.104",
+    "shazza":      "100.113.217.81",
+    "backup-melb": "43.229.63.19",
+    "bazza":       "127.0.0.1",
+}
+
+def ping(ip):
+    try:
+        out = subprocess.check_output(
+            ["ping", "-c", "3", "-W", "1", "-q", ip],
+            stderr=subprocess.DEVNULL, timeout=8
+        ).decode()
+        import re
+        m = re.search(r"= [\d.]+/([\d.]+)/", out)
+        return float(m.group(1)) if m else None
+    except Exception:
+        return None
+
+ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+con = sqlite3.connect("/root/.openclaw/workspace/mission-control/network-history.db")
+cur = con.cursor()
+rows = 0
+for node_id, ip in NODES.items():
+    ms = ping(ip)
+    if ms is not None:
+        cur.execute("INSERT INTO ping_history (ts, node_id, ping_ms) VALUES (?,?,?)", (ts, node_id, ms))
+        rows += 1
+con.commit()
+con.close()
+print(f"Ping: {rows} rows recorded")
+PINGEOF
+fi
+
+# ── 6c. Sync network-history.db to prod ──────────────────────────────────────
+if [ -f "$DB" ]; then
+  scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
+      "$DB" \
+      "${PROD_HOST}:${PROD_AGENT_DATA}/network-history.db" 2>/dev/null && true
+fi
+
 # ── 6. Collect real security data from prod and sync ──────────────────────────
 python3 - <<'SECEOF'
 import subprocess, json, re

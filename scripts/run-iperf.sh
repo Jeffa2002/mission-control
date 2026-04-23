@@ -55,6 +55,39 @@ JSONEOF
 
 echo "iperf results written to $OUTPUT"
 
+# Append results to network-history.db
+DB="/root/.openclaw/workspace/mission-control/network-history.db"
+if [ -f "$DB" ]; then
+  python3 - "$OUTPUT" "$DB" <<'PYEOF'
+import json, sqlite3, sys
+from datetime import datetime, timezone
+
+iperf_file, db_path = sys.argv[1], sys.argv[2]
+with open(iperf_file) as f:
+    data = json.load(f)
+
+ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+con = sqlite3.connect(db_path)
+cur = con.cursor()
+rows = 0
+for r in data.get("results", []):
+    if r.get("status") != "ok":
+        continue
+    cur.execute(
+        "INSERT INTO iperf_history (ts, node_id, mbps_send, mbps_recv, rtt_ms, retransmits) "
+        "VALUES (?,?,?,?,?,?)",
+        (ts, r["id"], r.get("mbpsSend"), r.get("mbpsRecv"), r.get("rttMs"), r.get("retransmits", 0)),
+    )
+    rows += 1
+con.commit()
+con.close()
+print(f"Appended {rows} iperf rows to {db_path}")
+PYEOF
+  echo "iperf history updated"
+else
+  echo "network-history.db not found, skipping history append"
+fi
+
 # Copy to prod container-accessible path
 scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
     "$OUTPUT" \
