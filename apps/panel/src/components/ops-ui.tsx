@@ -59,6 +59,7 @@ export const ROUTES: Route[] = [
   { href: '/office', label: 'Office', icon: 'office', group: 'OPS' },
   { href: '/memory', label: 'Memory', icon: 'memory', group: 'OPS' },
   { href: '/actions', label: 'Audit Log', icon: 'audit', group: 'OPS' },
+  { href: '/deploys', label: 'Deploys', icon: 'agents', group: 'OPS' },
 ];
 
 // ─── Nav icons (inline SVG, no imports) ──────────────────────────────────────
