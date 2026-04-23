@@ -52,6 +52,7 @@ export const ROUTES: Route[] = [
   { href: '/security', label: 'Security', icon: 'security', group: 'MONITOR' },
   { href: '/incidents', label: 'Incidents', icon: 'incidents', group: 'MONITOR' },
   { href: '/systems', label: 'Systems', icon: 'systems', group: 'MONITOR' },
+  { href: '/network', label: 'Network', icon: 'network', group: 'MONITOR' },
   // OPS group
   { href: '/apps', label: 'Agents', icon: 'agents', group: 'OPS' },
   { href: '/teams', label: 'Teams', icon: 'teams', group: 'OPS' },
@@ -130,6 +131,20 @@ function NavIcon({ name, active }: { name: string; active: boolean }) {
           <ellipse cx="8" cy="8" rx="6" ry="4.5" stroke={col} strokeWidth="1.4" />
           <line x1="2" y1="8" x2="14" y2="8" stroke={col} strokeWidth="1.2" />
           <path d="M4.5 5.2c.9-1.1 2.1-1.7 3.5-1.7s2.6.6 3.5 1.7" stroke={col} strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'network':
+      return (
+        <svg {...props}>
+          <circle cx="8" cy="8" r="2.2" stroke={col} strokeWidth="1.4" />
+          <circle cx="2.5" cy="4" r="1.5" stroke={col} strokeWidth="1.2" />
+          <circle cx="13.5" cy="4" r="1.5" stroke={col} strokeWidth="1.2" />
+          <circle cx="2.5" cy="12" r="1.5" stroke={col} strokeWidth="1.2" />
+          <circle cx="13.5" cy="12" r="1.5" stroke={col} strokeWidth="1.2" />
+          <line x1="5.8" y1="6.5" x2="4" y2="5.2" stroke={col} strokeWidth="1.1" strokeLinecap="round" />
+          <line x1="10.2" y1="6.5" x2="12" y2="5.2" stroke={col} strokeWidth="1.1" strokeLinecap="round" />
+          <line x1="5.8" y1="9.5" x2="4" y2="10.8" stroke={col} strokeWidth="1.1" strokeLinecap="round" />
+          <line x1="10.2" y1="9.5" x2="12" y2="10.8" stroke={col} strokeWidth="1.1" strokeLinecap="round" />
         </svg>
       );
     case 'audit':

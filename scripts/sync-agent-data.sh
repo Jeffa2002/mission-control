@@ -105,20 +105,19 @@ with open("/tmp/agent-status.json", "w") as f:
 print(f"Generated status for {len(agents)} agents")
 PYEOF
 
-# ── 2. Copy status JSON to prod's /root/.openclaw/agents/ ────────────────────
-# Container mounts /root/.openclaw/agents as /agent-data (read-only)
-# API checks /agent-data/agent-status.json — so write it there via rsync
-scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
-    "$STATUS_FILE" \
-    "${PROD_HOST}:/root/.openclaw/agents/agent-status.json" 2>/dev/null
-
-# ── 3. Rsync session files to prod (fast incremental, skip deleted/reset) ─────
+# ── 2. Rsync session files to prod (fast incremental, skip deleted/reset) ─────
 rsync -az --delete \
     -e "ssh -i $PROD_KEY -p $PROD_PORT -o StrictHostKeyChecking=no" \
     --exclude="*.reset.*" \
     --exclude="*.deleted.*" \
+    --exclude="agent-status.json" \
     "$AGENTS_DIR/" \
     "${PROD_HOST}:${PROD_AGENT_DATA}/" 2>/dev/null
+
+# ── 4. Write status JSON after rsync (so --delete doesn’t wipe it) ────────────
+scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
+    "$STATUS_FILE" \
+    "${PROD_HOST}:${PROD_AGENT_DATA}/agent-status.json" 2>/dev/null
 
 echo "Sync complete at $(date)"
 
