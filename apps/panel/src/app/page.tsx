@@ -50,9 +50,9 @@ interface Deploy {
 interface ShazzaData {
   ok: boolean;
   reachable: boolean;
-  memory?: { used_pct: number; used_gb: number; total_gb: number };
-  disk?: { used_pct: number };
-  uptime?: string;
+  memory?: { used_pct?: number; usedMb?: number; totalMb?: number; pct?: number } | null;
+  disk?: { used_pct?: number; pct?: string } | null;
+  uptime?: { pretty?: string | null; since?: string | null } | string | null;
   error?: string;
 }
 
@@ -329,9 +329,9 @@ export default function Home() {
               <ServerCard
                 label="shazza"
                 online={shazza?.reachable ?? false}
-                memPct={shazza?.memory?.used_pct}
-                diskPct={shazza?.disk?.used_pct}
-                uptime={shazza?.uptime}
+                memPct={shazza?.memory ? (shazza.memory.used_pct ?? undefined) : undefined}
+                diskPct={shazza?.disk ? (shazza.disk.used_pct ?? undefined) : undefined}
+                uptime={typeof shazza?.uptime === 'string' ? shazza.uptime : (shazza?.uptime as any)?.pretty ?? undefined}
               />
               {/* crm8 — check health endpoint */}
               <ServerCard
