@@ -10,6 +10,7 @@ PROD_PORT="2222"
 PROD_KEY="/root/.ssh/prod_deploy_v3"
 PROD_AGENT_DATA="/root/.openclaw/agents"
 STATUS_FILE="/tmp/agent-status.json"
+WORKSPACE_STATUS="/root/.openclaw/workspace/agent-status.json"
 
 # ── 1. Build agent-status.json from local agents dir ──────────────────────────
 python3 - <<'PYEOF'
@@ -104,10 +105,12 @@ with open("/tmp/agent-status.json", "w") as f:
 print(f"Generated status for {len(agents)} agents")
 PYEOF
 
-# ── 2. Rsync agent-status.json to prod ────────────────────────────────────────
+# ── 2. Copy status JSON to prod's /root/.openclaw/agents/ ────────────────────
+# Container mounts /root/.openclaw/agents as /agent-data (read-only)
+# API checks /agent-data/agent-status.json — so write it there via rsync
 scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
     "$STATUS_FILE" \
-    "${PROD_HOST}:/var/www/mission-control/agent-status.json" 2>/dev/null
+    "${PROD_HOST}:/root/.openclaw/agents/agent-status.json" 2>/dev/null
 
 # ── 3. Rsync session files to prod (fast incremental, skip deleted/reset) ─────
 rsync -az --delete \

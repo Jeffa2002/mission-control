@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { requireSessionAuth } from '../../_session-auth';
 
 const PATHS = [
+  '/agent-data/agent-status.json',
   '/var/www/mission-control/agent-status.json',
   '/workspace/agent-status.json',
 ];
