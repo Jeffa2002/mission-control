@@ -221,7 +221,7 @@ export default function SystemsPage() {
             <span style={{ fontSize: 11, color: '#10B981' }}>Healthy</span>
           </div>
           <div className={card + ' p-5'}>
-            <StatRow label="Host" value="203.57.50.240" sub="Sydney VPS" />
+            <StatRow label="Host" value="203.57.50.240" sub="Perth VPS" />
             <StatRow label="Apps running" value="PM2 + Docker" sub="crossbench, abea-ndh, nurturerecord, projectxify, mission-panel" />
             <StatRow label="SSH port" value="2222" sub="non-standard (good)" />
           </div>
