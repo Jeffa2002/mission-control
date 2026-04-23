@@ -20,6 +20,10 @@ interface NetworkData {
   nodes: NodeData[]; links: LinkData[]; measuredAt: string;
 }
 
+/* ─── History types ──────────────────────────────────────────────────── */
+interface HistoryPoint { ts: string; value: number; recv?: number; rtt?: number; }
+interface HistoryData { node: string; range: string; metric: string; points: HistoryPoint[]; }
+
 /* ─── Node positions (SVG viewBox 0 0 600 340) ──────────────────────── */
 const NODE_POS: Record<string, { x: number; y: number }> = {
   bazza:        { x: 120, y: 90  },
@@ -28,6 +32,17 @@ const NODE_POS: Record<string, { x: number; y: number }> = {
   crm8:         { x: 480, y: 170 },
   'backup-melb':{ x: 300, y: 270 },
 };
+
+/* ─── History node / range config ───────────────────────────────────── */
+const HISTORY_NODES = [
+  { id: 'prod',        label: 'Prod' },
+  { id: 'crm8',        label: 'CRM8' },
+  { id: 'shazza',      label: 'Shazza' },
+  { id: 'backup-melb', label: 'Backup Melb' },
+  { id: 'bazza',       label: 'Bazza' },
+];
+const HISTORY_RANGES = ['day', 'week', 'month', 'year'] as const;
+type HistoryRange = typeof HISTORY_RANGES[number];
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 function latencyColor(ms: number | null) {
@@ -42,6 +57,16 @@ function statusColor(s: string) {
   return '#EF4444';
 }
 function fmtMs(ms: number | null) { return ms === null ? '—' : `${ms.toFixed(1)}ms`; }
+
+function formatTs(ts: string, range: HistoryRange): string {
+  try {
+    const d = new Date(ts);
+    if (range === 'day')   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (range === 'week')  return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (range === 'month') return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    /* year */             return d.toLocaleDateString([], { month: 'short', year: '2-digit' });
+  } catch { return ts.slice(0, 10); }
+}
 
 /* ─── Sparkline ──────────────────────────────────────────────────────── */
 function Sparkline({ data, color = '#7ce8ff', w = 80, h = 28 }: { data: number[]; color?: string; w?: number; h?: number }) {
@@ -143,6 +168,293 @@ function NodeCircle({ node, selected, onClick }: { node: NodeData; selected: boo
       <circle cx={pos.x + r - 4} cy={pos.y - r + 4} r={5} fill={sc}
         stroke="#0b1020" strokeWidth={1.5} />
     </g>
+  );
+}
+
+/* ─── SVG Line Chart ─────────────────────────────────────────────────── */
+interface LineConfig { points: HistoryPoint[]; valueKey: 'value' | 'recv'; color: string; label: string; }
+
+function SvgLineChart({ lines, range }: { lines: LineConfig[]; range: HistoryRange }) {
+  const W = 560, H = 160;
+  const PAD = { top: 14, right: 12, bottom: 38, left: 46 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+
+  // Collect all values across all series
+  const allVals = lines.flatMap(l =>
+    l.points.map(p => (l.valueKey === 'recv' ? (p.recv ?? null) : p.value)).filter((v): v is number => v !== null && v !== undefined)
+  );
+  if (!allVals.length) return null;
+
+  const rawMin = Math.min(...allVals);
+  const rawMax = Math.max(...allVals);
+  const pad = (rawMax - rawMin) * 0.1 || 1;
+  const minV = Math.max(0, rawMin - pad);
+  const maxV = rawMax + pad;
+  const rangeV = maxV - minV || 1;
+
+  const basePoints = lines[0]?.points ?? [];
+  const nPoints = basePoints.length;
+  const toX = (i: number) => PAD.left + (i / Math.max(nPoints - 1, 1)) * plotW;
+  const toY = (v: number) => PAD.top + plotH - ((v - minV) / rangeV) * plotH;
+
+  // Grid lines (4 horizontal)
+  const GRID_N = 4;
+  const gridLines = Array.from({ length: GRID_N + 1 }, (_, gi) => {
+    const v = minV + (gi / GRID_N) * rangeV;
+    return { y: toY(v), v };
+  });
+
+  // X labels — at most 6 evenly spaced
+  const xStep = Math.max(1, Math.floor(nPoints / 5));
+  const xLabels = basePoints
+    .map((p, i) => ({ i, ts: p.ts }))
+    .filter((_, i, arr) => i % xStep === 0 || i === arr.length - 1)
+    .slice(0, 7);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+      {/* Subtle grid */}
+      {gridLines.map(({ y, v }, gi) => (
+        <g key={gi}>
+          <line
+            x1={PAD.left} y1={y} x2={W - PAD.right} y2={y}
+            stroke="rgba(148,163,184,0.1)" strokeWidth={0.75}
+          />
+          <text x={PAD.left - 5} y={y + 4} textAnchor="end" fontSize={9} fill="var(--text-3)">
+            {v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v < 10 ? v.toFixed(1) : Math.round(v)}
+          </text>
+        </g>
+      ))}
+
+      {/* X-axis baseline */}
+      <line
+        x1={PAD.left} y1={PAD.top + plotH}
+        x2={W - PAD.right} y2={PAD.top + plotH}
+        stroke="rgba(148,163,184,0.2)" strokeWidth={1}
+      />
+
+      {/* X labels */}
+      {xLabels.map(({ i, ts }) => (
+        <text key={i} x={toX(i)} y={H - 6} textAnchor="middle" fontSize={9} fill="var(--text-3)">
+          {formatTs(ts, range)}
+        </text>
+      ))}
+
+      {/* Data lines */}
+      {lines.map((line, li) => {
+        const pathParts: string[] = [];
+        line.points.forEach((p, i) => {
+          const raw = line.valueKey === 'recv' ? (p.recv ?? null) : p.value;
+          if (raw === null || raw === undefined) return;
+          const cmd = pathParts.length === 0 ? 'M' : 'L';
+          pathParts.push(`${cmd}${toX(i).toFixed(1)} ${toY(raw).toFixed(1)}`);
+        });
+        if (!pathParts.length) return null;
+        return (
+          <path
+            key={li}
+            d={pathParts.join(' ')}
+            fill="none"
+            stroke={line.color}
+            strokeWidth={1.75}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        );
+      })}
+
+      {/* Terminal dots */}
+      {lines.map((line, li) => {
+        const last = line.points[line.points.length - 1];
+        if (!last) return null;
+        const raw = line.valueKey === 'recv' ? (last.recv ?? null) : last.value;
+        if (raw === null || raw === undefined) return null;
+        return (
+          <circle key={li}
+            cx={toX(line.points.length - 1)} cy={toY(raw)} r={3}
+            fill={line.color} stroke="var(--bg-1)" strokeWidth={1.5}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+/* ─── History Chart Panel ────────────────────────────────────────────── */
+function HistoryChartPanel({
+  title, lines, loading, range,
+}: {
+  title: string;
+  lines: LineConfig[];
+  loading: boolean;
+  range: HistoryRange;
+}) {
+  const hasData = lines.some(l => l.points.length > 0);
+
+  return (
+    <div style={{
+      flex: '1 1 340px', borderRadius: 14,
+      border: '1px solid rgba(148,163,184,0.1)',
+      background: 'var(--bg-1)',
+      padding: '14px 16px',
+      minWidth: 0,
+    }}>
+      {/* Title + legend */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          {title}
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          {lines.map(l => (
+            <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 18, height: 2, background: l.color, borderRadius: 1 }} />
+              <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{l.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Loading skeleton */}
+      {loading && (
+        <div style={{
+          height: 130,
+          borderRadius: 8,
+          background: 'var(--bg-2)',
+          opacity: 0.7,
+          position: 'relative',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%)',
+          }} />
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && !hasData && (
+        <div style={{
+          height: 130,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'var(--text-3)', fontSize: 12,
+          borderRadius: 8,
+          border: '1px dashed rgba(148,163,184,0.12)',
+        }}>
+          No data available
+        </div>
+      )}
+
+      {/* Chart */}
+      {!loading && hasData && (
+        <SvgLineChart lines={lines} range={range} />
+      )}
+    </div>
+  );
+}
+
+/* ─── Network History Section ────────────────────────────────────────── */
+function NetworkHistorySection() {
+  const [activeNode, setActiveNode] = useState<string>('prod');
+  const [activeRange, setActiveRange] = useState<HistoryRange>('day');
+  const [pingData, setPingData]   = useState<HistoryData | null>(null);
+  const [iperfData, setIperfData] = useState<HistoryData | null>(null);
+  const [loading, setLoading]     = useState(false);
+
+  const fetchHistory = useCallback(async (node: string, range: HistoryRange) => {
+    setLoading(true);
+    setPingData(null);
+    setIperfData(null);
+    try {
+      const [pr, ir] = await Promise.all([
+        fetch(`/api/network/history?node=${node}&range=${range}&metric=ping`),
+        fetch(`/api/network/history?node=${node}&range=${range}&metric=iperf`),
+      ]);
+      if (pr.ok)  setPingData(await pr.json());
+      if (ir.ok) setIperfData(await ir.json());
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchHistory(activeNode, activeRange); }, [activeNode, activeRange, fetchHistory]);
+
+  const pingLines: LineConfig[] = [{
+    points: pingData?.points ?? [],
+    valueKey: 'value',
+    color: 'var(--sev-warning)',
+    label: 'RTT',
+  }];
+
+  const iperfLines: LineConfig[] = [
+    { points: iperfData?.points ?? [], valueKey: 'value', color: 'var(--accent)',      label: '↑ Send' },
+    { points: iperfData?.points ?? [], valueKey: 'recv',  color: 'var(--sev-healthy)', label: '↓ Recv' },
+  ];
+
+  const tabStyle = (active: boolean): React.CSSProperties => ({
+    padding: '5px 14px',
+    borderRadius: 999,
+    border: active
+      ? '1px solid rgba(103,213,255,0.4)'
+      : '1px solid rgba(148,163,184,0.12)',
+    background: active ? 'rgba(103,213,255,0.1)' : 'rgba(255,255,255,0.03)',
+    color: active ? 'var(--accent)' : 'var(--text-3)',
+    fontSize: 11,
+    fontWeight: active ? 700 : 500,
+    cursor: 'pointer',
+    transition: 'all 0.15s',
+    userSelect: 'none',
+    outline: 'none',
+    lineHeight: '1',
+  });
+
+  const rangeLabel: Record<HistoryRange, string> = { day: 'Day', week: 'Week', month: 'Month', year: 'Year' };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 8 }}>
+      {/* Section header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-1)', letterSpacing: -0.3, whiteSpace: 'nowrap' }}>
+          📈 Network History
+        </div>
+        <div style={{ flex: 1, height: 1, background: 'rgba(148,163,184,0.1)' }} />
+      </div>
+
+      {/* Controls row */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
+        {/* Node tabs */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {HISTORY_NODES.map(n => (
+            <button key={n.id} style={tabStyle(activeNode === n.id)} onClick={() => setActiveNode(n.id)}>
+              {n.label}
+            </button>
+          ))}
+        </div>
+        {/* Range pills */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {HISTORY_RANGES.map(r => (
+            <button key={r} style={tabStyle(activeRange === r)} onClick={() => setActiveRange(r)}>
+              {rangeLabel[r]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Chart panels — side by side, stack on narrow */}
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <HistoryChartPanel
+          title="Ping Latency (ms)"
+          lines={pingLines}
+          loading={loading}
+          range={activeRange}
+        />
+        <HistoryChartPanel
+          title="Throughput (Mbps)"
+          lines={iperfLines}
+          loading={loading}
+          range={activeRange}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -474,6 +786,9 @@ export default function NetworkPage() {
 
           </div>
         </div>
+
+        {/* ── Network History ─────────────────────────────────────────── */}
+        <NetworkHistorySection />
 
         <div style={{ fontSize: 11, color: '#374151', textAlign: 'right' }}>
           Pings measured from prod · Tailscale mesh · refreshes every 15s
