@@ -299,6 +299,7 @@ function HistoryChartPanel({
       background: 'var(--bg-1)',
       padding: '14px 16px',
       minWidth: 0,
+      position: 'relative',
     }}>
       {/* Title + legend */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -315,20 +316,18 @@ function HistoryChartPanel({
         </div>
       </div>
 
-      {/* Loading skeleton */}
+      {/* Loading spinner overlay - shown over existing data while refreshing */}
       {loading && (
         <div style={{
-          height: 130,
-          borderRadius: 8,
-          background: 'var(--bg-2)',
-          opacity: 0.7,
-          position: 'relative',
-          overflow: 'hidden',
+          position: 'absolute', top: 8, right: 8,
+          display: 'flex', alignItems: 'center', gap: 6,
+          color: 'var(--text-3)', fontSize: 11,
         }}>
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%)',
-          }} />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+            style={{ animation: 'spin 0.8s linear infinite' }}>
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
+          Loading…
         </div>
       )}
 
@@ -363,8 +362,7 @@ function NetworkHistorySection() {
 
   const fetchHistory = useCallback(async (node: string, range: HistoryRange) => {
     setLoading(true);
-    setPingData(null);
-    setIperfData(null);
+    // Don't clear data immediately — keep old data visible while loading
     try {
       const [pr, ir] = await Promise.all([
         fetch(`/api/network/history?node=${node}&range=${range}&metric=ping`),
