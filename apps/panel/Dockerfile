@@ -1,7 +1,7 @@
 FROM node:22-alpine
 WORKDIR /app
 
-RUN apk add --no-cache docker-cli openssh-client geoip geoip-dev
+RUN apk add --no-cache docker-cli openssh-client geoip geoip-dev sqlite
 
 COPY package*.json ./
 RUN npm install --legacy-peer-deps
