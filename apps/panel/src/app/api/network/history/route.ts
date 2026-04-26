@@ -12,7 +12,12 @@ import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import { requireSessionAuth } from '../../_session-auth';
 
-const DB_PATH = process.env.NETWORK_HISTORY_DB ?? '/agent-data/network-history.db';
+const DB_PATHS = [
+  process.env.NETWORK_HISTORY_DB,
+  '/workspace/mission-control/network-history.db',
+  '/workspace-data/mission-control/network-history.db',
+  '/agent-data/network-history.db',
+].filter(Boolean) as string[];
 
 type Range = 'day' | 'week' | 'month' | 'year';
 type Metric = 'ping' | 'iperf';
@@ -39,15 +44,16 @@ function groupBy(range: Range): string {
 }
 
 function queryDb(sql: string): unknown[] {
-  try {
-    const out = execSync(`sqlite3 -json "${DB_PATH}" "${sql.replace(/"/g, '\\"')}"`, {
-      timeout: 10_000,
-      encoding: 'utf8',
-    });
-    return out.trim() ? JSON.parse(out) : [];
-  } catch {
-    return [];
+  for (const dbPath of DB_PATHS) {
+    try {
+      const out = execSync(`sqlite3 -json "${dbPath}" "${sql.replace(/"/g, '\\"')}"`, {
+        timeout: 10_000,
+        encoding: 'utf8',
+      });
+      return out.trim() ? JSON.parse(out) : [];
+    } catch {}
   }
+  return [];
 }
 
 export async function GET(req: Request) {

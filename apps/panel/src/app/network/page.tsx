@@ -28,7 +28,8 @@ interface HistoryData { node: string; range: string; metric: string; points: His
 const NODE_POS: Record<string, { x: number; y: number }> = {
   bazza:        { x: 120, y: 90  },
   shazza:       { x: 120, y: 250 },
-  prod:         { x: 300, y: 80  },
+  sec1:         { x: 300, y: 52  },
+  prod:         { x: 300, y: 112 },
   crm8:         { x: 480, y: 170 },
   'backup-melb':{ x: 300, y: 270 },
 };
@@ -40,6 +41,7 @@ const HISTORY_NODES = [
   { id: 'shazza',      label: 'Shazza' },
   { id: 'backup-melb', label: 'Backup Melb' },
   { id: 'bazza',       label: 'Bazza' },
+  { id: 'sec1',        label: 'Sec1' },
 ];
 const HISTORY_RANGES = ['day', 'week', 'month', 'year'] as const;
 type HistoryRange = typeof HISTORY_RANGES[number];
@@ -466,7 +468,7 @@ export default function NetworkPage() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch('/api/network', { cache: 'no-store' });
+      const r = await fetch(`/api/network?ts=${Date.now()}`, { cache: 'no-store' });
       if (r.ok) {
         const d = await r.json();
         setData(d);
@@ -488,6 +490,7 @@ export default function NetworkPage() {
     ? data?.links.find(l => `${l.from}-${l.to}` === selectedLink)
     : null;
 
+  const totalNodes = data?.nodes.length ?? HISTORY_NODES.length;
   const onlineCount = data?.nodes.filter(n => n.status === 'online').length ?? 0;
   const avgLatency = data?.nodes.filter(n => n.latencyMs !== null).reduce((a, n, _, arr) =>
     a + (n.latencyMs! / arr.length), 0) ?? 0;
@@ -503,13 +506,13 @@ export default function NetworkPage() {
               🌐 Network Operations Centre
             </div>
             <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>
-              Tailscale mesh · 5 nodes · auto-refresh 15s
+              Tailscale mesh · {totalNodes} nodes · auto-refresh 15s
               {lastUpdated && <span style={{ color: '#64748B', marginLeft: 12 }}>last ping: {lastUpdated}</span>}{data?.stale && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 11 }}>↻ refreshing…</span>}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', fontSize: 12, fontWeight: 700, color: '#10B981' }}>
-              {onlineCount}/5 ONLINE
+              {onlineCount}/{totalNodes} ONLINE
             </div>
             <div style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(124,232,255,0.08)', border: '1px solid rgba(124,232,255,0.2)', fontSize: 12, fontWeight: 700, color: '#7ce8ff' }}>
               AVG {avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'}

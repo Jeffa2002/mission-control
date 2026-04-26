@@ -20,6 +20,7 @@ PING_BASELINES = {
     "shazza":      25.84,
     "backup-melb": 114.31,
     "bazza":       0.12,
+    "sec1":        1.05,
 }
 
 def jitter(value, pct=0.10):

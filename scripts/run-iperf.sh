@@ -12,6 +12,7 @@ PROD_DEST="/var/www/mission-control/iperf-results.json"
 
 declare -A NODES
 NODES[prod]="100.95.166.47"
+NODES[sec1]="100.122.8.93"
 NODES[crm8]="100.112.179.70"
 NODES[shazza]="100.113.217.81"
 NODES[backup-melb]="100.110.100.97"

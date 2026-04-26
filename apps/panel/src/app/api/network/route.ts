@@ -1,14 +1,26 @@
 // @ts-nocheck
 import { NextResponse } from 'next/server';
+
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
+};
 import { execSync } from 'child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { requireSessionAuth } from '../_session-auth';
 
-const CACHE_FILE = '/agent-data/network-cache.json';
-const IPERF_FILE = '/agent-data/iperf-results.json';
+const CACHE_FILE = process.env.NETWORK_CACHE_FILE ?? '/tmp/mission-network-cache.json';
+const IPERF_FILES = [
+  process.env.IPERF_RESULTS_FILE,
+  '/workspace/mission-control/iperf-results.json',
+  '/workspace-data/mission-control/iperf-results.json',
+  '/agent-data/iperf-results.json',
+].filter(Boolean) as string[];
 
 const NODES = [
   { id: 'bazza',       label: 'Bazza',      emoji: '💻', ip: '100.125.171.52', location: 'Perth',     role: 'OpenClaw Host' },
+  { id: 'sec1',        label: 'Sec1',       emoji: '🛡️', ip: '100.122.8.93',   location: 'Perth',     role: 'Security Host' },
   { id: 'prod',        label: 'Prod',        emoji: '🚀', ip: '100.95.166.47',  location: 'Perth',     role: 'App Server' },
   { id: 'crm8',        label: 'CRM8',        emoji: '🏢', ip: '100.112.179.70', location: 'Perth',     role: 'CRM Server' },
   { id: 'shazza',      label: 'Shazza',      emoji: '🖥️', ip: '100.113.217.81', location: 'Perth',     role: 'AI / GPU' },
@@ -17,6 +29,7 @@ const NODES = [
 
 const LINK_DEFS = [
   { from: 'bazza',       to: 'prod',        label: 'agent-status push',   direction: 'bazza→prod'   },
+  { from: 'bazza',       to: 'sec1',        label: 'security host',       direction: 'bazza→sec1'   },
   { from: 'backup-melb', to: 'prod',        label: 'prod DB backup',      direction: 'melb←prod'    },
   { from: 'backup-melb', to: 'crm8',        label: 'crm8 DB backup',      direction: 'melb←crm8'   },
   { from: 'backup-melb', to: 'bazza',       label: 'bazza workspace bkp', direction: 'melb←bazza'  },
@@ -39,14 +52,22 @@ function ping(ip: string): number | null {
 
 async function loadIperf() {
   const out: Record<string, any> = {};
-  try {
-    const raw = await readFile(IPERF_FILE, 'utf-8');
-    const data = JSON.parse(raw);
-    for (const r of data.results || []) {
-      if (r.status === 'ok') out[r.id] = { ...r, measuredAt: data.measuredAt };
-    }
-  } catch {}
+  for (const file of IPERF_FILES) {
+    try {
+      const raw = await readFile(file, 'utf-8');
+      const data = JSON.parse(raw);
+      for (const r of data.results || []) {
+        if (r.status === 'ok') out[r.id] = { ...r, measuredAt: data.measuredAt };
+      }
+      return out;
+    } catch {}
+  }
   return out;
+}
+
+function cacheMatchesNodes(cached: any) {
+  const cachedIds = new Set(Array.isArray(cached?.nodes) ? cached.nodes.map((n: any) => n?.id).filter(Boolean) : []);
+  return NODES.every(n => cachedIds.has(n.id)) && cachedIds.size === NODES.length;
 }
 
 async function buildData(iperf: Record<string, any>) {
@@ -104,6 +125,7 @@ export async function GET(req: Request) {
   try {
     const raw = await readFile(CACHE_FILE, 'utf-8');
     cached = JSON.parse(raw);
+    if (!cacheMatchesNodes(cached)) cached = null;
   } catch {}
 
   // Kick off background refresh at most once per minute
@@ -121,12 +143,12 @@ export async function GET(req: Request) {
   if (cached) {
     const ageMs = Date.now() - new Date(cached.measuredAt).getTime();
     cached.stale = ageMs > 30_000;
-    return NextResponse.json(cached);
+    return NextResponse.json(cached, { headers: NO_STORE_HEADERS });
   }
 
   // First ever load — wait for fresh data
   const iperf = await loadIperf();
   const data = await buildData(iperf);
   try { await writeFile(CACHE_FILE, JSON.stringify(data)); } catch {}
-  return NextResponse.json(data);
+  return NextResponse.json(data, { headers: NO_STORE_HEADERS });
 }

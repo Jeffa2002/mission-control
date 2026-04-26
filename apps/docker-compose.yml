@@ -8,6 +8,9 @@ services:
     environment:
       - PORT=3020
       - HOSTNAME=0.0.0.0
+      - IPERF_RESULTS_FILE=/workspace/mission-control/iperf-results.json
+      - NETWORK_HISTORY_DB=/workspace/mission-control/network-history.db
+      - NETWORK_CACHE_FILE=/tmp/mission-network-cache.json
     ports:
       - "0.0.0.0:3020:3020"
     volumes:
