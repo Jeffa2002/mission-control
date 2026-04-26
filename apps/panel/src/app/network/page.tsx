@@ -26,12 +26,12 @@ interface HistoryData { node: string; range: string; metric: string; points: His
 
 /* ─── Node positions (SVG viewBox 0 0 600 340) ──────────────────────── */
 const NODE_POS: Record<string, { x: number; y: number }> = {
-  bazza:        { x: 120, y: 90  },
-  shazza:       { x: 120, y: 250 },
-  sec1:         { x: 300, y: 52  },
-  prod:         { x: 300, y: 112 },
-  crm8:         { x: 480, y: 170 },
-  'backup-melb':{ x: 300, y: 270 },
+  bazza:        { x: 300, y: 152 },
+  sec1:         { x: 300, y: 34  },
+  prod:         { x: 472, y: 122 },
+  crm8:         { x: 492, y: 248 },
+  shazza:       { x: 120, y: 244 },
+  'backup-melb':{ x: 300, y: 286 },
 };
 
 /* ─── History node / range config ───────────────────────────────────── */
