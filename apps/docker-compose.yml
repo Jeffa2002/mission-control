@@ -11,6 +11,7 @@ services:
       - IPERF_RESULTS_FILE=/workspace/mission-control/iperf-results.json
       - NETWORK_HISTORY_DB=/workspace/mission-control/network-history.db
       - NETWORK_CACHE_FILE=/tmp/mission-network-cache.json
+      - CADVISOR_URL=http://mission-cadvisor:8080
     ports:
       - "0.0.0.0:3020:3020"
     volumes:

@@ -32,6 +32,20 @@ interface Crm8Data {
   checkedAt: string;
 }
 
+interface BazzaData {
+  ok: boolean;
+  label: string;
+  host: string;
+  cpu?: { pct: number | null; cores: number } | null;
+  memory?: { totalMb: number; usedMb: number; freeMb: number; pct: number } | null;
+  disk?: { totalGb: number; usedGb: number; freeGb: number; pct: number } | null;
+  uptime?: { pretty: string | null; since: string | null };
+  containers?: string[];
+  containerCount?: number;
+  error?: string;
+  checkedAt: string;
+}
+
 interface AgentStatus {
   id: string;
   label: string;
@@ -84,18 +98,21 @@ function StatRow({ label, value, sub }: { label: string; value: string; sub?: st
 export default function SystemsPage() {
   const [shazza, setShazza] = useState<ShazzaData | null>(null);
   const [crm8, setCrm8] = useState<Crm8Data | null>(null);
+  const [bazza, setBazza] = useState<BazzaData | null>(null);
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const [shazzaRes, crm8Res, agentsRes] = await Promise.allSettled([
+      const [shazzaRes, crm8Res, bazzaRes, agentsRes] = await Promise.allSettled([
         fetch('/api/shazza', { cache: 'no-store' }).then(r => r.json()),
         fetch('/api/crm8', { cache: 'no-store' }).then(r => r.json()),
+        fetch('/api/bazza', { cache: 'no-store' }).then(r => r.json()),
         fetch('/api/agents/status', { cache: 'no-store' }).then(r => r.json()),
       ]);
       if (shazzaRes.status === 'fulfilled') setShazza(shazzaRes.value);
       if (crm8Res.status === 'fulfilled') setCrm8(crm8Res.value);
+      if (bazzaRes.status === 'fulfilled') setBazza(bazzaRes.value);
       if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value.agents || []);
       setLoading(false);
     }
@@ -283,18 +300,112 @@ export default function SystemsPage() {
         </div>
 
         {/* ── Bazza ── */}
-        <div>
-          <div className="flex items-center gap-2 mb-4">
-            <span style={{ fontSize: 14, fontWeight: 700, color: '#F1F5F9' }}>💻 Bazza</span>
-            <span style={{ fontSize: 12, color: '#64748B' }}>100.125.171.52 · Tailscale · OpenClaw host</span>
-            <StatusDot state="healthy" />
-          </div>
-          <div className={card + ' p-5'}>
-            <StatRow label="Role" value="Dev workstation + AI host" />
-            <StatRow label="OpenClaw" value="Running" sub="main agent + crew" />
-            <StatRow label="Access" value="Tailscale only" sub="bazza.taile9fed9.ts.net" />
-          </div>
-        </div>
+        {(() => {
+          const bazzaState = !bazza ? 'unknown'
+            : !bazza.ok ? 'down'
+            : bazza.memory && bazza.memory.pct > 85 ? 'degraded'
+            : bazza.disk && bazza.disk.pct > 85 ? 'degraded'
+            : 'healthy';
+          const bMemColor = bazza?.memory
+            ? bazza.memory.pct > 85 ? '#EF4444' : bazza.memory.pct > 65 ? '#F59E0B' : '#10B981'
+            : '#10B981';
+          const bDiskColor = bazza?.disk
+            ? bazza.disk.pct > 85 ? '#EF4444' : bazza.disk.pct > 65 ? '#F59E0B' : '#10B981'
+            : '#10B981';
+          const bCpuColor = bazza?.cpu?.pct != null
+            ? bazza.cpu.pct > 80 ? '#EF4444' : bazza.cpu.pct > 50 ? '#F59E0B' : '#10B981'
+            : '#10B981';
+          return (
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#F1F5F9' }}>💻 Bazza</span>
+                <span style={{ fontSize: 12, color: '#64748B' }}>bazza.taile9fed9.ts.net · OpenClaw host</span>
+                {!loading && <StatusDot state={bazzaState} />}
+                {!loading && <span style={{ fontSize: 11, color: bazzaState === 'healthy' ? '#10B981' : bazzaState === 'degraded' ? '#F59E0B' : '#EF4444' }}>
+                  {bazzaState.charAt(0).toUpperCase() + bazzaState.slice(1)}
+                </span>}
+              </div>
+
+              {loading ? (
+                <div className={card + ' p-5'} style={{ color: '#64748B', fontSize: 13 }}>Loading Bazza metrics…</div>
+              ) : !bazza?.ok ? (
+                <div className={card + ' p-5'}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <StatusDot state="down" />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#F87171' }}>Error</div>
+                      <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>{bazza?.error || 'Metrics unavailable'}</div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  {/* Uptime card */}
+                  <div className={card + ' p-5'}>
+                    <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Uptime</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#F1F5F9', marginBottom: 4 }}>{bazza?.uptime?.pretty || 'N/A'}</div>
+                    <div style={{ fontSize: 11, color: '#64748B' }}>since {bazza?.uptime?.since || '—'}</div>
+                    <div style={{ marginTop: 10, fontSize: 11, color: '#94A3B8' }}>
+                      🐳 {bazza?.containerCount ?? 0} containers · {bazza?.cpu?.cores ?? '?'} cores
+                    </div>
+                  </div>
+
+                  {/* CPU card */}
+                  <div className={card + ' p-5'}>
+                    <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>CPU</div>
+                    {bazza?.cpu?.pct != null ? (
+                      <>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: '#F1F5F9' }}>{bazza.cpu.pct}%</div>
+                        <Bar pct={bazza.cpu.pct} color={bCpuColor} />
+                        <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>{bazza.cpu.cores} cores total</div>
+                      </>
+                    ) : <div style={{ fontSize: 13, color: '#64748B' }}>Unavailable</div>}
+                  </div>
+
+                  {/* Memory card */}
+                  <div className={card + ' p-5'}>
+                    <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Memory</div>
+                    {bazza?.memory ? (
+                      <>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: '#F1F5F9' }}>{bazza.memory.usedMb.toLocaleString()} <span style={{ fontSize: 12, fontWeight: 400, color: '#64748B' }}>/ {bazza.memory.totalMb.toLocaleString()} MB</span></div>
+                        <Bar pct={bazza.memory.pct} color={bMemColor} />
+                        <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>{bazza.memory.pct}% · {bazza.memory.freeMb.toLocaleString()} MB free</div>
+                      </>
+                    ) : <div style={{ fontSize: 13, color: '#64748B' }}>Unavailable</div>}
+                  </div>
+
+                  {/* Disk card */}
+                  <div className={card + ' p-5'}>
+                    <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Disk (/)</div>
+                    {bazza?.disk ? (
+                      <>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: '#F1F5F9' }}>{bazza.disk.usedGb} <span style={{ fontSize: 12, fontWeight: 400, color: '#64748B' }}>/ {bazza.disk.totalGb} GB</span></div>
+                        <Bar pct={bazza.disk.pct} color={bDiskColor} />
+                        <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>{bazza.disk.pct}% · {bazza.disk.freeGb} GB free</div>
+                      </>
+                    ) : <div style={{ fontSize: 13, color: '#64748B' }}>Unavailable</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* Container list */}
+              {!loading && bazza?.ok && bazza.containers && bazza.containers.length > 0 && (
+                <div className={card + ' p-4 mt-4'}>
+                  <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Running Containers</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {bazza.containers.map(name => (
+                      <span key={name} style={{
+                        fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                        background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)',
+                        color: '#10B981', fontFamily: 'monospace',
+                      }}>● {name}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── Agents ── */}
         {agents.length > 0 && (
