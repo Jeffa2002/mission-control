@@ -29,6 +29,13 @@ function relTime(iso: string | null | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+// Stale = last seen more than 7 days ago (168 hours)
+function isStale(iso: string | null | undefined): boolean {
+  if (!iso) return false;
+  const diffH = (Date.now() - new Date(iso).getTime()) / 3_600_000;
+  return diffH > 168;
+}
+
 function StatusBadge({ status }: { status: string }) {
   const s = (status ?? '').toLowerCase();
   const cfg = s === 'working'
@@ -131,13 +138,16 @@ export default function TeamsPage() {
 
             {/* Agent grid */}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {agents.map((agent) => (
-                <Link key={agent.id} href="/office" style={{ textDecoration: 'none' }}>
+              {agents.map((agent) => {
+                const stale = isStale(agent.lastSeen);
+                return (
+                <Link key={agent.id} href={`/agents/${agent.id}`} style={{ textDecoration: 'none' }}>
                   <div
                     className={card}
                     style={{
                       padding: '16px', cursor: 'pointer',
                       transition: 'background 0.12s, border-color 0.12s',
+                      opacity: stale ? 0.6 : 1,
                     }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
@@ -154,12 +164,22 @@ export default function TeamsPage() {
                         width: 44, height: 44, borderRadius: 12,
                         background: 'rgba(103,213,255,0.08)', border: '1px solid rgba(103,213,255,0.18)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0,
+                        filter: stale ? 'grayscale(0.7)' : undefined,
                       }}>
                         {agent.emoji ?? '🤖'}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
                           {agent.label ?? agent.id}
+                          {stale && (
+                            <span style={{
+                              fontSize: 10, padding: '1px 6px', borderRadius: 4,
+                              background: 'rgba(100,116,139,0.25)', color: '#94a3b8',
+                              fontWeight: 600, flexShrink: 0,
+                            }}>
+                              Inactive
+                            </span>
+                          )}
                         </div>
                         {agent.role && (
                           <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{agent.role}</div>
@@ -198,7 +218,8 @@ export default function TeamsPage() {
                     </div>
                   </div>
                 </Link>
-              ))}
+                );
+              })}
             </div>
           </>
         )}

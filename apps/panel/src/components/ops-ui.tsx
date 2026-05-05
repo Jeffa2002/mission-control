@@ -787,10 +787,27 @@ export function Metric({
     critical: 'var(--sev-critical)',
     neutral: 'var(--text-3)',
   };
+  const statusBg: Record<string, string> = {
+    warning: 'rgba(245,158,11,0.07)',
+    critical: 'rgba(239,68,68,0.07)',
+    healthy: '',
+    neutral: '',
+  };
+  const statusBorder: Record<string, string> = {
+    warning: 'rgba(245,158,11,0.30)',
+    critical: 'rgba(239,68,68,0.30)',
+    healthy: '',
+    neutral: '',
+  };
   const dotColor = status ? statusColors[status] : undefined;
+  const bg = status ? (statusBg[status] ?? '') : '';
+  const border = status ? (statusBorder[status] ?? '') : '';
 
   return (
-    <div className={cn(card, 'p-5')}>
+    <div
+      className={cn(card, 'p-5')}
+      style={bg ? { background: bg, borderColor: border } : undefined}
+    >
       <div className="flex items-center justify-between">
         <div className="text-[11px] uppercase tracking-[0.24em] text-slate-500">{label}</div>
         {dotColor && (
