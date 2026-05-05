@@ -95,7 +95,7 @@ export default function SecurityPage() {
                 label="Fail2ban bans"
                 value={data.fail2ban.available ? String(data.fail2ban.banned) : 'N/A'}
                 delta={data.fail2ban.available ? `${data.fail2ban.totalFailed} total failures` : 'fail2ban not available'}
-                status={data.fail2ban.banned > 0 ? 'warning' : 'healthy'}
+                status={!data.fail2ban.available ? 'warning' : data.fail2ban.banned > 0 ? 'warning' : 'healthy'}
               />
               <Metric
                 label="Auth failures"

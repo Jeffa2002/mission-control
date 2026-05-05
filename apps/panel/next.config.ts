@@ -31,6 +31,13 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      { source: '/uptime', destination: '/security', permanent: false },
+      { source: '/agents', destination: '/teams', permanent: false },
+      { source: '/audit', destination: '/actions', permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

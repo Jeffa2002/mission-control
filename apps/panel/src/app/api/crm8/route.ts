@@ -19,12 +19,14 @@ export async function GET(req: Request) {
     ]);
 
     if (!res.ok) {
+      // HTTP error means server is reachable but returned an error code
+      const isAuthError = res.status === 401 || res.status === 403;
       return NextResponse.json({
         ok: false,
-        reachable: false,
+        reachable: true,
         service: 'crm8',
         label: 'CRM8',
-        error: `Health endpoint returned ${res.status}`,
+        error: isAuthError ? `Auth error (${res.status})` : `Health check failed (HTTP ${res.status})`,
         checkedAt,
       });
     }

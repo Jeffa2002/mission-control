@@ -490,7 +490,7 @@ export default function NetworkPage() {
     ? data?.links.find(l => `${l.from}-${l.to}` === selectedLink)
     : null;
 
-  const totalNodes = data?.nodes.length ?? HISTORY_NODES.length;
+  const totalNodes = data?.nodes.length ?? (loading ? 0 : HISTORY_NODES.length);
   const onlineCount = data?.nodes.filter(n => n.status === 'online').length ?? 0;
   const avgLatency = data?.nodes.filter(n => n.latencyMs !== null).reduce((a, n, _, arr) =>
     a + (n.latencyMs! / arr.length), 0) ?? 0;
@@ -512,7 +512,7 @@ export default function NetworkPage() {
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', fontSize: 12, fontWeight: 700, color: '#10B981' }}>
-              {onlineCount}/{totalNodes} ONLINE
+              {loading ? '…/…' : `${onlineCount}/${totalNodes}`} ONLINE
             </div>
             <div style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(124,232,255,0.08)', border: '1px solid rgba(124,232,255,0.2)', fontSize: 12, fontWeight: 700, color: '#7ce8ff' }}>
               AVG {avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'}

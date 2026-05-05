@@ -131,8 +131,11 @@ function WorkArea({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: Agent
     >
       {/* Monitor SVG */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-        <button
+        <div
+          role="button"
+          tabIndex={0}
           onClick={(e) => { e.stopPropagation(); onOpen(agent); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); onOpen(agent); } }}
           aria-label={`Open activity for ${agent.label}`}
           style={{
             border: 'none',
@@ -144,11 +147,11 @@ function WorkArea({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: Agent
           }}
         >
           <MonitorSVG active={isWorking} />
-        </button>
+        </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           {isOffline ? (
             <div style={{ color: '#667799', fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>
-              Away from desk
+              No recent activity
             </div>
           ) : isIdle ? (
             <div style={{ color: '#ffd060', fontSize: 12, marginTop: 4 }}>
@@ -430,7 +433,17 @@ export default function OfficePage() {
       const res = await fetch('/api/agents/status', { cache: 'no-store' });
       if (!res.ok) throw new Error(await res.text());
       const j = await res.json();
-      setAgents(j.agents ?? []);
+      const rawAgents: AgentStatus[] = j.agents ?? [];
+      // H4: Override status if last_seen is stale (> 1 hour)
+      const now = Date.now();
+      const corrected = rawAgents.map((agent) => {
+        if (agent.status === 'Working' && agent.lastSeen) {
+          const diffH = (now - new Date(agent.lastSeen).getTime()) / 3_600_000;
+          if (diffH > 1) return { ...agent, status: 'Offline' as const };
+        }
+        return agent;
+      });
+      setAgents(corrected);
       setLastFetch(j.ts ?? new Date().toISOString());
       setErr(null);
     } catch (e: any) {
@@ -542,7 +555,7 @@ export default function OfficePage() {
         <span>
           <span style={{ color: '#667799' }}>● Offline</span> — no activity in 20+ min
         </span>
-        <span style={{ marginLeft: 'auto' }}>Source: <code>/agent-data/{'{agent}'}/sessions/*.jsonl</code></span>
+        <span style={{ marginLeft: 'auto' }}>Source: session data</span>
       </div>
     </AppShell>
   );

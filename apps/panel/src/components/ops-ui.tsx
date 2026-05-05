@@ -52,10 +52,10 @@ export const ROUTES: Route[] = [
   { href: '/apps', label: 'App Health', icon: 'agents', group: 'MONITOR' },
   { href: '/systems', label: 'Systems', icon: 'systems', group: 'MONITOR' },
   { href: '/network', label: 'Network', icon: 'network', group: 'MONITOR' },
-  { href: '/security', label: 'Uptime', icon: 'security', group: 'MONITOR' },
+  { href: '/security', label: 'Security', icon: 'security', group: 'MONITOR' },
   // OPS group
   { href: '/office', label: 'Office', icon: 'office', group: 'OPS' },
-  { href: '/teams', label: 'Agents', icon: 'agents', group: 'OPS' },
+  { href: '/teams', label: 'Team', icon: 'teams', group: 'OPS' },
   { href: '/deploys', label: 'Deploys', icon: 'agents', group: 'OPS' },
   { href: '/actions', label: 'Audit Log', icon: 'audit', group: 'OPS' },
 ];
@@ -681,12 +681,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const [health, setHealth] = useState<HealthData | null>(null);
   const [lastUpdated, setLastUpdated] = useState('');
+  const [currentTime, setCurrentTime] = useState('');
 
   const loadHealth = useCallback(async () => {
     try {
       const r = await fetch('/api/health', { cache: 'no-store' });
       if (r.ok) {
-        setHealth(await r.json());
+        const data = await r.json();
+        // Compute worst-case overall from all checks
+        const checks = Object.values(data.checks || {}) as HealthCheck[];
+        const hasError = checks.some((c) => c.status === 'error');
+        const hasDegraded = checks.some((c) => c.status === 'degraded');
+        const computedOverall: HealthColor = hasError ? 'red' : hasDegraded ? 'amber' : (data.overall ?? 'green');
+        setHealth({ ...data, overall: computedOverall });
         setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
     } catch {}
@@ -697,6 +704,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const t = setInterval(loadHealth, 30_000);
     return () => clearInterval(t);
   }, [loadHealth]);
+
+  // Live clock — updates every second
+  useEffect(() => {
+    function tick() {
+      setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    }
+    tick();
+    const t = setInterval(tick, 1_000);
+    return () => clearInterval(t);
+  }, []);
 
   const contextValue: AppShellContextValue = {
     health,
@@ -719,7 +736,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Header
             path={path}
             health={health}
-            lastUpdated={lastUpdated}
+            lastUpdated={currentTime || lastUpdated}
             onRefresh={loadHealth}
           />
           <main style={{ flex: 1, padding: '24px 28px' }}>

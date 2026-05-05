@@ -123,7 +123,9 @@ export default function SystemsPage() {
 
   const shazzaState = !shazza ? 'unknown'
     : !shazza.reachable ? 'down'
+    : shazza.temperature && shazza.temperature.celsius >= 90 ? 'down'
     : shazza.memory && shazza.memory.pct > 85 ? 'degraded'
+    : shazza.temperature && shazza.temperature.celsius >= 80 ? 'degraded'
     : 'healthy';
 
   const memColor = shazza?.memory
@@ -134,7 +136,7 @@ export default function SystemsPage() {
   const diskColor = diskPct > 85 ? '#EF4444' : diskPct > 65 ? '#F59E0B' : '#10B981';
 
   const crm8State = !crm8 ? 'unknown'
-    : !crm8.reachable ? 'down'
+    : !crm8.reachable && !crm8.ok ? 'down'
     : crm8.memory && crm8.memory.pct > 85 ? 'degraded'
     : 'healthy';
 
@@ -178,8 +180,9 @@ export default function SystemsPage() {
                 <div style={{ fontSize: 15, fontWeight: 700, color: '#F1F5F9', marginBottom: 4 }}>{shazza?.uptime?.pretty || 'N/A'}</div>
                 <div style={{ fontSize: 11, color: '#64748B' }}>since {shazza?.uptime?.since || '—'}</div>
                 {shazza?.temperature && (
-                  <div style={{ marginTop: 10, fontSize: 12, color: shazza.temperature.celsius > 80 ? '#F87171' : '#94A3B8' }}>
+                  <div style={{ marginTop: 10, fontSize: 12, color: shazza.temperature.celsius >= 90 ? '#EF4444' : shazza.temperature.celsius > 80 ? '#F87171' : '#94A3B8' }}>
                     🌡️ {shazza.temperature.celsius.toFixed(0)}°C
+                    {shazza.temperature.celsius >= 90 && <span style={{ marginLeft: 6, fontWeight: 700 }}>CRITICAL</span>}
                   </div>
                 )}
               </div>
@@ -257,12 +260,14 @@ export default function SystemsPage() {
 
           {loading ? (
             <div className={card + ' p-5'} style={{ color: '#64748B', fontSize: 13 }}>Connecting to CRM8…</div>
-          ) : !crm8?.reachable ? (
+          ) : !crm8?.ok ? (
             <div className={card + ' p-5'}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <StatusDot state="down" />
+                <StatusDot state={crm8?.reachable ? 'degraded' : 'down'} />
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#F87171' }}>Unreachable</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: crm8?.reachable ? '#F59E0B' : '#F87171' }}>
+                    {crm8?.reachable ? 'Health check failed' : 'Unreachable'}
+                  </div>
                   <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>{crm8?.error || 'Health check failed'}</div>
                 </div>
               </div>

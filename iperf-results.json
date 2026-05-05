@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-05-01T16:00:22Z",
+  "measuredAt": "2026-05-05T22:00:22Z",
   "testedFrom": "bazza",
-  "results": [{"id":"sec1","status":"ok","mbpsSend":511.4,"mbpsRecv":500.12,"rttMs":10.18,"retransmits":4},{"id":"prod","status":"ok","mbpsSend":552.24,"mbpsRecv":544.36,"rttMs":11.18,"retransmits":0},{"id":"backup-melb","status":"ok","mbpsSend":364.37,"mbpsRecv":322.1,"rttMs":138.68,"retransmits":1491},{"id":"crm8","status":"ok","mbpsSend":598.89,"mbpsRecv":592.51,"rttMs":6.32,"retransmits":0},{"id":"shazza","status":"error"}]
+  "results": [{"id":"sec1","status":"ok","mbpsSend":588.45,"mbpsRecv":583.07,"rttMs":6.13,"retransmits":0},{"id":"prod","status":"ok","mbpsSend":519.17,"mbpsRecv":510.43,"rttMs":7.47,"retransmits":1},{"id":"backup-melb","status":"ok","mbpsSend":429.8,"mbpsRecv":396.73,"rttMs":137.42,"retransmits":7061},{"id":"crm8","status":"ok","mbpsSend":576.61,"mbpsRecv":570.16,"rttMs":5.08,"retransmits":0},{"id":"shazza","status":"error"}]
 }

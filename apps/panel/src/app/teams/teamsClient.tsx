@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/ops-ui';
+import Link from 'next/link';
 
 type AgentStatus = {
   id: string;
@@ -159,6 +160,13 @@ function pill(status: string, busy: boolean) {
   );
 }
 
+// L3: helper to check if agent is stale (> 7 days)
+function isStaleAgent(lastSeen: string | null): boolean {
+  if (!lastSeen) return false;
+  const diffH = (Date.now() - new Date(lastSeen).getTime()) / 3_600_000;
+  return diffH > 168; // 7 days
+}
+
 export default function TeamsClient() {
   const [agents, setAgents] = useState<Record<string, AgentStatus>>({});
 
@@ -170,8 +178,20 @@ export default function TeamsClient() {
         const res = await fetch('/api/agents/status', { cache: 'no-store' });
         const j = await res.json();
         if (!alive) return;
+        const now = Date.now();
         const map: Record<string, AgentStatus> = {};
-        (Array.isArray(j) ? j : []).forEach((a: AgentStatus) => (map[a.id] = a));
+        const agentList: AgentStatus[] = Array.isArray(j) ? j : (j.agents ?? []);
+        agentList.forEach((a: AgentStatus) => {
+          // H4: override working status if last_seen > 1 hour
+          if (a.status === 'working' && a.lastSeen) {
+            const diffH = (now - new Date(a.lastSeen).getTime()) / 3_600_000;
+            if (diffH > 1) {
+              map[a.id] = { ...a, status: 'offline' };
+              return;
+            }
+          }
+          map[a.id] = a;
+        });
         setAgents(map);
       } catch {
         // ignore
@@ -228,6 +248,7 @@ export default function TeamsClient() {
                   const live = m.agentId ? agents[m.agentId] : null;
                   const status = m.planned ? 'offline' : live?.status || 'offline';
                   const busy = Boolean(live?.busy);
+                  const stale = m.agentId ? isStaleAgent(live?.lastSeen ?? null) : false;
 
                   return (
                     <div
@@ -235,8 +256,9 @@ export default function TeamsClient() {
                       style={{
                         border: '1px solid rgba(124,232,255,0.14)',
                         borderRadius: 14,
-                        background: 'rgba(0,0,0,0.18)',
+                        background: stale ? 'rgba(0,0,0,0.10)' : 'rgba(0,0,0,0.18)',
                         padding: 12,
+                        opacity: stale ? 0.6 : 1,
                       }}
                     >
                       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -255,7 +277,18 @@ export default function TeamsClient() {
                           {m.emoji}
                         </div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 900, color: '#d6f6ff', letterSpacing: 0.3 }}>{m.label}</div>
+                          <div style={{ fontWeight: 900, color: '#d6f6ff', letterSpacing: 0.3, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {m.agentId ? (
+                              <Link href={`/agents/${m.agentId}`} style={{ color: '#d6f6ff', textDecoration: 'none' }}>
+                                {m.label}
+                              </Link>
+                            ) : m.label}
+                            {stale && (
+                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(100,116,139,0.25)', color: '#64748b', fontWeight: 600 }}>
+                                Inactive
+                              </span>
+                            )}
+                          </div>
                           <div style={{ marginTop: 6 }}>{m.type === 'agent' ? pill(status, busy) : (
                             <span style={{ fontSize: 12, color: '#9fefff', opacity: 0.9 }}>Human</span>
                           )}</div>
