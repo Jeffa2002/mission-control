@@ -31,9 +31,9 @@ Runtime telemetry files are deliberately excluded from source sync:
 
 1. push a panel/deploy change to `master`, or manually run the `Deploy Mission Control` workflow
 2. the repo-scoped self-hosted runner on prod checks out the repo
-3. GitHub Actions builds the panel
-4. the runner syncs source into `/var/www/mission-control`
-5. prod rebuilds and restarts the panel
+3. the runner syncs source into `/var/www/mission-control`
+4. prod rebuilds the Docker image, which runs the Next.js build
+5. prod restarts the panel
 6. the workflow verifies the live app
 
 The runner is installed as a systemd service:
