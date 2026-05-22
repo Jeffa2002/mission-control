@@ -10,18 +10,13 @@ concurrency:
 jobs:
   deploy:
     name: Build and deploy panel
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - mission-control-prod
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Connect to Tailnet
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -38,14 +33,7 @@ jobs:
         working-directory: apps/panel
         run: npm run build
 
-      - name: Install SSH key
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/prod_deploy
-          chmod 600 ~/.ssh/prod_deploy
-          ssh-keyscan -p 2222 100.95.166.47 >> ~/.ssh/known_hosts
-
-      - name: Sync source to prod
+      - name: Sync source into production tree
         run: |
           rsync -az --delete \
             --exclude .git \
@@ -60,23 +48,19 @@ jobs:
             --exclude network-history.db \
             --exclude network-history.db-journal \
             --exclude security-data.json \
-            -e "ssh -i ~/.ssh/prod_deploy -p 2222" \
-            ./ root@100.95.166.47:/var/www/mission-control/
+            ./ /var/www/mission-control/
 
       - name: Rebuild and restart prod
-        run: |
-          ssh -i ~/.ssh/prod_deploy -p 2222 root@100.95.166.47 \
-            'cd /var/www/mission-control/apps && docker-compose build panel && docker-compose up -d panel'
+        working-directory: /var/www/mission-control/apps
+        run: docker-compose build panel && docker-compose up -d panel
 
       - name: Verify prod
         run: |
-          ssh -i ~/.ssh/prod_deploy -p 2222 root@100.95.166.47 '
-            set -euo pipefail
-            set -a
-            . /etc/infisical/generated/mission-control.runtime.env
-            set +a
-            html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)"
-            printf "%s" "$html" | grep -q "Unified Activity"
-            printf "%s" "$html" | grep -q "Runbook"
-            curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null
-          '
+          set -euo pipefail
+          set -a
+          . /etc/infisical/generated/mission-control.runtime.env
+          set +a
+          html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)"
+          printf "%s" "$html" | grep -q "Unified Activity"
+          printf "%s" "$html" | grep -q "Runbook"
+          curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null

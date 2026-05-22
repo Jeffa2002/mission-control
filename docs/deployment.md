@@ -30,19 +30,19 @@ Runtime telemetry files are deliberately excluded from source sync:
 `.github/workflows/deploy-mission-control.yml` is ready for the intended flow:
 
 1. manually run the `Deploy Mission Control` workflow
-2. GitHub Actions builds the panel
-3. the runner joins the Tailnet
-4. the runner syncs source to prod
+2. the repo-scoped self-hosted runner on prod checks out the repo
+3. GitHub Actions builds the panel
+4. the runner syncs source into `/var/www/mission-control`
 5. prod rebuilds and restarts the panel
 6. the workflow verifies the live app
 
-The workflow needs these GitHub secrets before it can run:
+The runner is installed as a systemd service:
 
-- `PROD_SSH_KEY`: private deploy key that can SSH to `root@100.95.166.47:2222`
-- `TS_OAUTH_CLIENT_ID`: Tailscale OAuth client ID
-- `TS_OAUTH_SECRET`: Tailscale OAuth secret
+```bash
+actions.runner.Jeffa2002-mission-control.per-web-mission-control.service
+```
 
-After those secrets are configured and the first manual deploy is proven, the workflow can be changed to deploy automatically on pushes to `master`.
+After the first manual deploy is proven, the workflow can be changed to deploy automatically on pushes to `master`.
 
 Production's git remote should use SSH:
 
