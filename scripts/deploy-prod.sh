@@ -9,6 +9,17 @@ PROD_PORT="${PROD_PORT:-2222}"
 PROD_KEY="${PROD_KEY:-/root/.ssh/prod_deploy_v3}"
 PROD_DIR="${PROD_DIR:-/var/www/mission-control}"
 
+PROD_HOST_TARGET="${PROD_HOST#*@}"
+case "$PROD_HOST_TARGET" in
+  100.6[4-9].*|100.[7-9][0-9].*|100.1[0-1][0-9].*|100.12[0-7].*|*.ts.net)
+    ;;
+  *)
+    echo "Refusing deploy to non-tailnet host: $PROD_HOST" >&2
+    echo "Set PROD_HOST to the prod Tailscale IP or MagicDNS name." >&2
+    exit 1
+    ;;
+esac
+
 SSH_OPTS=(
   -i "$PROD_KEY"
   -p "$PROD_PORT"

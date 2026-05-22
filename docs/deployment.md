@@ -13,7 +13,8 @@ scripts/deploy-prod.sh
 The script:
 
 - builds `apps/panel`
-- syncs source to `root@100.95.166.47:/var/www/mission-control`
+- syncs source to `root@100.95.166.47:/var/www/mission-control` over the tailnet
+- refuses to deploy if `PROD_HOST` is not a Tailscale `100.64.0.0/10` address or `*.ts.net` MagicDNS name
 - rebuilds and restarts the `mission-panel` container
 - verifies `/` and `/activity` from inside prod using the runtime auth secret
 
@@ -43,6 +44,8 @@ actions.runner.Jeffa2002-mission-control.per-web-mission-control.service
 ```
 
 The workflow deploys automatically on panel/deploy changes pushed to `master`.
+
+This path does not SSH from GitHub to prod. It runs locally on the prod self-hosted runner, so it has no public deploy hop.
 
 Production's git remote should use SSH:
 
