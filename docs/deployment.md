@@ -29,7 +29,7 @@ Runtime telemetry files are deliberately excluded from source sync:
 
 `.github/workflows/deploy-mission-control.yml` is ready for the intended flow:
 
-1. manually run the `Deploy Mission Control` workflow
+1. push a panel/deploy change to `master`, or manually run the `Deploy Mission Control` workflow
 2. the repo-scoped self-hosted runner on prod checks out the repo
 3. GitHub Actions builds the panel
 4. the runner syncs source into `/var/www/mission-control`
@@ -42,7 +42,7 @@ The runner is installed as a systemd service:
 actions.runner.Jeffa2002-mission-control.per-web-mission-control.service
 ```
 
-After the first manual deploy is proven, the workflow can be changed to deploy automatically on pushes to `master`.
+The workflow deploys automatically on panel/deploy changes pushed to `master`.
 
 Production's git remote should use SSH:
 

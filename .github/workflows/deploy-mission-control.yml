@@ -2,6 +2,14 @@ name: Deploy Mission Control
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'apps/panel/**'
+      - 'apps/docker-compose.yml'
+      - 'scripts/deploy-prod.sh'
+      - '.github/workflows/deploy-mission-control.yml'
 
 concurrency:
   group: mission-control-prod
@@ -60,7 +68,14 @@ jobs:
           set -a
           . /etc/infisical/generated/mission-control.runtime.env
           set +a
-          html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)"
-          printf "%s" "$html" | grep -q "Unified Activity"
-          printf "%s" "$html" | grep -q "Runbook"
-          curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null
+          for attempt in $(seq 1 20); do
+            if html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)" \
+              && printf "%s" "$html" | grep -q "Unified Activity" \
+              && printf "%s" "$html" | grep -q "Runbook" \
+              && curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null; then
+              exit 0
+            fi
+            echo "Waiting for panel restart ($attempt/20)..."
+            sleep 3
+          done
+          exit 1
