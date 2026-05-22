@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-PROD_HOST="root@203.57.50.240"
+PROD_HOST="root@100.95.166.47"
 PROD_PORT="2222"
 PROD_KEY="/root/.ssh/prod_deploy_v3"
 OUTPUT="/root/.openclaw/workspace/mission-control/iperf-results.json"

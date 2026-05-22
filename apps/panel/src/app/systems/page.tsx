@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AppShell, SectionTitle, card, muted } from '../../components/ops-ui';
+import { AppShell, SectionTitle, StatusBadge, ToolbarButton, card, muted, sevPill } from '../../components/ops-ui';
 
 interface ShazzaData {
   ok: boolean;
@@ -95,6 +95,77 @@ function StatRow({ label, value, sub }: { label: string; value: string; sub?: st
   );
 }
 
+type HostState = 'healthy' | 'degraded' | 'down' | 'stale' | 'unknown';
+type UiStatus = 'healthy' | 'warning' | 'critical' | 'info' | 'neutral';
+
+function stateToUi(state: HostState): UiStatus {
+  if (state === 'healthy') return 'healthy';
+  if (state === 'degraded') return 'warning';
+  if (state === 'down') return 'critical';
+  if (state === 'stale') return 'neutral';
+  return 'neutral';
+}
+
+function stateLabel(state: HostState) {
+  if (state === 'healthy') return 'Healthy';
+  if (state === 'degraded') return 'Degraded';
+  if (state === 'down') return 'Down';
+  if (state === 'stale') return 'Stale';
+  return 'Unknown';
+}
+
+function HostCommandCard({
+  name,
+  role,
+  address,
+  state,
+  primary,
+  secondary,
+}: {
+  name: string;
+  role: string;
+  address: string;
+  state: HostState;
+  primary: string;
+  secondary: string;
+}) {
+  const color = state === 'down'
+    ? 'var(--sev-critical)'
+    : state === 'degraded'
+      ? 'var(--sev-warning)'
+      : state === 'healthy'
+        ? 'var(--sev-healthy)'
+        : 'var(--sev-neutral)';
+
+  return (
+    <div className={card + ' p-5'} style={{ borderLeft: `3px solid ${color}` }}>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div style={{ minWidth: 0 }}>
+          <div className="truncate text-[16px] font-extrabold text-slate-50">{name}</div>
+          <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-slate-500">{role}</div>
+        </div>
+        <StatusBadge label={stateLabel(state)} status={stateToUi(state)} pulse={state === 'down'} />
+      </div>
+      <div className="font-mono text-[12px] text-[var(--accent)]">{address}</div>
+      <div className="mt-4 text-[22px] font-extrabold leading-none text-slate-100">{primary}</div>
+      <div className={muted + ' mt-2'}>{secondary}</div>
+    </div>
+  );
+}
+
+function AnomalyRow({ label, detail, state }: { label: string; detail: string; state: HostState }) {
+  return (
+    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-white/10 px-4 py-3">
+      <StatusDot state={state} />
+      <div style={{ minWidth: 0 }}>
+        <div className="truncate text-[13px] font-bold text-slate-100">{label}</div>
+        <div className="mt-1 truncate text-[11px] text-slate-500">{detail}</div>
+      </div>
+      <StatusBadge label={stateLabel(state)} status={stateToUi(state)} />
+    </div>
+  );
+}
+
 export default function SystemsPage() {
   const [shazza, setShazza] = useState<ShazzaData | null>(null);
   const [crm8, setCrm8] = useState<Crm8Data | null>(null);
@@ -102,20 +173,21 @@ export default function SystemsPage() {
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [loading, setLoading] = useState(true);
 
+  async function load() {
+    const [shazzaRes, crm8Res, bazzaRes, agentsRes] = await Promise.allSettled([
+      fetch('/api/shazza', { cache: 'no-store' }).then(r => r.json()),
+      fetch('/api/crm8', { cache: 'no-store' }).then(r => r.json()),
+      fetch('/api/bazza', { cache: 'no-store' }).then(r => r.json()),
+      fetch('/api/agents/status', { cache: 'no-store' }).then(r => r.json()),
+    ]);
+    if (shazzaRes.status === 'fulfilled') setShazza(shazzaRes.value);
+    if (crm8Res.status === 'fulfilled') setCrm8(crm8Res.value);
+    if (bazzaRes.status === 'fulfilled') setBazza(bazzaRes.value);
+    if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value.agents || []);
+    setLoading(false);
+  }
+
   useEffect(() => {
-    async function load() {
-      const [shazzaRes, crm8Res, bazzaRes, agentsRes] = await Promise.allSettled([
-        fetch('/api/shazza', { cache: 'no-store' }).then(r => r.json()),
-        fetch('/api/crm8', { cache: 'no-store' }).then(r => r.json()),
-        fetch('/api/bazza', { cache: 'no-store' }).then(r => r.json()),
-        fetch('/api/agents/status', { cache: 'no-store' }).then(r => r.json()),
-      ]);
-      if (shazzaRes.status === 'fulfilled') setShazza(shazzaRes.value);
-      if (crm8Res.status === 'fulfilled') setCrm8(crm8Res.value);
-      if (bazzaRes.status === 'fulfilled') setBazza(bazzaRes.value);
-      if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value.agents || []);
-      setLoading(false);
-    }
     load();
     const iv = setInterval(load, 30_000);
     return () => clearInterval(iv);
@@ -144,10 +216,136 @@ export default function SystemsPage() {
     ? crm8.memory.pct > 85 ? '#EF4444' : crm8.memory.pct > 65 ? '#F59E0B' : '#10B981'
     : '#10B981';
 
+  const bazzaState: HostState = !bazza ? 'unknown'
+    : !bazza.ok ? 'down'
+    : bazza.memory && bazza.memory.pct > 85 ? 'degraded'
+    : bazza.disk && bazza.disk.pct > 85 ? 'degraded'
+    : 'healthy';
+
+  const hostStates: HostState[] = [shazzaState as HostState, crm8State as HostState, bazzaState, 'healthy'];
+  const downHosts = hostStates.filter((s) => s === 'down').length;
+  const degradedHosts = hostStates.filter((s) => s === 'degraded').length;
+  const healthyHosts = hostStates.filter((s) => s === 'healthy').length;
+  const commandState: UiStatus = downHosts ? 'critical' : degradedHosts ? 'warning' : healthyHosts ? 'healthy' : 'neutral';
+  const activeAgents = agents.filter((agent) => agent.status === 'Working').length;
+  const anomalies = [
+    {
+      label: 'Shazza thermal and memory envelope',
+      detail: shazza?.reachable
+        ? `temp ${shazza.temperature?.celsius?.toFixed(0) ?? '?'}C · memory ${shazza.memory?.pct ?? '?'}%`
+        : shazza?.error || 'waiting for first probe',
+      state: shazzaState as HostState,
+    },
+    {
+      label: 'Bazza local resource envelope',
+      detail: bazza?.ok
+        ? `cpu ${bazza.cpu?.pct ?? '?'}% · memory ${bazza.memory?.pct ?? '?'}% · disk ${bazza.disk?.pct ?? '?'}%`
+        : bazza?.error || 'waiting for first probe',
+      state: bazzaState,
+    },
+    {
+      label: 'CRM8 application process',
+      detail: crm8?.ok
+        ? `uptime ${crm8.uptime?.pretty ?? 'unknown'} · memory ${crm8.memory?.pct ?? '?'}%`
+        : crm8?.error || 'waiting for first probe',
+      state: crm8State as HostState,
+    },
+    {
+      label: 'Prod service posture',
+      detail: 'PM2 + Docker suite, SSH on 2222, Mission Panel container published',
+      state: 'healthy' as HostState,
+    },
+  ].sort((a, b) => {
+    const rank: Record<HostState, number> = { down: 0, degraded: 1, unknown: 2, stale: 3, healthy: 4 };
+    return rank[a.state] - rank[b.state];
+  });
+
   return (
     <AppShell>
       <div className="space-y-8">
-        <SectionTitle title="Systems" subtitle="Live host health and agent status" />
+        <SectionTitle
+          title="Systems"
+          subtitle="Host command board for machine health, service pressure, and anomaly triage"
+          action={<ToolbarButton onClick={load} disabled={loading}>{loading ? 'Refreshing' : 'Refresh'}</ToolbarButton>}
+        />
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <HostCommandCard
+            name="Bazza"
+            role="OpenClaw host"
+            address="bazza.taile9fed9.ts.net"
+            state={bazzaState}
+            primary={bazza?.ok ? `${bazza.containerCount ?? 0} containers` : 'No signal'}
+            secondary={bazza?.ok ? `CPU ${bazza.cpu?.pct ?? '?'}% · RAM ${bazza.memory?.pct ?? '?'}% · disk ${bazza.disk?.pct ?? '?'}%` : bazza?.error || 'Local probe pending'}
+          />
+          <HostCommandCard
+            name="Shazza"
+            role="AI workstation"
+            address="100.113.217.81"
+            state={shazzaState as HostState}
+            primary={shazza?.reachable ? `${shazza.temperature?.celsius?.toFixed(0) ?? '?'}C` : 'No signal'}
+            secondary={shazza?.reachable ? `RAM ${shazza.memory?.pct ?? '?'}% · llama ${shazza.services?.llamaServer.active ? 'active' : 'inactive'}` : shazza?.error || 'Tailnet probe pending'}
+          />
+          <HostCommandCard
+            name="CRM8"
+            role="application host"
+            address="103.230.159.104"
+            state={crm8State as HostState}
+            primary={crm8?.ok ? crm8.uptime?.pretty ?? 'Online' : 'No signal'}
+            secondary={crm8?.ok ? `Node ${crm8.nodeVersion ?? '?'} · memory ${crm8.memory?.pct ?? '?'}%` : crm8?.error || 'App probe pending'}
+          />
+          <HostCommandCard
+            name="Prod"
+            role="EffectX suite"
+            address="203.57.50.240"
+            state="healthy"
+            primary="PM2 + Docker"
+            secondary="crossbench, abea-ndh, nurture, projectxify, mission-panel"
+          />
+        </div>
+
+        <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
+          <section className={card + ' overflow-hidden'}>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[var(--bg-2)] px-4 py-3">
+              <div>
+                <div className="text-[13px] font-bold text-slate-100">Fleet Anomaly Queue</div>
+                <div className="mt-1 text-[12px] text-slate-500">Hosts sorted by the highest current operational pressure</div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <span className={sevPill(commandState)}>{stateLabel(downHosts ? 'down' : degradedHosts ? 'degraded' : healthyHosts ? 'healthy' : 'unknown')}</span>
+                <span className={sevPill('critical')}>{downHosts} down</span>
+                <span className={sevPill('warning')}>{degradedHosts} degraded</span>
+              </div>
+            </div>
+            <div>
+              {anomalies.map((item) => (
+                <AnomalyRow key={item.label} label={item.label} detail={item.detail} state={item.state} />
+              ))}
+            </div>
+          </section>
+
+          <aside className={card + ' overflow-hidden'}>
+            <div className="border-b border-white/10 bg-[var(--bg-2)] px-4 py-3">
+              <div className="text-[13px] font-bold text-slate-100">Operator Readiness</div>
+              <div className="mt-1 text-[12px] text-slate-500">Agent availability beside the machine state</div>
+            </div>
+            <div className="grid grid-cols-2 gap-0">
+              <div className="border-r border-white/10 p-5">
+                <div className="text-[28px] font-extrabold leading-none text-slate-50">{activeAgents}/{agents.length}</div>
+                <div className={muted + ' mt-2'}>agents working</div>
+              </div>
+              <div className="p-5">
+                <div className="text-[28px] font-extrabold leading-none text-slate-50">{healthyHosts}/4</div>
+                <div className={muted + ' mt-2'}>hosts healthy</div>
+              </div>
+            </div>
+            <div className="border-t border-white/10 p-4 text-[13px] text-slate-300">
+              {downHosts || degradedHosts
+                ? 'Review the anomaly queue before lower-priority telemetry.'
+                : 'Fleet is nominal. Next useful work is incident workflow polish.'}
+            </div>
+          </aside>
+        </div>
 
         {/* ── Shazza ── */}
         <div>

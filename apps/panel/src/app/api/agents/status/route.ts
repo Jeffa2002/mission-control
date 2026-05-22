@@ -4,9 +4,12 @@ import { readFile } from 'node:fs/promises';
 import { requireSessionAuth } from '../../_session-auth';
 
 const PATHS = [
+  '/workspace/mission-control/agent-status.json',
+  '/workspace-data/mission-control/agent-status.json',
+  '/workspace/agent-status.json',
   '/agent-data/agent-status.json',
   '/var/www/mission-control/agent-status.json',
-  '/workspace/agent-status.json',
+  '/app/agent-status.json',
 ];
 
 interface CacheEntry { ts: number; data: object }

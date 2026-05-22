@@ -41,11 +41,7 @@ export async function GET(req: Request) {
   const authErr = requireSessionAuth(req);
   if (authErr) return authErr;
   try {
-    const { execSync } = await import('child_process');
-    const raw = execSync(
-      `ssh -i /root/.ssh/prod_deploy_v3 -p 2222 -o StrictHostKeyChecking=no -o ConnectTimeout=8 root@203.57.50.240 'tail -n 2000 /var/log/security-alert.log 2>/dev/null'`,
-      { timeout: 12000, encoding: 'utf8' }
-    ).trim();
+    const raw = runRemote('tail -n 2000 /var/log/security-alert.log 2>/dev/null').trim();
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     const alerts = parseAlerts(raw)
       .filter((x) => {

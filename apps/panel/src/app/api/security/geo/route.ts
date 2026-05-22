@@ -52,16 +52,12 @@ export async function GET(req: Request) {
 
   try {
     // Single SSH call: extract top IPs + resolve geo in one shot on prod
-    const { execSync } = await import('child_process');
     const remoteScript = [
       'grep -E "Failed password|Invalid user" /var/log/auth.log 2>/dev/null',
       'grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}"',
       'sort | uniq -c | sort -rn | head -30',
     ].join(' | ');
-    const ipRaw = execSync(
-      `ssh -i /root/.ssh/prod_deploy_v3 -p 2222 -o StrictHostKeyChecking=no -o ConnectTimeout=8 root@203.57.50.240 '${remoteScript}'`,
-      { timeout: 15000, encoding: 'utf8' }
-    ).trim();
+    const ipRaw = runRemote(remoteScript).trim();
 
     const ipCounts = new Map<string, number>();
     for (const line of ipRaw.split('\n')) {
@@ -83,10 +79,7 @@ export async function GET(req: Request) {
     // Resolve all IPs geo in one SSH call
     const ipList = [...ipCounts.keys()].join(' ');
     const geoScript = `for ip in ${ipList}; do echo "$ip $(geoiplookup $ip 2>/dev/null | head -1)"; done`;
-    const geoRaw = execSync(
-      `ssh -i /root/.ssh/prod_deploy_v3 -p 2222 -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@203.57.50.240 '${geoScript}'`,
-      { timeout: 20000, encoding: 'utf8' }
-    ).trim();
+    const geoRaw = runRemote(geoScript).trim();
 
     const geo = new Map<string, Country>();
     for (const line of geoRaw.split('\n')) {

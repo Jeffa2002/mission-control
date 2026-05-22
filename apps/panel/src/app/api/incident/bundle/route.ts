@@ -19,9 +19,14 @@ export async function GET(req: Request) {
     const zip = new JSZip();
     zip.file('README.txt', `CUTLINE/Mission Control incident bundle\nGenerated: ${new Date().toISOString()}\nWindow: last ${minutes} minutes\n`);
 
+    const warnings: string[] = [];
+
     // Bot logs
-    const botLogs = await sh('docker', ['logs', '--since', `${minutes}m`, 'crypto-bot'], { timeoutMs: 60_000 });
-    zip.file('crypto-bot/logs.txt', botLogs);
+    const botLogs = await sh('docker', ['logs', '--since', `${minutes}m`, 'crypto-bot'], { timeoutMs: 60_000 }).catch((e) => {
+      warnings.push(`crypto-bot/logs.txt unavailable: ${String(e?.message || e)}`);
+      return '';
+    });
+    if (botLogs) zip.file('crypto-bot/logs.txt', botLogs);
 
     // Bot state + config
     const state = await sh('docker', ['exec', 'crypto-bot', 'cat', '/data/state.json'], { timeoutMs: 10_000 }).catch(() => '');
@@ -38,6 +43,10 @@ export async function GET(req: Request) {
     if (audit) {
       const lines = audit.split('\n').filter(Boolean);
       zip.file('mission-control/audit-tail.jsonl', lines.slice(-200).join('\n') + '\n');
+    }
+
+    if (warnings.length) {
+      zip.file('WARNINGS.txt', warnings.join('\n') + '\n');
     }
 
     const out = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });

@@ -4,6 +4,9 @@ import { execSync } from 'node:child_process';
 export type RecentItem = Record<string, unknown>;
 
 const LOG_ROOTS = ['/host-logs', '/var/log'];
+const PROD_SSH_HOST = process.env.PROD_SSH_HOST || '100.95.166.47';
+const PROD_SSH_PORT = process.env.PROD_SSH_PORT || '2222';
+const PROD_SSH_KEY = process.env.PROD_SSH_KEY || '/root/.ssh/prod_deploy_v3';
 
 export async function readFirstExisting(paths: string[]): Promise<string> {
   for (const p of paths) {
@@ -51,7 +54,7 @@ export function safeExec(command: string): string {
 export function runRemote(cmd: string): string {
   try {
     return execSync(
-      `ssh -i /root/.ssh/prod_deploy_v3 -p 2222 -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@203.57.50.240 bash -lc ${escapeShell(cmd)}`,
+      `ssh -i ${escapeShell(PROD_SSH_KEY)} -p ${escapeShell(PROD_SSH_PORT)} -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@${escapeShell(PROD_SSH_HOST)} bash -lc ${escapeShell(cmd)}`,
       { timeout: 10000, encoding: 'utf8' }
     );
   } catch {

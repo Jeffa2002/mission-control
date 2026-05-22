@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { AppShell } from '../../components/ops-ui';
+import { AppShell, SectionTitle, StatusBadge, card, card2, muted } from '../../components/ops-ui';
 import { AgentActivityDrawer } from '../../components/AgentActivityDrawer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -365,38 +365,40 @@ function FloorSummary({ agents }: { agents: AgentStatus[] }) {
   const working = agents.filter((a) => a.status === 'Working').length;
   const idle    = agents.filter((a) => a.status === 'Idle').length;
   const offline = agents.filter((a) => a.status === 'Offline').length;
+  const lastActive = agents
+    .map((a) => a.lastSeen)
+    .filter(Boolean)
+    .sort()
+    .at(-1);
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 12,
-        flexWrap: 'wrap',
-        marginTop: 16,
-        marginBottom: 6,
-      }}
-    >
-      {[
-        { label: 'Working', count: working, color: '#33ffcc' },
-        { label: 'Idle',    count: idle,    color: '#ffd060' },
-        { label: 'Offline', count: offline, color: '#667799' },
-      ].map(({ label, count, color }) => (
-        <div
-          key={label}
-          style={{
-            padding: '6px 16px',
-            borderRadius: 999,
-            border: `1px solid ${color}44`,
-            background: `${color}0e`,
-            fontSize: 12,
-            fontWeight: 700,
-            color,
-            letterSpacing: 0.5,
-          }}
-        >
-          {count} {label}
+    <div className="grid gap-3 md:grid-cols-4">
+      <div className={card2 + ' p-4'}>
+        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Floor Load</div>
+        <div className="mt-2 text-2xl font-bold text-slate-100">{agents.length}</div>
+        <div className={muted}>Registered operators</div>
+      </div>
+      <div className={card2 + ' p-4'}>
+        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Active</div>
+        <div className="mt-2 flex items-center gap-2">
+          <div className="text-2xl font-bold text-slate-100">{working}</div>
+          <StatusBadge label="working" status="healthy" pulse={working > 0} />
         </div>
-      ))}
+        <div className={muted}>Tool activity now</div>
+      </div>
+      <div className={card2 + ' p-4'}>
+        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Available</div>
+        <div className="mt-2 flex items-center gap-2">
+          <div className="text-2xl font-bold text-slate-100">{idle}</div>
+          <StatusBadge label="idle" status="warning" />
+        </div>
+        <div className={muted}>{offline} offline</div>
+      </div>
+      <div className={card2 + ' p-4'}>
+        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Last Signal</div>
+        <div className="mt-2 text-[15px] font-semibold text-slate-100">{lastActive ? fmtRelative(lastActive) : 'No signal'}</div>
+        <div className={muted}>Newest agent heartbeat</div>
+      </div>
     </div>
   );
 }
@@ -464,98 +466,56 @@ export default function OfficePage() {
       {/* Inject keyframes */}
       <style dangerouslySetInnerHTML={{ __html: KEYFRAMES }} />
 
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: 'var(--text-1)' }}>
-            Digital Office
-          </h1>
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <SectionTitle
+            title="Digital Office"
+            subtitle="Agent desks with live work state, activity drill-in, and stale-session correction."
+          />
+          <div className="flex flex-col items-end gap-2 text-xs text-slate-400">
+            <StatusBadge label={loading ? 'syncing' : 'live 10s'} status={loading ? 'info' : 'healthy'} pulse={!loading} />
+            {lastFetch ? <span>{new Date(lastFetch).toLocaleTimeString()}</span> : null}
+          </div>
         </div>
-        <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-3)' }}>
-          <div>{loading ? 'syncing…' : 'live · 10s refresh'}</div>
-          {lastFetch && (
-            <div style={{ opacity: 0.7, marginTop: 4 }}>
-              {new Date(lastFetch).toLocaleTimeString()}
+
+        {/* Floor summary */}
+        {agents.length > 0 && <FloorSummary agents={agents} />}
+
+        {err && (
+          <div className="rounded-[12px] border border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.08)] p-4 text-sm text-[var(--sev-critical)]">
+            <strong>Error loading agent status:</strong> {err}
+            <div className="mt-2 text-xs opacity-80">
+              Make sure the panel container has <code>/agent-data</code> mounted from <code>/root/.openclaw/agents</code>.
+            </div>
+          </div>
+        )}
+
+        {/* Agent grid */}
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+          {agents.map((agent) => (
+            <DeskCard key={agent.id} agent={agent} onOpen={setSelectedAgent} />
+          ))}
+
+          {/* Empty state */}
+          {!loading && agents.length === 0 && !err && (
+            <div className={card + ' col-span-full p-10 text-center text-sm text-slate-400'}>
+              No agents found. Check the <code>/agent-data</code> mount.
             </div>
           )}
         </div>
-      </div>
 
-      {/* Floor summary */}
-      {agents.length > 0 && <FloorSummary agents={agents} />}
+        <AgentActivityDrawer
+          agent={selectedAgent}
+          open={!!selectedAgent}
+          onClose={() => setSelectedAgent(null)}
+        />
 
-      {err && (
-        <div
-          style={{
-            marginTop: 14,
-            padding: '12px 16px',
-            borderRadius: 12,
-            border: '1px solid rgba(255,80,120,0.35)',
-            background: 'rgba(255,40,90,0.08)',
-            color: '#ff7aa8',
-            fontSize: 13,
-          }}
-        >
-          <strong>Error loading agent status:</strong> {err}
-          <div style={{ marginTop: 6, fontSize: 11, opacity: 0.75 }}>
-            Make sure the panel container has <code>/agent-data</code> mounted from{' '}
-            <code>/root/.openclaw/agents</code>. See <code>apps/docker-compose.yml</code>.
-          </div>
+        <div className={card2 + ' flex flex-wrap gap-4 p-3 text-xs text-slate-400'}>
+          <span><span style={{ color: '#33ffcc' }}>Working</span>: active tool call in last 45s</span>
+          <span><span style={{ color: '#ffd060' }}>Idle</span>: last activity 45s-20m ago</span>
+          <span><span style={{ color: '#667799' }}>Offline</span>: no activity in 20m+</span>
+          <span className="ml-auto">Source: session data</span>
         </div>
-      )}
-
-      {/* Agent grid */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-          gap: 16,
-          marginTop: 18,
-        }}
-      >
-        {agents.map((agent) => (
-          <DeskCard key={agent.id} agent={agent} onOpen={setSelectedAgent} />
-        ))}
-
-        {/* Empty state */}
-        {!loading && agents.length === 0 && !err && (
-          <div style={{ gridColumn: '1 / -1', textAlign: 'center', opacity: 0.5, padding: 40 }}>
-            No agents found. Check the <code>/agent-data</code> mount.
-          </div>
-        )}
-      </div>
-
-      <AgentActivityDrawer
-        agent={selectedAgent}
-        open={!!selectedAgent}
-        onClose={() => setSelectedAgent(null)}
-      />
-
-      {/* Legend */}
-      <div
-        style={{
-          marginTop: 32,
-          padding: '10px 16px',
-          borderRadius: 10,
-          border: '1px solid var(--border)',
-          background: 'rgba(0,0,0,0.2)',
-          fontSize: 11,
-          color: 'var(--text-3)',
-          display: 'flex',
-          gap: 20,
-          flexWrap: 'wrap',
-        }}
-      >
-        <span>
-          <span style={{ color: '#33ffcc' }}>● Working</span> — active toolCall in last 45 s
-        </span>
-        <span>
-          <span style={{ color: '#ffd060' }}>● Idle</span> — last activity 45 s–20 min ago
-        </span>
-        <span>
-          <span style={{ color: '#667799' }}>● Offline</span> — no activity in 20+ min
-        </span>
-        <span style={{ marginLeft: 'auto' }}>Source: session data</span>
       </div>
     </AppShell>
   );

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AppShell, SectionTitle, card, muted } from '../../components/ops-ui';
+import { AppShell, SectionTitle, StatusBadge as OpsStatusBadge, card, card2, muted } from '../../components/ops-ui';
 
 interface Agent {
   id: string;
@@ -82,20 +82,26 @@ export default function TeamsPage() {
   const working = agents.filter((a) => (a.status ?? '').toLowerCase() === 'working');
   const idle = agents.filter((a) => (a.status ?? '').toLowerCase() === 'idle');
   const offline = agents.filter((a) => (a.status ?? '').toLowerCase() === 'offline');
+  const stale = agents.filter((a) => isStale(a.lastSeen));
+  const liveRatio = agents.length ? Math.round((working.length / agents.length) * 100) : 0;
+  const priority = working[0]?.currentTask
+    ? `${working[0].label ?? working[0].id}: ${working[0].currentTask}`
+    : stale.length
+      ? `${stale.length} inactive agent${stale.length === 1 ? '' : 's'} need review`
+      : idle.length
+        ? `${idle.length} idle agent${idle.length === 1 ? '' : 's'} available`
+        : 'No active operators';
 
   return (
     <AppShell>
       <div className="space-y-8">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <SectionTitle
-            title="Agent Crew"
-            subtitle="Live status of every agent — updates every 15 seconds"
+            title="Team Command"
+            subtitle="Live operator roster, current work, and stale-session review queue."
           />
-          <Link href="/office" style={{
-            textDecoration: 'none', fontSize: 13, fontWeight: 600,
-            color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 5,
-          }}>
-            Live Office →
+          <Link href="/office" className="rounded-[10px] border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-[var(--accent)] transition hover:border-[rgba(103,213,255,0.35)] hover:bg-[rgba(103,213,255,0.08)]">
+            Live Office
           </Link>
         </div>
 
@@ -111,28 +117,30 @@ export default function TeamsPage() {
           </div>
         ) : (
           <>
-            {/* Summary row */}
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <div style={{
-                padding: '8px 16px', borderRadius: 10,
-                background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.22)',
-                fontSize: 13, fontWeight: 600, color: 'var(--sev-healthy)',
-              }}>
-                {working.length} Working
+            <div className="grid gap-3 lg:grid-cols-[1.2fr_0.9fr_0.9fr]">
+              <div className={card2 + ' p-4'}>
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Current Focus</div>
+                <div className="mt-2 line-clamp-2 text-[15px] font-semibold leading-6 text-slate-100">{priority}</div>
+                <div className={muted + ' mt-2'}>Refresh cadence: 15 seconds</div>
               </div>
-              <div style={{
-                padding: '8px 16px', borderRadius: 10,
-                background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.20)',
-                fontSize: 13, fontWeight: 600, color: 'var(--sev-warning)',
-              }}>
-                {idle.length} Idle
+              <div className={card2 + ' p-4'}>
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Live Load</div>
+                <div className="mt-2 flex items-end gap-2">
+                  <div className="text-3xl font-bold text-slate-100">{liveRatio}%</div>
+                  <div className="pb-1 text-xs text-slate-400">{working.length}/{agents.length} working</div>
+                </div>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                  <div className="h-full rounded-full bg-[var(--sev-healthy)]" style={{ width: `${liveRatio}%` }} />
+                </div>
               </div>
-              <div style={{
-                padding: '8px 16px', borderRadius: 10,
-                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.10)',
-                fontSize: 13, fontWeight: 600, color: 'var(--text-3)',
-              }}>
-                {offline.length} Offline
+              <div className={card2 + ' p-4'}>
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Roster State</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <OpsStatusBadge label={`${working.length} working`} status="healthy" pulse={working.length > 0} />
+                  <OpsStatusBadge label={`${idle.length} idle`} status="warning" />
+                  <OpsStatusBadge label={`${offline.length} offline`} status="neutral" />
+                </div>
+                {stale.length > 0 ? <div className="mt-3 text-xs text-[var(--sev-warning)]">{stale.length} inactive beyond 7 days</div> : null}
               </div>
             </div>
 

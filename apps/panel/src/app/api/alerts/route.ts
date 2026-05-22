@@ -11,6 +11,10 @@ export async function GET(req: Request) {
     const j = await res.json();
     return NextResponse.json(j);
   } catch (e: any) {
-    return new NextResponse(String(e?.message || e), { status: 500 });
+    return NextResponse.json({
+      status: 'unavailable',
+      error: String(e?.message || e),
+      data: { alerts: [] },
+    });
   }
 }

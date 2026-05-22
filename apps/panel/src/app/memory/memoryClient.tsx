@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AppShell } from '../../components/ops-ui';
+import { AppShell, SectionTitle, StatusBadge, card, card2, muted } from '../../components/ops-ui';
 
 type DocMeta = {
   id: string;
@@ -75,137 +75,122 @@ export default function MemoryClient() {
     return docs;
   }, [docs, hits]);
 
+  const dailyCount = docs.filter((d) => d.kind === 'DAILY').length;
+  const memoryCount = docs.filter((d) => d.kind === 'MEMORY').length;
+  const latestDoc = docs[0];
+  const activeLines = active?.content.split('\n').filter(Boolean).length ?? 0;
+
   return (
     <AppShell>
-      <h1 style={{ margin: '0 0 8px', fontSize: 26, fontWeight: 700, color: 'var(--text-1)' }}>
-        Memory
-      </h1>
-      <p style={{ marginTop: 0, marginBottom: 14, color: 'var(--text-3)', maxWidth: 980, lineHeight: 1.6 }}>
-        Browse and search Bazza&rsquo;s long-term memory and daily logs. Click a document to view it.
-      </p>
-
-      <div
-        style={{
-          marginTop: 14,
-          display: 'flex',
-          gap: 10,
-          flexWrap: 'wrap',
-          alignItems: 'center',
-        }}
-      >
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search memories…"
-          style={{
-            flex: 1,
-            minWidth: 260,
-            padding: '10px 12px',
-            borderRadius: 12,
-            border: '1px solid rgba(124,232,255,0.18)',
-            background: 'rgba(0,0,0,0.25)',
-            color: '#d6f6ff',
-            outline: 'none',
-            fontWeight: 700,
-          }}
-        />
-        <button
-          onClick={() => {
-            setQ('');
-            setHits(null);
-          }}
-          style={{
-            padding: '10px 12px',
-            borderRadius: 12,
-            border: '1px solid rgba(124,232,255,0.18)',
-            background: 'rgba(0,0,0,0.18)',
-            color: '#9fefff',
-            fontWeight: 900,
-            cursor: 'pointer',
-          }}
-        >
-          Clear
-        </button>
-      </div>
-
-      {err ? (
-        <div style={{ marginTop: 12, color: '#ff8fb1', fontWeight: 800 }}>{err}</div>
-      ) : null}
-
-      <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 14, marginTop: 14 }}>
-        <div
-          style={{
-            border: '1px solid rgba(124,232,255,0.16)',
-            borderRadius: 16,
-            background: 'rgba(0,0,0,0.22)',
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ padding: 12, borderBottom: '1px solid rgba(124,232,255,0.12)', color: '#9fefff', fontWeight: 900 }}>
-            Documents ({list.length})
-          </div>
-          <div style={{ maxHeight: '65vh', overflow: 'auto' }}>
-            {list.map((d) => (
-              <button
-                key={d.id}
-                onClick={() => loadDoc(d.id).catch((e) => setErr(String(e?.message || e)))}
-                style={{
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: 12,
-                  border: 'none',
-                  borderTop: '1px solid rgba(124,232,255,0.10)',
-                  background: active?.id === d.id ? 'rgba(0,200,255,0.12)' : 'transparent',
-                  color: '#d6f6ff',
-                  cursor: 'pointer',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                  <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>{d.title}</div>
-                  <span style={{ fontSize: 12, color: '#9fefff', opacity: 0.8 }}>{d.kind}</span>
-                </div>
-                <div style={{ marginTop: 6, fontSize: 12, color: '#9fefff', opacity: 0.8 }}>
-                  Updated {fmt(d.updatedAt)}
-                </div>
-                {'snippet' in d ? (
-                  <div style={{ marginTop: 8, fontSize: 12, color: '#9fefff', opacity: 0.9, lineHeight: 1.5 }}>
-                    {(d as any).snippet}
-                  </div>
-                ) : null}
-              </button>
-            ))}
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <SectionTitle
+            title="Memory"
+            subtitle="Long-term context and daily logs, surfaced as a reviewable operational archive."
+          />
+          <div className="flex flex-wrap gap-2">
+            <StatusBadge label={`${memoryCount} curated`} status="info" />
+            <StatusBadge label={`${dailyCount} daily logs`} status="neutral" />
           </div>
         </div>
 
-        <div
-          style={{
-            border: '1px solid rgba(124,232,255,0.16)',
-            borderRadius: 16,
-            background: 'rgba(0,0,0,0.22)',
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ padding: 12, borderBottom: '1px solid rgba(124,232,255,0.12)', color: '#9fefff', fontWeight: 900 }}>
-            {active ? active.title : 'Select a document'}
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className={card2 + ' p-4'}>
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Archive</div>
+            <div className="mt-2 text-2xl font-bold text-slate-100">{docs.length}</div>
+            <div className={muted}>Indexed documents available</div>
           </div>
-          <div style={{ padding: 14, maxHeight: '65vh', overflow: 'auto' }}>
-            {active ? (
-              <article
-                style={{
-                  whiteSpace: 'pre-wrap',
-                  lineHeight: 1.65,
-                  color: '#d6f6ff',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                  fontSize: 13,
-                }}
-              >
-                {active.content}
-              </article>
-            ) : (
-              <div style={{ color: '#9fefff', opacity: 0.9, lineHeight: 1.6 }}>
-                Tip: search for things like <code style={{ color: '#d6f6ff' }}>AssetX</code>, <code style={{ color: '#d6f6ff' }}>Stripe</code>, <code style={{ color: '#d6f6ff' }}>demo@</code>, or a date.
+          <div className={card2 + ' p-4'}>
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Latest Write</div>
+            <div className="mt-2 truncate text-[15px] font-semibold text-slate-100">{latestDoc?.title ?? 'No memory files'}</div>
+            <div className={muted}>{latestDoc ? fmt(latestDoc.updatedAt) : 'Waiting for data'}</div>
+          </div>
+          <div className={card2 + ' p-4'}>
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Selection</div>
+            <div className="mt-2 truncate text-[15px] font-semibold text-slate-100">{active?.title ?? 'No document selected'}</div>
+            <div className={muted}>{active ? `${activeLines} populated lines` : 'Choose from the archive stream'}</div>
+          </div>
+        </div>
+
+        <div className={card + ' p-3'}>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search memory, decisions, projects, dates"
+              className="min-h-[38px] min-w-[240px] flex-1 rounded-[10px] border border-white/10 bg-black/20 px-3 text-sm font-semibold text-slate-100 outline-none transition focus:border-[rgba(103,213,255,0.42)]"
+            />
+            <button
+              onClick={() => {
+                setQ('');
+                setHits(null);
+              }}
+              className="min-h-[38px] rounded-[10px] border border-white/10 bg-white/5 px-3 text-xs font-bold text-slate-200 transition hover:border-[rgba(103,213,255,0.35)] hover:bg-[rgba(103,213,255,0.08)]"
+              type="button"
+            >
+              Clear
+            </button>
+          </div>
+          {hits ? (
+            <div className="mt-2 text-xs text-slate-400">{hits.length} search result{hits.length === 1 ? '' : 's'} for &ldquo;{q.trim()}&rdquo;</div>
+          ) : null}
+        </div>
+
+        {err ? (
+          <div className="rounded-[12px] border border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.08)] p-3 text-sm font-semibold text-[var(--sev-critical)]">{err}</div>
+        ) : null}
+
+        <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
+          <div className={card + ' overflow-hidden'}>
+            <div className="border-b border-white/10 px-4 py-3">
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Document Stream</div>
+              <div className="mt-1 text-sm font-semibold text-slate-100">{list.length} visible</div>
+            </div>
+            <div className="max-h-[66vh] overflow-auto">
+              {list.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => loadDoc(d.id).catch((e) => setErr(String(e?.message || e)))}
+                  className="block w-full border-t border-white/10 px-4 py-3 text-left transition hover:bg-white/[0.035]"
+                  style={{ background: active?.id === d.id ? 'rgba(103,213,255,0.10)' : undefined }}
+                  type="button"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-bold text-slate-100">{d.title}</div>
+                      <div className="mt-1 text-xs text-slate-400">Updated {fmt(d.updatedAt)}</div>
+                    </div>
+                    <StatusBadge label={d.kind} status={d.kind === 'MEMORY' ? 'info' : 'neutral'} />
+                  </div>
+                  {'snippet' in d ? (
+                    <div className="mt-2 line-clamp-3 text-xs leading-5 text-slate-300">
+                      {(d as any).snippet}
+                    </div>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className={card + ' overflow-hidden'}>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Memory Pane</div>
+                <div className="mt-1 text-sm font-semibold text-slate-100">{active ? active.title : 'Select a document'}</div>
               </div>
-            )}
+              {active ? <StatusBadge label={active.kind} status={active.kind === 'MEMORY' ? 'info' : 'neutral'} /> : null}
+            </div>
+            <div className="max-h-[66vh] overflow-auto p-4">
+              {active ? (
+                <article className="whitespace-pre-wrap font-mono text-[13px] leading-7 text-slate-200">
+                  {active.content}
+                </article>
+              ) : (
+                <div className="rounded-[12px] border border-dashed border-white/10 bg-white/[0.025] p-5 text-sm leading-6 text-slate-400">
+                  Select a memory file to inspect its raw context. Search narrows the archive without changing the underlying files.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

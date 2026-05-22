@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+PROD_HOST="${PROD_HOST:-root@100.95.166.47}"
+PROD_PORT="${PROD_PORT:-2222}"
+PROD_KEY="${PROD_KEY:-/root/.ssh/prod_deploy_v3}"
+PROD_DIR="${PROD_DIR:-/var/www/mission-control}"
+
+SSH_OPTS=(
+  -i "$PROD_KEY"
+  -p "$PROD_PORT"
+  -o BatchMode=yes
+  -o StrictHostKeyChecking=no
+)
+
+RSYNC_EXCLUDES=(
+  --exclude .git
+  --exclude node_modules
+  --exclude .next
+  --exclude .env
+  --exclude '*.env'
+  --exclude tsconfig.tsbuildinfo
+  --exclude runtime
+  --exclude agent-status.json
+  --exclude iperf-results.json
+  --exclude network-history.db
+  --exclude network-history.db-journal
+  --exclude security-data.json
+)
+
+echo "Building panel locally..."
+(cd "$ROOT/apps/panel" && npm run build)
+
+echo "Syncing source to $PROD_HOST:$PROD_DIR..."
+rsync -az --delete "${RSYNC_EXCLUDES[@]}" \
+  -e "ssh ${SSH_OPTS[*]}" \
+  "$ROOT/" "$PROD_HOST:$PROD_DIR/"
+
+echo "Rebuilding production container..."
+ssh "${SSH_OPTS[@]}" "$PROD_HOST" \
+  "cd '$PROD_DIR/apps' && docker-compose build panel && docker-compose up -d panel"
+
+echo "Verifying production markers..."
+ssh "${SSH_OPTS[@]}" "$PROD_HOST" '
+  set -euo pipefail
+  set -a
+  . /etc/infisical/generated/mission-control.runtime.env
+  set +a
+  html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)"
+  printf "%s" "$html" | grep -q "Unified Activity"
+  printf "%s" "$html" | grep -q "Runbook"
+  curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null
+'
+
+echo "Production deploy verified."

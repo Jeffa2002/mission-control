@@ -7,3 +7,5 @@ dist/
 node_modules/
 runtime/
 tmp_*.js
+security-data.json
+network-history.db-journal

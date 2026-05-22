@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useEffect, useState, createContext, useContext, useCallback } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState, createContext, useContext, useCallback, useMemo } from 'react';
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +34,102 @@ export function sevPill(sev: string) {
   return cn(pill, map[sev] ?? map.neutral);
 }
 
+type UiStatus = 'healthy' | 'warning' | 'critical' | 'info' | 'neutral';
+
+const STATUS_META: Record<UiStatus, { color: string; bg: string; border: string }> = {
+  healthy: { color: 'var(--sev-healthy)', bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.28)' },
+  warning: { color: 'var(--sev-warning)', bg: 'rgba(245,158,11,0.09)', border: 'rgba(245,158,11,0.30)' },
+  critical: { color: 'var(--sev-critical)', bg: 'rgba(239,68,68,0.09)', border: 'rgba(239,68,68,0.30)' },
+  info: { color: 'var(--sev-info)', bg: 'rgba(34,211,238,0.08)', border: 'rgba(34,211,238,0.26)' },
+  neutral: { color: 'var(--text-3)', bg: 'rgba(255,255,255,0.04)', border: 'rgba(255,255,255,0.10)' },
+};
+
+export function StatusBadge({
+  label,
+  status = 'neutral',
+  pulse = false,
+}: {
+  label: string;
+  status?: UiStatus;
+  pulse?: boolean;
+}) {
+  const meta = STATUS_META[status];
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '3px 9px',
+        borderRadius: 999,
+        border: `1px solid ${meta.border}`,
+        background: meta.bg,
+        color: meta.color,
+        fontSize: 11,
+        fontWeight: 700,
+        lineHeight: 1.25,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span
+        className={pulse ? 'mc-status-pulse' : undefined}
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: meta.color,
+          boxShadow: status === 'neutral' ? undefined : `0 0 8px ${meta.color}`,
+          display: 'inline-block',
+        }}
+      />
+      {label}
+    </span>
+  );
+}
+
+export function ToolbarButton({
+  children,
+  onClick,
+  disabled = false,
+  title,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      className="mc-toolbar-button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      type="button"
+    >
+      {children}
+    </button>
+  );
+}
+
+export function InspectorPanel({
+  title,
+  eyebrow,
+  children,
+}: {
+  title: string;
+  eyebrow?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <aside className={cn(card2, 'p-4')}>
+      {eyebrow ? <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">{eyebrow}</div> : null}
+      <div className="mb-3 text-[14px] font-semibold text-slate-100">{title}</div>
+      {children}
+    </aside>
+  );
+}
+
 // ─── Routes (single source of truth) ─────────────────────────────────────────
 
 export type RouteGroup = 'MONITOR' | 'OPS';
@@ -49,13 +145,16 @@ export interface Route {
 export const ROUTES: Route[] = [
   // MONITOR group
   { href: '/', label: 'Overview', icon: 'overview', group: 'MONITOR' },
+  { href: '/activity', label: 'Activity', icon: 'activity', group: 'MONITOR' },
   { href: '/apps', label: 'App Health', icon: 'agents', group: 'MONITOR' },
   { href: '/systems', label: 'Systems', icon: 'systems', group: 'MONITOR' },
   { href: '/network', label: 'Network', icon: 'network', group: 'MONITOR' },
   { href: '/security', label: 'Security', icon: 'security', group: 'MONITOR' },
   // OPS group
+  { href: '/incidents', label: 'Incidents', icon: 'incidents', group: 'OPS' },
   { href: '/office', label: 'Office', icon: 'office', group: 'OPS' },
   { href: '/teams', label: 'Team', icon: 'teams', group: 'OPS' },
+  { href: '/memory', label: 'Memory', icon: 'memory', group: 'OPS' },
   { href: '/deploys', label: 'Deploys', icon: 'agents', group: 'OPS' },
   { href: '/actions', label: 'Audit Log', icon: 'audit', group: 'OPS' },
 ];
@@ -147,6 +246,7 @@ function NavIcon({ name, active }: { name: string; active: boolean }) {
         </svg>
       );
     case 'audit':
+    case 'activity':
       return (
         <svg {...props}>
           <rect x="2" y="1.5" width="12" height="13" rx="1.5" stroke={col} strokeWidth="1.4" />
@@ -215,6 +315,7 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
 
   return (
     <aside
+      className="mc-sidebar"
       style={{
         width: 260,
         minHeight: '100vh',
@@ -497,6 +598,137 @@ function ServerDot({ label, ok }: { label: string; ok: boolean }) {
   );
 }
 
+function CommandPalette({ open, onOpenChange, onRefresh }: { open: boolean; onOpenChange: (open: boolean) => void; onRefresh: () => void }) {
+  const router = useRouter();
+  const [query, setQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [runbookBusy, setRunbookBusy] = useState<string | null>(null);
+
+  const commands = useMemo(() => {
+    const routeCommands = ROUTES.map((route) => ({
+      id: `route:${route.href}`,
+      label: route.label,
+      detail: `Open ${route.group.toLowerCase()} surface`,
+      group: route.group,
+      href: route.href,
+      kind: 'nav' as const,
+    }));
+
+    return [
+      ...routeCommands,
+      { id: 'action:refresh', label: 'Refresh telemetry', detail: 'Pull fresh shell health state', group: 'ACTION', kind: 'refresh' as const },
+      { id: 'runbook:open-incident', label: 'Open incident runbook', detail: 'Stage an incident response intent in audit', group: 'RUNBOOK', kind: 'runbook' as const, action: 'open_incident' },
+      { id: 'runbook:capture-diagnostics', label: 'Capture diagnostics', detail: 'Record diagnostics capture intent in audit', group: 'RUNBOOK', kind: 'runbook' as const, action: 'capture_diagnostics' },
+      { id: 'runbook:notify-team', label: 'Notify team', detail: 'Stage a team notification intent in audit', group: 'RUNBOOK', kind: 'runbook' as const, action: 'notify_team' },
+      { id: 'runbook:review-audit', label: 'Review audit trail', detail: 'Jump to audit log and record review intent', group: 'RUNBOOK', kind: 'runbook' as const, action: 'review_audit_trail', href: '/actions' },
+    ];
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return commands;
+    return commands.filter((command) => `${command.label} ${command.detail} ${command.group}`.toLowerCase().includes(q));
+  }, [commands, query]);
+
+  useEffect(() => {
+    if (activeIndex >= filtered.length) setActiveIndex(0);
+  }, [activeIndex, filtered.length]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuery('');
+      setActiveIndex(0);
+    }
+  }, [open]);
+
+  async function execute(command = filtered[activeIndex]) {
+    if (!command) return;
+    if (command.kind === 'nav') {
+      router.push(command.href);
+      onOpenChange(false);
+      return;
+    }
+    if (command.kind === 'refresh') {
+      onRefresh();
+      onOpenChange(false);
+      return;
+    }
+    if (command.kind === 'runbook') {
+      setRunbookBusy(command.action);
+      try {
+        await fetch('/api/runbook-actions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: command.action, source: 'command_palette' }),
+        });
+      } finally {
+        setRunbookBusy(null);
+        if (command.href) router.push(command.href);
+        onOpenChange(false);
+      }
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="mc-command-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onOpenChange(false);
+      }}
+    >
+      <div className="mc-command-palette">
+        <div className="mc-command-input-row">
+          <span className="mc-command-mark">⌘K</span>
+          <input
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') onOpenChange(false);
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setActiveIndex((i) => Math.min(i + 1, Math.max(filtered.length - 1, 0)));
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setActiveIndex((i) => Math.max(i - 1, 0));
+              }
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                execute();
+              }
+            }}
+            placeholder="Search surfaces, telemetry, runbooks..."
+          />
+        </div>
+        <div className="mc-command-results">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-[13px] text-slate-500">No matching command</div>
+          ) : filtered.map((command, index) => (
+            <button
+              key={command.id}
+              type="button"
+              className="mc-command-item"
+              data-active={index === activeIndex ? 'true' : 'false'}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => execute(command)}
+            >
+              <span className="mc-command-dot" />
+              <span style={{ minWidth: 0 }}>
+                <span className="mc-command-label">{command.label}</span>
+                <span className="mc-command-detail">{runbookBusy === (command as any).action ? 'Recording intent...' : command.detail}</span>
+              </span>
+              <span className="mc-command-group">{command.group}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Header ───────────────────────────────────────────────────────────────────
 
 function Header({
@@ -523,6 +755,7 @@ function Header({
 
   return (
     <header
+      className="mc-header"
       style={{
         position: 'sticky',
         top: 0,
@@ -535,6 +768,7 @@ function Header({
     >
       {/* Dynamic status bar */}
       <div
+        className="mc-header-content"
         style={{
           height: 2,
           background: css.bar,
@@ -545,6 +779,7 @@ function Header({
 
       {/* Header content */}
       <div
+        className="mc-app-shell"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -682,6 +917,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [lastUpdated, setLastUpdated] = useState('');
   const [currentTime, setCurrentTime] = useState('');
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const loadHealth = useCallback(async () => {
     try {
@@ -715,6 +951,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      } else if (!typing && event.key === '/') {
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const contextValue: AppShellContextValue = {
     health,
     refresh: loadHealth,
@@ -732,17 +985,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }}
       >
         <Sidebar path={path} health={health} />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="mc-content-shell" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <Header
             path={path}
             health={health}
             lastUpdated={currentTime || lastUpdated}
             onRefresh={loadHealth}
           />
-          <main style={{ flex: 1, padding: '24px 28px' }}>
+          <main className="mc-main" style={{ flex: 1, padding: '24px 28px' }}>
             {children}
           </main>
         </div>
+        <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onRefresh={loadHealth} />
       </div>
     </AppShellContext.Provider>
   );

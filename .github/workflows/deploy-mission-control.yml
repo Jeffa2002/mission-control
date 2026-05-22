@@ -1,0 +1,82 @@
+name: Deploy Mission Control
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: mission-control-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy panel
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Connect to Tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/panel/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/panel
+        run: npm ci --legacy-peer-deps
+
+      - name: Build panel
+        working-directory: apps/panel
+        run: npm run build
+
+      - name: Install SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/prod_deploy
+          chmod 600 ~/.ssh/prod_deploy
+          ssh-keyscan -p 2222 100.95.166.47 >> ~/.ssh/known_hosts
+
+      - name: Sync source to prod
+        run: |
+          rsync -az --delete \
+            --exclude .git \
+            --exclude node_modules \
+            --exclude .next \
+            --exclude .env \
+            --exclude '*.env' \
+            --exclude tsconfig.tsbuildinfo \
+            --exclude runtime \
+            --exclude agent-status.json \
+            --exclude iperf-results.json \
+            --exclude network-history.db \
+            --exclude network-history.db-journal \
+            --exclude security-data.json \
+            -e "ssh -i ~/.ssh/prod_deploy -p 2222" \
+            ./ root@100.95.166.47:/var/www/mission-control/
+
+      - name: Rebuild and restart prod
+        run: |
+          ssh -i ~/.ssh/prod_deploy -p 2222 root@100.95.166.47 \
+            'cd /var/www/mission-control/apps && docker-compose build panel && docker-compose up -d panel'
+
+      - name: Verify prod
+        run: |
+          ssh -i ~/.ssh/prod_deploy -p 2222 root@100.95.166.47 '
+            set -euo pipefail
+            set -a
+            . /etc/infisical/generated/mission-control.runtime.env
+            set +a
+            html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)"
+            printf "%s" "$html" | grep -q "Unified Activity"
+            printf "%s" "$html" | grep -q "Runbook"
+            curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null
+          '

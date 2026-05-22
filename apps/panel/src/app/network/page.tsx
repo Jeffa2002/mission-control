@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { AppShell, SectionTitle, card } from '../../components/ops-ui';
+import { AppShell, SectionTitle, StatusBadge, card } from '../../components/ops-ui';
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
 interface NodeData {
@@ -500,31 +500,27 @@ export default function NetworkPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="mc-network-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
           <div>
             <div style={{ fontSize: 20, fontWeight: 800, color: '#F1F5F9', letterSpacing: -0.5 }}>
-              🌐 Network Operations Centre
+              Network Operations Centre
             </div>
             <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>
               Tailscale mesh · {totalNodes} nodes · auto-refresh 15s
               {lastUpdated && <span style={{ color: '#64748B', marginLeft: 12 }}>last ping: {lastUpdated}</span>}{data?.stale && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 11 }}>↻ refreshing…</span>}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', fontSize: 12, fontWeight: 700, color: '#10B981' }}>
-              {loading ? '…/…' : `${onlineCount}/${totalNodes}`} ONLINE
-            </div>
-            <div style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(124,232,255,0.08)', border: '1px solid rgba(124,232,255,0.2)', fontSize: 12, fontWeight: 700, color: '#7ce8ff' }}>
-              AVG {avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'}
-            </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            <StatusBadge label={loading ? 'Pinging' : `${onlineCount}/${totalNodes} online`} status={onlineCount === totalNodes ? 'healthy' : 'warning'} pulse={loading} />
+            <StatusBadge label={`Avg ${avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'}`} status="info" />
           </div>
         </div>
 
         {/* Main grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
+        <div className="mc-network-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 16 }}>
 
           {/* Topology canvas */}
-          <div style={{ borderRadius: 14, border: '1px solid rgba(124,232,255,0.12)', background: '#090d1a', padding: 8, position: 'relative', minHeight: 380 }}>
+          <div className="mc-network-canvas" style={{ borderRadius: 14, border: '1px solid rgba(124,232,255,0.12)', background: '#090d1a', padding: 8, position: 'relative', minHeight: 380 }}>
             {/* Scanline overlay */}
             <div style={{
               position: 'absolute', inset: 0, borderRadius: 14, pointerEvents: 'none',
@@ -611,11 +607,34 @@ export default function NetworkPage() {
           </div>
 
           {/* Right panel */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="mc-network-rail" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
             {/* Detail panel — node or link */}
-            {(selectedNodeData || selectedLinkData) && (
-              <div style={{ borderRadius: 14, border: '1px solid rgba(124,232,255,0.2)', background: '#0d1424', padding: 16 }}>
+            <div style={{ borderRadius: 14, border: '1px solid rgba(124,232,255,0.2)', background: '#0d1424', padding: 16 }}>
+              {!selectedNodeData && !selectedLinkData && (
+                <>
+                  <div style={{ fontSize: 10, color: '#7ce8ff', textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: 8, fontWeight: 800 }}>Inspector</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#F1F5F9', marginBottom: 8 }}>Mesh overview</div>
+                  <div style={{ fontSize: 12, lineHeight: 1.6, color: '#94A3B8' }}>
+                    Select a node or link to inspect address, role, latency, throughput, and packet loss.
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 14 }}>
+                    {[
+                      ['Nodes', String(totalNodes)],
+                      ['Online', String(onlineCount)],
+                      ['Links', String(data?.links.length ?? 0)],
+                      ['Avg RTT', avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'],
+                    ].map(([k, v]) => (
+                      <div key={k} style={{ padding: '8px 6px', borderRadius: 9, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', textAlign: 'center' }}>
+                        <div style={{ fontSize: 10, color: '#475569' }}>{k}</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: '#7ce8ff', marginTop: 2 }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              {(selectedNodeData || selectedLinkData) && (
+                <>
                 {selectedNodeData && (
                   <>
                     <div style={{ fontSize: 16, fontWeight: 800, color: '#F1F5F9', marginBottom: 10 }}>
@@ -707,8 +726,9 @@ export default function NetworkPage() {
                         </div>
                       </div>
                     )}
-              </div>
-            )}
+                </>
+              )}
+            </div>
 
             {/* Node list */}
             <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: '#0d1424', padding: 14 }}>

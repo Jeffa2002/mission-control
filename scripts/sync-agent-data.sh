@@ -5,12 +5,14 @@
 set -euo pipefail
 
 AGENTS_DIR="/root/.openclaw/agents"
-PROD_HOST="root@203.57.50.240"
+PROD_HOST="root@100.95.166.47"
 PROD_PORT="2222"
 PROD_KEY="/root/.ssh/prod_deploy_v3"
 PROD_AGENT_DATA="/root/.openclaw/agents"
 STATUS_FILE="/tmp/agent-status.json"
 WORKSPACE_STATUS="/root/.openclaw/workspace/agent-status.json"
+MISSION_STATUS="/root/.openclaw/workspace/mission-control/agent-status.json"
+MISSION_SECURITY="/root/.openclaw/workspace/mission-control/security-data.json"
 
 # ── 1. Build agent-status.json from local agents dir ──────────────────────────
 python3 - <<'PYEOF'
@@ -105,6 +107,9 @@ with open("/tmp/agent-status.json", "w") as f:
 print(f"Generated status for {len(agents)} agents")
 PYEOF
 
+cp "$STATUS_FILE" "$WORKSPACE_STATUS"
+cp "$STATUS_FILE" "$MISSION_STATUS"
+
 # ── 2. Rsync session files to prod (fast incremental, skip deleted/reset) ─────
 rsync -az --delete \
     -e "ssh -i $PROD_KEY -p $PROD_PORT -o StrictHostKeyChecking=no" \
@@ -135,8 +140,8 @@ import subprocess, sqlite3, time
 from datetime import datetime, timezone
 
 NODES = {
-    "prod":        "203.57.50.240",
-    "crm8":        "103.230.159.104",
+    "prod":        "100.95.166.47",
+    "crm8":        "100.112.179.70",
     "shazza":      "100.113.217.81",
     "backup-melb": "43.229.63.19",
     "bazza":       "127.0.0.1",
@@ -155,8 +160,9 @@ def ping(ip):
         return None
 
 ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-con = sqlite3.connect("/root/.openclaw/workspace/mission-control/network-history.db")
+con = sqlite3.connect("/root/.openclaw/workspace/mission-control/network-history.db", timeout=30)
 cur = con.cursor()
+cur.execute("PRAGMA busy_timeout=30000")
 rows = 0
 for node_id, ip in NODES.items():
     ms = ping(ip)
@@ -182,7 +188,7 @@ import subprocess, json, re
 from datetime import datetime, timezone
 
 SSH = ["ssh", "-i", "/root/.ssh/prod_deploy_v3", "-p", "2222",
-       "-o", "StrictHostKeyChecking=no", "root@203.57.50.240"]
+       "-o", "StrictHostKeyChecking=no", "root@100.95.166.47"]
 
 def run(cmd):
     try:
@@ -242,6 +248,7 @@ SECEOF
 
 # Sync security data to prod
 if [ -f "/tmp/security-data.json" ]; then
+  cp /tmp/security-data.json "$MISSION_SECURITY"
   scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
       /tmp/security-data.json \
       "${PROD_HOST}:${PROD_AGENT_DATA}/security-data.json" 2>/dev/null
