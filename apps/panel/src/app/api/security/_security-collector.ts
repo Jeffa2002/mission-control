@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFirstExisting, safeExec } from './_security-logs';
+import { escapeShell, readFirstExisting, safeExec } from './_security-logs';
 import { SYSTEM_REGISTRY } from '../_system-health';
 
 type SecurityHostKind = 'local' | 'ssh';
@@ -118,7 +118,7 @@ function runHostCommand(host: SecurityHostConfig, command: string): string {
     '-p', host.port || '22',
   ];
   if (host.key) args.push('-i', host.key);
-  args.push(`${host.user || 'root'}@${host.host}`, 'bash', '-lc', command);
+  args.push(`${host.user || 'root'}@${host.host}`, `bash -lc ${escapeShell(command)}`);
 
   try {
     return execFileSync('ssh', args, { encoding: 'utf8', timeout: 12_000, stdio: ['ignore', 'pipe', 'pipe'] });
