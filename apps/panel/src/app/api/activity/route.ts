@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { readFile } from 'node:fs/promises';
 import { requireSessionAuth } from '../_session-auth';
 import { readAuditLog } from '../_util';
+import { readDeployFeed } from '../_deploys';
+import { readFile } from 'node:fs/promises';
 
 type ActivitySeverity = 'healthy' | 'warning' | 'critical' | 'info' | 'neutral';
 
@@ -23,8 +24,6 @@ const AGENT_PATHS = [
   '/var/www/mission-control/agent-status.json',
   '/app/agent-status.json',
 ];
-
-const DEPLOY_LOG = process.env.DEPLOY_LOG_FILE ?? '/agent-data/deploy-log.json';
 
 async function readJsonFile<T>(paths: string[] | string, fallback: T): Promise<T> {
   const list = Array.isArray(paths) ? paths : [paths];
@@ -57,9 +56,9 @@ export async function GET(req: Request) {
   const limit = Math.min(120, Math.max(1, Number(url.searchParams.get('limit') || '60')));
   const now = new Date().toISOString();
 
-  const [auditItems, deploys, agentData] = await Promise.all([
+  const [auditItems, deployFeed, agentData] = await Promise.all([
     readAuditLog(80).catch(() => []),
-    readJsonFile<any[]>(DEPLOY_LOG, []),
+    readDeployFeed(),
     readJsonFile<{ agents?: any[] }>(AGENT_PATHS, { agents: [] }),
   ]);
 
@@ -78,7 +77,7 @@ export async function GET(req: Request) {
     });
   }
 
-  for (const deploy of deploys.slice(0, 25)) {
+  for (const deploy of deployFeed.deploys.slice(0, 25)) {
     const status = String(deploy.status ?? 'running');
     items.push({
       id: `deploy:${deploy.id ?? deploy.startedAt}`,

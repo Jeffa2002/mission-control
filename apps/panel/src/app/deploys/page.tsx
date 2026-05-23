@@ -15,6 +15,7 @@ interface Deploy {
   startedAt: string;
   finishedAt?: string;
   durationS?: number;
+  runUrl?: string;
 }
 
 function statusColor(s: Deploy['status']) {
@@ -43,6 +44,8 @@ export default function DeploysPage() {
   const [deploys, setDeploys] = useState<Deploy[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | Deploy['status']>('all');
+  const [workflowFilter, setWorkflowFilter] = useState('all');
 
   const load = async () => {
     setLoading(true);
@@ -56,6 +59,15 @@ export default function DeploysPage() {
   useEffect(() => {
     load();
   }, []);
+
+  const workflows = Array.from(new Set(deploys.map((deploy) => deploy.app).filter(Boolean))).sort();
+  const filteredDeploys = deploys.filter((deploy) => {
+    const statusOk = statusFilter === 'all' || deploy.status === statusFilter;
+    const workflowOk = workflowFilter === 'all' || deploy.app === workflowFilter;
+    return statusOk && workflowOk;
+  });
+  const failedCount = deploys.filter((deploy) => deploy.status === 'failure').length;
+  const runningCount = deploys.filter((deploy) => deploy.status === 'running').length;
 
   return (
     <AppShell>
@@ -86,6 +98,43 @@ export default function DeploysPage() {
         )}
 
         {deploys.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="h-9 rounded-md border border-white/10 bg-[var(--bg-2)] px-3 text-[12px] font-semibold text-slate-200 outline-none"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as 'all' | Deploy['status'])}
+                aria-label="Filter by deploy status"
+              >
+                <option value="all">All states</option>
+                <option value="success">Success</option>
+                <option value="running">Running</option>
+                <option value="failure">Failed</option>
+              </select>
+              <select
+                className="h-9 max-w-[260px] rounded-md border border-white/10 bg-[var(--bg-2)] px-3 text-[12px] font-semibold text-slate-200 outline-none"
+                value={workflowFilter}
+                onChange={(event) => setWorkflowFilter(event.target.value)}
+                aria-label="Filter by workflow"
+              >
+                <option value="all">All workflows</option>
+                {workflows.map((workflow) => (
+                  <option key={workflow} value={workflow}>{workflow}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em]">
+              {runningCount > 0 && <span className="rounded border border-[rgba(245,158,11,0.28)] bg-[rgba(245,158,11,0.08)] px-2 py-1 text-[var(--sev-warning)]">{runningCount} running</span>}
+              {failedCount > 0 && <span className="rounded border border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.08)] px-2 py-1 text-[var(--sev-critical)]">{failedCount} failed</span>}
+            </div>
+          </div>
+        )}
+
+        {deploys.length > 0 && filteredDeploys.length === 0 && (
+          <div className={card + ' p-8 text-center text-sm text-slate-400'}>No deploys match the active filters.</div>
+        )}
+
+        {filteredDeploys.length > 0 && (
           <div className={card + ' overflow-hidden'}>
             <div className="grid grid-cols-[1.2fr_0.8fr_0.8fr_0.6fr_0.7fr] gap-3 border-b border-white/10 bg-[var(--bg-2)] px-4 py-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
               <div>App</div>
@@ -96,19 +145,27 @@ export default function DeploysPage() {
             </div>
 
             <div className="divide-y divide-white/10">
-              {deploys.map(d => {
+              {filteredDeploys.map(d => {
                 const meta = statusMeta(d.status);
+                const Row = d.runUrl ? 'a' : 'div';
                 return (
-                  <div
+                  <Row
                     key={d.id}
+                    href={d.runUrl}
+                    target={d.runUrl ? '_blank' : undefined}
+                    rel={d.runUrl ? 'noreferrer' : undefined}
                     className="grid grid-cols-[1.2fr_0.8fr_0.8fr_0.6fr_0.7fr] gap-3 px-4 py-3 text-[13px] transition-colors hover:bg-white/[0.025]"
                     style={{ borderLeft: `3px solid ${statusColor(d.status)}` }}
                   >
                     <div style={{ minWidth: 0 }}>
-                      <div className="truncate font-semibold text-slate-100">{d.app}</div>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="truncate font-semibold text-slate-100">{d.app}</div>
+                        {d.status === 'failure' && <span className="shrink-0 rounded border border-[rgba(239,68,68,0.32)] bg-[rgba(239,68,68,0.09)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sev-critical)]">fail</span>}
+                      </div>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
                         <span className="rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-slate-400">{d.branch}</span>
                         <span>{timeAgo(d.startedAt)}</span>
+                        {d.runUrl && <span className="text-[var(--accent)]">GitHub run</span>}
                       </div>
                     </div>
                     <div style={{ minWidth: 0 }}>
@@ -120,7 +177,7 @@ export default function DeploysPage() {
                     <div className="text-right">
                       <StatusBadge label={meta.label} status={meta.status} pulse={meta.pulse} />
                     </div>
-                  </div>
+                  </Row>
                 );
               })}
             </div>
@@ -129,7 +186,7 @@ export default function DeploysPage() {
 
         {deploys.length > 0 && (
           <div className="text-right text-[11px] text-slate-500">
-            Showing {deploys.length} deployment{deploys.length === 1 ? '' : 's'}
+            Showing {filteredDeploys.length} of {deploys.length} deployment{deploys.length === 1 ? '' : 's'}
           </div>
         )}
       </div>
