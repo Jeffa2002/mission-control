@@ -33,12 +33,12 @@ This is the working backlog after the `/systems` health registry and `/deploys` 
    - Do: build overview/status from health, systems, alerts, agents, deploys, security, and activity; include stale/error metadata per source.
    - Files: `apps/panel/src/app/api/overview/route.ts`, `apps/panel/src/app/api/status/route.ts`.
 
-6. `[done]` Update Activity to use the GitHub deploy feed.
+6. `[published]` Update Activity to use the GitHub deploy feed.
    - Why: `/api/activity` still reads `DEPLOY_LOG_FILE`, so deploy activity can remain empty even though `/api/deploys` now correctly reads GitHub Actions.
    - Do: share deploy-fetching logic or call an internal helper from both routes; show failed/running/success deploys in the unified activity stream.
    - Files: `apps/panel/src/app/api/activity/route.ts`, `apps/panel/src/app/api/deploys/route.ts`.
 
-7. `[done]` Improve `/deploys` operator usefulness.
+7. `[published]` Improve `/deploys` operator usefulness.
    - Why: The feed now loads, but the UI does not expose run URLs, failure detail, or workflow filters.
    - Do: include run URL in the API contract; make rows link to GitHub run details; add status/workflow filters and a compact failure badge.
    - Files: `apps/panel/src/app/deploys/page.tsx`, `apps/panel/src/app/api/deploys/route.ts`.
