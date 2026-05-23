@@ -54,7 +54,7 @@ export function safeExec(command: string): string {
 export function runRemote(cmd: string): string {
   try {
     return execSync(
-      `ssh -i ${escapeShell(PROD_SSH_KEY)} -p ${escapeShell(PROD_SSH_PORT)} -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@${escapeShell(PROD_SSH_HOST)} bash -lc ${escapeShell(cmd)}`,
+      `ssh -i ${escapeShell(PROD_SSH_KEY)} -p ${escapeShell(PROD_SSH_PORT)} -o BatchMode=yes -o ConnectTimeout=5 root@${escapeShell(PROD_SSH_HOST)} bash -lc ${escapeShell(cmd)}`,
       { timeout: 10000, encoding: 'utf8' }
     );
   } catch {

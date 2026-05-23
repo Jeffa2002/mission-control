@@ -21,53 +21,58 @@ This is the working backlog after the `/systems` health registry and `/deploys` 
    - Do: fail closed when the secret is unset in production; validate status/body shape; audit writes.
    - Files: `apps/panel/src/app/api/deploys/route.ts`.
 
+4. `[published]` Make `/security` use live host security telemetry.
+   - Why: `/api/security` depended on stale `security-data.json`, so auth failures and firewall activity could disappear even while the per-signal routes had newer host access.
+   - Do: collect prod auth/firewall/fail2ban/nginx signals live from mounted host logs, expose reporting coverage by server, and show registered hosts that still need a security channel.
+   - Files: `apps/docker-compose.yml`, `apps/panel/src/app/api/security/route.ts`, `apps/panel/src/app/api/security/_security-collector.ts`, `apps/panel/src/app/security/page.tsx`.
+
 ## P1 - Product Value
 
-4. `[todo]` Make incident controls real and persistent.
+5. `[todo]` Make incident controls real and persistent.
    - Why: Incidents have Ack/Assign/Close buttons, but they are inert and incident state is rebuilt from live signals every refresh.
    - Do: add `/api/incidents` with persisted state for ack, owner, close, silence-until, and notes; merge persisted state into the incident builder; audit each action.
    - Files: `apps/panel/src/app/incidents/page.tsx`, new `apps/panel/src/app/api/incidents/route.ts`.
 
-5. `[todo]` Replace placeholder overview/status contracts.
+6. `[todo]` Replace placeholder overview/status contracts.
    - Why: `/api/overview` only says the endpoint exists, and `/api/status` returns null Prometheus fields. These should be trustworthy aggregate APIs.
    - Do: build overview/status from health, systems, alerts, agents, deploys, security, and activity; include stale/error metadata per source.
    - Files: `apps/panel/src/app/api/overview/route.ts`, `apps/panel/src/app/api/status/route.ts`.
 
-6. `[published]` Update Activity to use the GitHub deploy feed.
+7. `[published]` Update Activity to use the GitHub deploy feed.
    - Why: `/api/activity` still reads `DEPLOY_LOG_FILE`, so deploy activity can remain empty even though `/api/deploys` now correctly reads GitHub Actions.
    - Do: share deploy-fetching logic or call an internal helper from both routes; show failed/running/success deploys in the unified activity stream.
    - Files: `apps/panel/src/app/api/activity/route.ts`, `apps/panel/src/app/api/deploys/route.ts`.
 
-7. `[published]` Improve `/deploys` operator usefulness.
+8. `[published]` Improve `/deploys` operator usefulness.
    - Why: The feed now loads, but the UI does not expose run URLs, failure detail, or workflow filters.
    - Do: include run URL in the API contract; make rows link to GitHub run details; add status/workflow filters and a compact failure badge.
    - Files: `apps/panel/src/app/deploys/page.tsx`, `apps/panel/src/app/api/deploys/route.ts`.
 
 ## P1 - Reliability And Ops
 
-8. `[todo]` Reduce panel container blast radius.
+9. `[todo]` Reduce panel container blast radius.
    - Why: The panel publishes `3020` on `0.0.0.0` and mounts Docker socket, workspace, SSH keys, and agent data into one web process.
    - Do: bind panel to localhost if nginx is the public entrypoint; split privileged host probes into a narrow sidecar/API; remove Docker socket and SSH mounts from the main panel where possible.
    - Files: `apps/docker-compose.yml`, host probe API routes.
 
-9. `[todo]` Stop disabling SSH host verification.
+10. `[todo]` Stop disabling SSH host verification.
    - Why: Deploy and remote log paths use `StrictHostKeyChecking=no`, which weakens prod access.
    - Do: use the existing SSH config/known-host aliases; fail closed with `BatchMode=yes` and explicit known-host handling.
    - Files: `scripts/deploy-prod.sh`, `apps/panel/src/app/api/security/_security-logs.ts`.
 
-10. `[todo]` Add a working verification gate before deploy.
+11. `[todo]` Add a working verification gate before deploy.
     - Why: `next lint` is obsolete here and there are no route contract/security checks.
     - Do: add route smoke tests for auth coverage and API shape; run build plus smoke tests in GitHub Actions before restarting prod.
     - Files: `apps/panel/package.json`, `.github/workflows/deploy-mission-control.yml`, new test scripts.
 
 ## P2 - Repo Hygiene
 
-11. `[todo]` Clean generated/runtime artifacts out of Git.
+12. `[todo]` Clean generated/runtime artifacts out of Git.
     - Why: `agent-status.json`, `iperf-results.json`, `network-history.db`, and `tsconfig.tsbuildinfo` cause noisy diffs and risk accidental runtime-data commits.
     - Do: update `.gitignore`; intentionally untrack generated files after confirming prod/deploy expectations; document runtime source-of-truth paths.
     - Files: `.gitignore`, `agent-status.json`, `iperf-results.json`, `network-history.db`, `apps/panel/tsconfig.tsbuildinfo`.
 
-12. `[todo]` Split shared data helpers for deploys, agents, systems, and activity.
+13. `[todo]` Split shared data helpers for deploys, agents, systems, and activity.
     - Why: API routes duplicate file paths and parsing logic, which is how `/deploys` and `/activity` diverged.
     - Do: create small server-only helper modules for deploy events, agent status, system health, and activity aggregation; keep route files thin.
     - Files: `apps/panel/src/app/api/_*.ts`, `apps/panel/src/app/api/activity/route.ts`.

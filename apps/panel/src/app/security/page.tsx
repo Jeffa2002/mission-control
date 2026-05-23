@@ -6,8 +6,23 @@ import { AppShell, Metric, SectionTitle, StatusBadge, ToolbarButton, card, muted
 interface SecurityData {
   ok: boolean;
   checkedAt: string;
+  source?: string;
   hasThreats: boolean;
   stale?: boolean;
+  hosts?: Array<{
+    id: string;
+    label: string;
+    reporting: boolean;
+    checkedAt: string;
+    sources: { auth: boolean; nginx: boolean; firewall: boolean; fail2ban: boolean };
+    error?: string;
+  }>;
+  registeredHosts?: Array<{
+    id: string;
+    label: string;
+    reporting: boolean;
+    securityChannel: string;
+  }>;
   fail2ban: {
     available: boolean;
     banned: number;
@@ -20,6 +35,12 @@ interface SecurityData {
   };
   auth: {
     failCount: number;
+    sshAcceptCount?: number;
+    sudoCount?: number;
+    recent: string[];
+  };
+  firewall?: {
+    blockCount: number;
     recent: string[];
   };
 }
@@ -46,6 +67,25 @@ function severityLabel(severity: ThreatSeverity) {
 
 function buildThreats(data: SecurityData): ThreatItem[] {
   const threats: ThreatItem[] = [];
+  const hosts = data.hosts ?? [];
+  const missingHosts = hosts.filter((host) => !host.reporting);
+  const unconfiguredRegisteredHosts = (data.registeredHosts ?? []).filter((host) => !host.reporting);
+
+  if (missingHosts.length > 0 || unconfiguredRegisteredHosts.length > 0) {
+    threats.push({
+      id: 'host-reporting',
+      title: `${missingHosts.length + unconfiguredRegisteredHosts.length} server${missingHosts.length + unconfiguredRegisteredHosts.length === 1 ? '' : 's'} not reporting security telemetry`,
+      source: 'coverage',
+      severity: 'warning',
+      status: 'Needs wiring',
+      signal: 'Every registered server should have an auth/firewall/web signal path back to Bazza.',
+      evidence: [
+        ...missingHosts.map((host) => `${host.label}: ${host.error || 'security command returned no usable data'}`),
+        ...unconfiguredRegisteredHosts.map((host) => `${host.label}: security channel not configured`),
+      ].slice(0, 8),
+      action: 'Add or fix the host security channel so auth failures and firewall activity are visible here.',
+    });
+  }
 
   if (!data.fail2ban.available) {
     threats.push({
@@ -97,6 +137,19 @@ function buildThreats(data: SecurityData): ThreatItem[] {
     });
   }
 
+  if ((data.firewall?.blockCount ?? 0) > 0) {
+    threats.push({
+      id: 'firewall-blocks',
+      title: `${data.firewall?.blockCount ?? 0} firewall block${(data.firewall?.blockCount ?? 0) === 1 ? '' : 's'}`,
+      source: 'firewall',
+      severity: (data.firewall?.blockCount ?? 0) > 100 ? 'warning' : 'info',
+      status: 'Contained',
+      signal: 'UFW/kernel block events were seen in recent host logs.',
+      evidence: data.firewall?.recent.slice(0, 5) ?? [],
+      action: 'Check top sources if the block volume keeps rising or targets unusual ports.',
+    });
+  }
+
   if (threats.length === 0) {
     threats.push({
       id: 'clear',
@@ -104,7 +157,7 @@ function buildThreats(data: SecurityData): ThreatItem[] {
       source: 'security',
       severity: 'healthy',
       status: 'Clear',
-      signal: 'fail2ban, auth, and nginx signals are within normal bounds.',
+      signal: 'fail2ban, auth, firewall, and nginx signals are within normal bounds.',
       evidence: [`Checked ${new Date(data.checkedAt).toLocaleTimeString()}`],
       action: 'No operator action required.',
     });
@@ -218,6 +271,44 @@ export default function SecurityPage() {
                 delta={data.nginx.errorCount > 0 ? 'Recent 4xx/5xx responses' : 'No web error pressure'}
                 status={data.nginx.errorCount > 5000 ? 'critical' : data.nginx.errorCount > 1000 ? 'warning' : 'healthy'}
               />
+              <Metric
+                label="Reporting hosts"
+                value={`${(data.hosts ?? []).filter((host) => host.reporting).length}/${Math.max((data.hosts ?? []).length, 1)}`}
+                delta={(data.hosts ?? []).every((host) => host.reporting) ? 'All configured channels online' : 'One or more channels need attention'}
+                status={(data.hosts ?? []).every((host) => host.reporting) ? 'healthy' : 'warning'}
+              />
+            </section>
+
+            <section className={card + ' overflow-hidden'}>
+              <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
+                <SectionTitle title="Server Reporting" subtitle={`Source: ${data.source || 'security api'}`} />
+              </div>
+              <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+                {(data.hosts ?? []).map((host) => (
+                  <div key={host.id} className="p-5">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[14px] font-semibold text-slate-100">{host.label}</div>
+                        <div className="text-[11px] text-slate-500">{host.id}</div>
+                      </div>
+                      <StatusBadge label={host.reporting ? 'Reporting' : 'Offline'} status={host.reporting ? 'healthy' : 'warning'} />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(host.sources).map(([source, ok]) => (
+                        <span key={source} className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${ok ? 'border-[rgba(34,197,94,0.28)] bg-[rgba(34,197,94,0.08)] text-[var(--sev-healthy)]' : 'border-white/10 bg-white/[0.03] text-slate-500'}`}>
+                          {source}
+                        </span>
+                      ))}
+                    </div>
+                    {host.error && <div className="mt-3 truncate font-mono text-[11px] text-[var(--sev-warning)]" title={host.error}>{host.error}</div>}
+                  </div>
+                ))}
+              </div>
+              {(data.registeredHosts ?? []).some((host) => !host.reporting) && (
+                <div className="border-t border-white/10 px-5 py-4 text-[12px] text-slate-400">
+                  Not yet wired for security telemetry: {(data.registeredHosts ?? []).filter((host) => !host.reporting).map((host) => host.label).join(', ')}
+                </div>
+              )}
             </section>
 
             <section className={card + ' overflow-hidden'}>
@@ -261,6 +352,8 @@ export default function SecurityPage() {
               <EvidencePanel title="Auth Evidence" lines={data.auth.recent} tone={data.auth.failCount > 10 ? 'warning' : 'neutral'} />
               <EvidencePanel title="Nginx Evidence" lines={data.nginx.recentErrors} tone={data.nginx.errorCount > 1000 ? 'warning' : 'neutral'} />
             </section>
+
+            <EvidencePanel title="Firewall Evidence" lines={data.firewall?.recent ?? []} tone={(data.firewall?.blockCount ?? 0) > 100 ? 'warning' : 'neutral'} />
 
             {data.fail2ban.available && data.fail2ban.bannedIPs.length > 0 && (
               <div className={card + ' p-5'}>
