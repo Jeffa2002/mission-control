@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
 import { sh } from '../_util';
 import { requireSessionAuth } from '../_session-auth';
+import { getSystemDefinition, probeSystemHealth } from '../_system-health';
 
 const CADVISOR = process.env.CADVISOR_URL ?? 'http://mission-cadvisor:8080';
 const TIMEOUT_MS = 8_000;
@@ -104,6 +105,12 @@ export async function GET(req: Request) {
   if (authErr) return authErr;
 
   try {
+    const system = getSystemDefinition('bazza');
+    if (!system) throw new Error('Bazza is not registered');
+
+    const health = await probeSystemHealth(system);
+    if (!health.ok) throw new Error(health.error || 'Bazza health probe failed');
+
     let machine: any = null;
     let hostData: any = null;
     let fallback: Awaited<ReturnType<typeof fallbackBazzaStats>> | null = null;
@@ -187,6 +194,8 @@ export async function GET(req: Request) {
       ok: true,
       label: 'Bazza',
       host: 'bazza.taile9fed9.ts.net',
+      reachable: health.reachable,
+      probe: health.probe,
       cpu: { pct: cpuPct, cores: machine.num_cores },
       memory: {
         totalMb: Math.round(memTotalBytes / 1e6),

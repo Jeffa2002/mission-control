@@ -64,6 +64,23 @@ ssh "${SSH_OPTS[@]}" "$PROD_HOST" '
   printf "%s" "$html" | grep -q "Unified Activity"
   printf "%s" "$html" | grep -q "Runbook"
   curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null
+  systems_json="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/api/systems)"
+  SYSTEMS_JSON="$systems_json" node -e '"'"'
+    const data = JSON.parse(process.env.SYSTEMS_JSON || "{}");
+    const systems = Array.isArray(data.systems) ? data.systems : [];
+    const bad = systems.filter((system) => !system.ok);
+    if (!systems.length) {
+      console.error("No registered systems were returned by /api/systems");
+      process.exit(1);
+    }
+    if (bad.length) {
+      console.error("Unhealthy registered systems:");
+      for (const system of bad) {
+        console.error(`- ${system.id || system.label}: ${system.error || "not ok"}`);
+      }
+      process.exit(1);
+    }
+  '"'"'
 '
 
 echo "Production deploy verified."
