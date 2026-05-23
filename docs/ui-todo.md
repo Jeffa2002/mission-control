@@ -21,3 +21,4 @@ Notes:
 - Keep the product operational, dense, and calm. Futuristic means event-aware and action-oriented, not decorative.
 - Prefer shared primitives in `src/components/ops-ui.tsx` over one-off page styling.
 - Report completion after each item and mark `[published]` only after deployment is verified.
+- Current post-polish backlog lives in `docs/backlog.md`.
