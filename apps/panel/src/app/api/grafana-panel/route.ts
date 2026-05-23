@@ -18,11 +18,15 @@
 
 import { NextResponse } from 'next/server';
 import { GRAFANA_BASE } from '../../embeds';
+import { requireSessionAuth } from '../_session-auth';
 
 const DEFAULT_W = 1200;
 const DEFAULT_H = 400;
 
 export async function GET(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   const token    = process.env.GRAFANA_SA_TOKEN;
   const baseUrl  = process.env.GRAFANA_BASE_URL ?? GRAFANA_BASE;
 

@@ -6,17 +6,17 @@ This is the working backlog after the `/systems` health registry and `/deploys` 
 
 ## P0 - Security And Correctness
 
-1. `[todo]` Add explicit auth guards to sensitive API routes.
+1. `[done]` Add explicit auth guards to sensitive API routes.
    - Why: `/api/*` is excluded by middleware, so API routes must guard themselves. `panic-reset` can clear safety state, and `grafana-panel` can proxy internal Grafana panels with a service token.
    - Do: call `requireSessionAuth(req)` in `GET`/`POST` handlers for `panic-reset` and `grafana-panel`; add a small guard-coverage check for sensitive routes.
    - Files: `apps/panel/src/app/api/panic-reset/route.ts`, `apps/panel/src/app/api/grafana-panel/route.ts`, `apps/panel/src/middleware.ts`.
 
-2. `[todo]` Harden `/api/network/history` query handling.
+2. `[done]` Harden `/api/network/history` query handling.
    - Why: `node`, `range`, and `metric` are cast but not validated, then SQL is interpolated into a shell `sqlite3` command.
    - Do: whitelist node IDs, ranges, and metrics; return `400` for invalid params; avoid shell SQL interpolation or tightly escape all values.
    - Files: `apps/panel/src/app/api/network/history/route.ts`.
 
-3. `[todo]` Lock down deploy-log writes.
+3. `[done]` Lock down deploy-log writes.
    - Why: `POST /api/deploys` only checks `x-deploy-secret` when `DEPLOY_WEBHOOK_SECRET` exists. If the env var is missing, the fallback writer is open to anyone who can reach the route.
    - Do: fail closed when the secret is unset in production; validate status/body shape; audit writes.
    - Files: `apps/panel/src/app/api/deploys/route.ts`.

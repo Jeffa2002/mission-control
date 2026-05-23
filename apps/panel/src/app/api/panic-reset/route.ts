@@ -11,10 +11,14 @@
  */
 import { NextResponse } from 'next/server';
 import { audit, getPanicLatch, setPanicLatch } from '../_util';
+import { requireSessionAuth } from '../_session-auth';
 
 const REQUIRED_PHRASE = 'RESET PANIC LATCH';
 
 export async function POST(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     ?? req.headers.get('x-real-ip')
     ?? 'unknown';
@@ -65,7 +69,10 @@ export async function POST(req: Request) {
 }
 
 /** GET /api/panic-reset — returns current latch state. */
-export async function GET() {
+export async function GET(req: Request) {
+  const authErr = requireSessionAuth(req);
+  if (authErr) return authErr;
+
   try {
     const latch = await getPanicLatch();
     return NextResponse.json({ ok: true, latch });

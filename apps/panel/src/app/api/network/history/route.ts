@@ -9,7 +9,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { requireSessionAuth } from '../../_session-auth';
 
 const DB_PATHS = [
@@ -21,6 +21,10 @@ const DB_PATHS = [
 
 type Range = 'day' | 'week' | 'month' | 'year';
 type Metric = 'ping' | 'iperf';
+
+const VALID_NODES = new Set(['prod', 'crm8', 'shazza', 'backup-melb', 'bazza', 'sec1']);
+const VALID_RANGES = new Set<Range>(['day', 'week', 'month', 'year']);
+const VALID_METRICS = new Set<Metric>(['ping', 'iperf']);
 
 function sinceIso(range: Range): string {
   const now = new Date();
@@ -46,7 +50,7 @@ function groupBy(range: Range): string {
 function queryDb(sql: string): unknown[] {
   for (const dbPath of DB_PATHS) {
     try {
-      const out = execSync(`sqlite3 -json "${dbPath}" "${sql.replace(/"/g, '\\"')}"`, {
+      const out = execFileSync('sqlite3', ['-json', dbPath, sql], {
         timeout: 10_000,
         encoding: 'utf8',
       });
@@ -61,14 +65,26 @@ export async function GET(req: Request) {
   if (authErr) return authErr;
 
   const url = new URL(req.url);
-  const node   = url.searchParams.get('node') ?? 'prod';
-  const range  = (url.searchParams.get('range') ?? 'week') as Range;
-  const metric = (url.searchParams.get('metric') ?? 'ping') as Metric;
+  const node = url.searchParams.get('node') ?? 'prod';
+  const range = url.searchParams.get('range') ?? 'week';
+  const metric = url.searchParams.get('metric') ?? 'ping';
 
-  const since  = sinceIso(range);
-  const bucket = groupBy(range);
+  if (!VALID_NODES.has(node)) {
+    return NextResponse.json({ ok: false, error: `Invalid node: ${node}` }, { status: 400 });
+  }
+  if (!VALID_RANGES.has(range as Range)) {
+    return NextResponse.json({ ok: false, error: `Invalid range: ${range}` }, { status: 400 });
+  }
+  if (!VALID_METRICS.has(metric as Metric)) {
+    return NextResponse.json({ ok: false, error: `Invalid metric: ${metric}` }, { status: 400 });
+  }
 
-  if (metric === 'ping') {
+  const safeRange = range as Range;
+  const safeMetric = metric as Metric;
+  const since  = sinceIso(safeRange);
+  const bucket = groupBy(safeRange);
+
+  if (safeMetric === 'ping') {
     const rows = queryDb(
       `SELECT strftime('${bucket}', ts) AS bucket, ROUND(AVG(ping_ms),2) AS value
        FROM ping_history
@@ -78,7 +94,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       node,
-      range,
+      range: safeRange,
       metric: 'ping',
       points: rows.map(r => ({ ts: r.bucket, value: r.value })),
     });
@@ -97,7 +113,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     node,
-    range,
+    range: safeRange,
     metric: 'iperf',
     points: rows.map(r => ({ ts: r.bucket, value: r.send, recv: r.recv, rtt: r.rtt })),
   });

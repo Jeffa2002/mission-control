@@ -96,6 +96,14 @@ async function writeLog(deploys: Deploy[]) {
   await fs.writeFile(DEPLOY_LOG, JSON.stringify(deploys.slice(0, MAX_ENTRIES), null, 2));
 }
 
+function isDeployStatus(value: unknown): value is Deploy['status'] {
+  return value === 'success' || value === 'failure' || value === 'running';
+}
+
+function cleanString(value: unknown, fallback: string) {
+  return typeof value === 'string' ? value.slice(0, 500) : fallback;
+}
+
 export async function GET(req: Request) {
   const authErr = requireSessionAuth(req);
   if (authErr) return authErr;
@@ -124,7 +132,10 @@ export async function POST(req: Request) {
   // Webhook secret check
   const secret = req.headers.get('x-deploy-secret');
   const expected = process.env.DEPLOY_WEBHOOK_SECRET;
-  if (expected && secret !== expected) {
+  if (!expected) {
+    return new NextResponse('DEPLOY_WEBHOOK_SECRET is not configured', { status: 503 });
+  }
+  if (secret !== expected) {
     return new NextResponse('Unauthorized', { status: 401 });
   }
 
@@ -135,18 +146,22 @@ export async function POST(req: Request) {
     return new NextResponse('Bad JSON', { status: 400 });
   }
 
+  if (body.status !== undefined && !isDeployStatus(body.status)) {
+    return new NextResponse('Invalid deploy status', { status: 400 });
+  }
+
   const deploy: Deploy = {
-    id: body.id ?? `${Date.now()}`,
-    app: body.app ?? 'unknown',
-    repo: body.repo ?? '',
-    commit: body.commit ?? '',
-    commitMsg: body.commitMsg ?? '',
-    branch: body.branch ?? 'main',
+    id: cleanString(body.id, `${Date.now()}`),
+    app: cleanString(body.app, 'unknown'),
+    repo: cleanString(body.repo, ''),
+    commit: cleanString(body.commit, ''),
+    commitMsg: cleanString(body.commitMsg, ''),
+    branch: cleanString(body.branch, 'main'),
     status: body.status ?? 'running',
-    triggeredBy: body.triggeredBy ?? 'github-actions',
-    startedAt: body.startedAt ?? new Date().toISOString(),
-    finishedAt: body.finishedAt,
-    durationS: body.durationS,
+    triggeredBy: cleanString(body.triggeredBy, 'github-actions'),
+    startedAt: cleanString(body.startedAt, new Date().toISOString()),
+    finishedAt: typeof body.finishedAt === 'string' ? body.finishedAt : undefined,
+    durationS: typeof body.durationS === 'number' && Number.isFinite(body.durationS) ? Math.max(0, Math.round(body.durationS)) : undefined,
   };
 
   const deploys = await readLog();
