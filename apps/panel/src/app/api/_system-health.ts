@@ -87,11 +87,11 @@ function isOkPayload(data: any, okField?: string) {
 function sanitizeSystemPayload(system: SystemDefinition, data: any) {
   if (system.id !== 'shazza' || !data?.services?.llamaServer) return data;
 
-  const { llamaServer, ...services } = data.services;
+  const services = { ...data.services };
+  delete services.llamaServer;
   return {
     ...data,
     services,
-    ignoredChecks: [...(Array.isArray(data.ignoredChecks) ? data.ignoredChecks : []), 'llamaServer'],
   };
 }
 
