@@ -9,9 +9,7 @@ interface ShazzaData {
   label: string;
   tailscaleIp: string;
   uptime?: { pretty: string | null; since: string | null };
-  services?: {
-    llamaServer: { active: boolean; since: string | null; label: string };
-  };
+  services?: Record<string, unknown>;
   memory?: { totalMb: number; usedMb: number; freeMb: number; pct: number } | null;
   disk?: { total: string; used: string; free: string; pct: string } | null;
   gpu?: { raw: string | null; label: string };
@@ -284,7 +282,7 @@ export default function SystemsPage() {
             address="100.113.217.81"
             state={shazzaState as HostState}
             primary={shazza?.reachable ? `${shazza.temperature?.celsius?.toFixed(0) ?? '?'}C` : 'No signal'}
-            secondary={shazza?.reachable ? `RAM ${shazza.memory?.pct ?? '?'}% · llama ${shazza.services?.llamaServer.active ? 'active' : 'inactive'}` : shazza?.error || 'Tailnet probe pending'}
+            secondary={shazza?.reachable ? `RAM ${shazza.memory?.pct ?? '?'}% · host telemetry` : shazza?.error || 'Tailnet probe pending'}
           />
           <HostCommandCard
             name="CRM8"
@@ -409,19 +407,10 @@ export default function SystemsPage() {
                 ) : <div style={{ fontSize: 13, color: '#64748B' }}>Unavailable</div>}
               </div>
 
-              {/* GPU + llama-server card */}
+              {/* GPU card */}
               <div className={card + ' p-5'}>
-                <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>GPU / AI Services</div>
+                <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>GPU</div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: '#F1F5F9', marginBottom: 6 }}>Intel Arc (ARL) · 23GB VRAM</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <StatusDot state={shazza?.services?.llamaServer.active ? 'healthy' : 'stale'} />
-                    <span style={{ fontSize: 12, color: '#94A3B8' }}>llama-server (SYCL)</span>
-                    <span style={{ fontSize: 11, marginLeft: 'auto', color: shazza?.services?.llamaServer.active ? '#10B981' : '#6B7280' }}>
-                      {shazza?.services?.llamaServer.active ? 'active' : 'inactive'}
-                    </span>
-                  </div>
-                </div>
                 {shazza?.gpu?.raw && (
                   <div style={{ marginTop: 8, fontSize: 11, color: '#64748B' }}>sycl-ls: {shazza.gpu.raw}</div>
                 )}

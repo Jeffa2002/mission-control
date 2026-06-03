@@ -71,7 +71,6 @@ export const SYSTEM_REGISTRY: SystemDefinition[] = [
     timeoutMs: 8_000,
     envUrl: 'SHAZZA_HEALTH_URL',
     url: 'https://shazza.taile9fed9.ts.net/health',
-    okField: 'ok',
     metadata: { tailscaleIp: '100.113.217.81' },
   },
 ];
@@ -83,6 +82,17 @@ export function getSystemDefinition(id: string) {
 function isOkPayload(data: any, okField?: string) {
   if (!okField) return true;
   return Boolean(data?.[okField]);
+}
+
+function sanitizeSystemPayload(system: SystemDefinition, data: any) {
+  if (system.id !== 'shazza' || !data?.services?.llamaServer) return data;
+
+  const { llamaServer, ...services } = data.services;
+  return {
+    ...data,
+    services,
+    ignoredChecks: [...(Array.isArray(data.ignoredChecks) ? data.ignoredChecks : []), 'llamaServer'],
+  };
 }
 
 export async function probeSystemHealth(system: SystemDefinition): Promise<SystemHealthResult> {
@@ -106,13 +116,14 @@ export async function probeSystemHealth(system: SystemDefinition): Promise<Syste
 
       const data = await res.json();
       const ok = isOkPayload(data, system.okField);
+      const sanitizedData = sanitizeSystemPayload(system, data);
       return {
         ...system,
         reachable: true,
         ok,
         checkedAt,
         latencyMs: Date.now() - startedAt,
-        data,
+        data: sanitizedData,
         error: ok ? undefined : `${system.okField || 'health'} did not report ok`,
       };
     }
