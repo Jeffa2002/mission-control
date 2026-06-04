@@ -88,6 +88,13 @@ interface PentestFlow {
   detail: string;
 }
 
+interface PentestProgramItem {
+  title: string;
+  status: 'live' | 'queued' | 'approval';
+  cadence: string;
+  detail: string;
+}
+
 const PENTEST_CHECKS: PentestCheck[] = [
   {
     id: 'sec1-ssh-tailnet',
@@ -121,9 +128,9 @@ const PENTEST_CHECKS: PentestCheck[] = [
     area: 'Dependencies',
     target: 'Prod web apps',
     status: 'watch',
-    result: 'High advisories cleared except TimePulse moderate residuals',
-    evidence: 'VenConX, QueueM8 app/web, ABEA, YieldDock, Helix app/web audit clean; TimePulse remains 0 high / 4 moderate.',
-    next: 'Track TimePulse moderate advisories until a safe upstream fix path exists.',
+    result: 'Moderate+ advisories cleared except Crossbench Prisma residuals',
+    evidence: '14 of 15 local package roots audit clean after npm update; Crossbench keeps 3 moderate Prisma 7 nested @hono advisories.',
+    next: 'Leave Crossbench Prisma as-is per Jeff; track upstream Prisma fix or deliberate downgrade decision.',
   },
   {
     id: 'mission-control-api',
@@ -217,6 +224,60 @@ const PENTEST_FLOWS: PentestFlow[] = [
     owner: 'Archie + SecSpy',
     status: 'queued',
     detail: 'Repeat the exact finding path and add the result to the security history before closing.',
+  },
+];
+
+const PENTEST_PROGRAM: PentestProgramItem[] = [
+  {
+    title: 'Gate 0',
+    status: 'live',
+    cadence: 'Always allowed',
+    detail: 'Passive inventory, repo and config review, DNS/TLS/header checks, and normal HTTP GET/HEAD validation.',
+  },
+  {
+    title: 'Gate 1',
+    status: 'approval',
+    cadence: 'Per fixture set',
+    detail: 'Safe authenticated testing with disposable accounts, canary records, upload samples, and a cleanup plan.',
+  },
+  {
+    title: 'Gate 2',
+    status: 'approval',
+    cadence: 'Quiet window',
+    detail: 'Targeted low-noise production validation with monitoring, stop conditions, and one app in scope at a time.',
+  },
+  {
+    title: 'Gate 3',
+    status: 'queued',
+    cadence: 'Explicit approval',
+    detail: 'Higher-risk simulation such as stress-adjacent checks, exploit proof validation, or aggressive scanners.',
+  },
+];
+
+const PENTEST_CADENCE: PentestProgramItem[] = [
+  {
+    title: 'Weekly',
+    status: 'live',
+    cadence: 'One target',
+    detail: 'Run one focused app test or retest, then record evidence and owner in Mission Control.',
+  },
+  {
+    title: 'Fortnightly',
+    status: 'live',
+    cadence: 'sec1',
+    detail: 'Review public exposure, nginx routes, expected ports, and stale app aliases from the isolated bench.',
+  },
+  {
+    title: 'Monthly',
+    status: 'queued',
+    cadence: 'Dashboard',
+    detail: 'Review Security -> Pen Testing, open findings, fixture health, and overdue retests.',
+  },
+  {
+    title: 'Quarterly',
+    status: 'queued',
+    cadence: 'Deep review',
+    detail: 'Review auth, tenant isolation, secrets, backups, host hardening, and deploy pipelines.',
   },
 ];
 
@@ -433,6 +494,42 @@ function PentestProgram() {
         <Metric label="Checks passed" value={String(passed)} delta="Validated controls" status="healthy" />
         <Metric label="Watch items" value={String(watch)} delta="Residual or partial coverage" status={watch ? 'neutral' : 'healthy'} />
         <Metric label="Approval gates" value={String(blocked)} delta="Held before louder testing" status={blocked ? 'warning' : 'healthy'} />
+      </div>
+
+      <div className={card + ' overflow-hidden'}>
+        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
+          <SectionTitle title="Testing Program" subtitle="SecSpy operating gates and cadence" />
+        </div>
+        <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
+          {PENTEST_PROGRAM.map((item) => (
+            <div key={item.title} className="p-5">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <StatusBadge label={item.status} status={flowTone(item.status)} />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{item.cadence}</span>
+              </div>
+              <div className="text-[14px] font-semibold text-slate-100">{item.title}</div>
+              <div className="mt-2 text-[12px] leading-5 text-slate-400">{item.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className={card + ' overflow-hidden'}>
+        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
+          <SectionTitle title="Cadence" subtitle="Repeatable rhythm for defensive testing" />
+        </div>
+        <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
+          {PENTEST_CADENCE.map((item) => (
+            <div key={item.title} className="p-5">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <StatusBadge label={item.status} status={flowTone(item.status)} />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{item.cadence}</span>
+              </div>
+              <div className="text-[14px] font-semibold text-slate-100">{item.title}</div>
+              <div className="mt-2 text-[12px] leading-5 text-slate-400">{item.detail}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className={card + ' overflow-hidden'}>
