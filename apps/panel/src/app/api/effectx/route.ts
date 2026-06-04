@@ -79,8 +79,8 @@ const APPS = [
   {
     id: 'queuem8-web',
     name: 'QueueM8 Web',
-    description: 'QueueM8 marketing site (Cutline)',
-    url: 'https://cutline.effectx.com.au',
+    description: 'QueueM8 marketing site',
+    url: 'https://queuem8.effectx.com.au',
     healthPath: '/',
     color: '#F59E0B',
     emoji: '🌐',
