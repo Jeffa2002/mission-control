@@ -81,6 +81,13 @@ interface PentestGate {
   detail: string;
 }
 
+interface PentestFlow {
+  step: string;
+  owner: string;
+  status: 'live' | 'queued' | 'approval';
+  detail: string;
+}
+
 const PENTEST_CHECKS: PentestCheck[] = [
   {
     id: 'sec1-ssh-tailnet',
@@ -97,8 +104,8 @@ const PENTEST_CHECKS: PentestCheck[] = [
     target: 'QueueM8 site-admin',
     status: 'passed',
     result: 'Forged static cookie rejected',
-    evidence: 'site-admin-session=authenticated redirects to login; protected API returns 401.',
-    next: 'Run rate-limit checks after approval for louder auth testing.',
+    evidence: 'Forged site-admin cookie check remains in the active low-noise suite; prior run redirected to login and API returned 401.',
+    next: 'Re-run from a stable resolver path, then run rate-limit checks after approval for louder auth testing.',
   },
   {
     id: 'venconx-upload-direct',
@@ -115,8 +122,26 @@ const PENTEST_CHECKS: PentestCheck[] = [
     target: 'Prod web apps',
     status: 'watch',
     result: 'High advisories cleared except TimePulse moderate residuals',
-    evidence: 'VenConX, QueueM8, ABEA, YieldDock, Helix audit clean; TimePulse remains 0 high / 4 moderate.',
+    evidence: 'VenConX, QueueM8 app/web, ABEA, YieldDock, Helix app/web audit clean; TimePulse remains 0 high / 4 moderate.',
     next: 'Track TimePulse moderate advisories until a safe upstream fix path exists.',
+  },
+  {
+    id: 'mission-control-api',
+    area: 'Access control',
+    target: 'Mission Control security API',
+    status: 'passed',
+    result: 'Unauthenticated security API access rejected',
+    evidence: 'GET /api/security without Mission Control session returns 401; /security redirects to /login.',
+    next: 'Keep this in the regression set for every security dashboard change.',
+  },
+  {
+    id: 'env-permissions',
+    area: 'Secrets hygiene',
+    target: 'Prod env files',
+    status: 'passed',
+    result: 'Runtime env files remain locked down',
+    evidence: 'Checked app runtime env files under /var/www and /etc/infisical/generated; sensitive files are 600.',
+    next: 'Keep .env.example files public-readable only if they contain placeholders.',
   },
   {
     id: 'yielddock-headers',
@@ -135,6 +160,45 @@ const PENTEST_CHECKS: PentestCheck[] = [
     result: 'Not started',
     evidence: 'Crafted files, oversized payloads, zip edge cases, and parser stress tests intentionally held.',
     next: 'Needs explicit approval before noisy payload testing.',
+  },
+];
+
+const PENTEST_FLOWS: PentestFlow[] = [
+  {
+    step: 'Scope',
+    owner: 'Archie',
+    status: 'live',
+    detail: 'Name target app, exact routes, expected risk, and allowed noise level before any run starts.',
+  },
+  {
+    step: 'Approval',
+    owner: 'Jeff',
+    status: 'approval',
+    detail: 'Human checkpoint for fixture creation, repeated auth attempts, upload abuse, or recovery drills.',
+  },
+  {
+    step: 'Run',
+    owner: 'Archie + SecSpy',
+    status: 'live',
+    detail: 'Execute low-noise checks, keep timestamps and evidence, stop if a test becomes operationally risky.',
+  },
+  {
+    step: 'Record',
+    owner: 'Mission Control',
+    status: 'live',
+    detail: 'Capture result, evidence, next action, and residual risk in Security -> Pen Testing.',
+  },
+  {
+    step: 'Fix',
+    owner: 'Repo owner',
+    status: 'queued',
+    detail: 'Patch in repo, test locally, deploy through the normal GitHub path, then verify in prod.',
+  },
+  {
+    step: 'Retest',
+    owner: 'Archie + SecSpy',
+    status: 'queued',
+    detail: 'Repeat the exact finding path and add the result to the security history before closing.',
   },
 ];
 
@@ -305,6 +369,12 @@ function gateTone(status: PentestGate['status']): 'healthy' | 'warning' | 'info'
   return 'info';
 }
 
+function flowTone(status: PentestFlow['status']): 'healthy' | 'warning' | 'info' {
+  if (status === 'live') return 'healthy';
+  if (status === 'approval') return 'warning';
+  return 'info';
+}
+
 function EvidencePanel({ title, lines, tone = 'neutral' }: { title: string; lines: string[]; tone?: 'neutral' | 'warning' | 'critical' }) {
   const color = tone === 'critical' ? 'var(--sev-critical)' : tone === 'warning' ? 'var(--sev-warning)' : 'var(--text-3)';
 
@@ -366,6 +436,24 @@ function PentestProgram() {
                 {check.evidence}
               </div>
               <div className="text-[13px] leading-5 text-slate-300">{check.next}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className={card + ' overflow-hidden'}>
+        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
+          <SectionTitle title="Process Flow" subtitle="How security testing moves from approval to retest" />
+        </div>
+        <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-6 lg:divide-x lg:divide-y-0">
+          {PENTEST_FLOWS.map((flow) => (
+            <div key={flow.step} className="p-5">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <StatusBadge label={flow.status} status={flowTone(flow.status)} />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{flow.owner}</span>
+              </div>
+              <div className="text-[14px] font-semibold text-slate-100">{flow.step}</div>
+              <div className="mt-2 text-[12px] leading-5 text-slate-400">{flow.detail}</div>
             </div>
           ))}
         </div>
