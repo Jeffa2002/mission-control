@@ -41,6 +41,11 @@ interface SecurityData {
   };
   firewall?: {
     blockCount: number;
+    sampleCount?: number;
+    sampleLimitPerHost?: number;
+    byHost?: Array<{ key: string; label: string; count: number; sampled: boolean }>;
+    topSources?: Array<{ key: string; count: number }>;
+    topPorts?: Array<{ key: string; count: number }>;
     recent: string[];
   };
 }
@@ -57,6 +62,109 @@ interface ThreatItem {
   evidence: string[];
   action: string;
 }
+
+type PentestStatus = 'passed' | 'watch' | 'blocked' | 'queued';
+
+interface PentestCheck {
+  id: string;
+  area: string;
+  target: string;
+  status: PentestStatus;
+  result: string;
+  evidence: string;
+  next: string;
+}
+
+interface PentestGate {
+  label: string;
+  status: 'approved' | 'needs-approval' | 'deferred';
+  detail: string;
+}
+
+const PENTEST_CHECKS: PentestCheck[] = [
+  {
+    id: 'sec1-ssh-tailnet',
+    area: 'Exposure',
+    target: 'sec1 SSH',
+    status: 'passed',
+    result: 'Password SSH kept, public 2222 removed',
+    evidence: 'UFW allows 2222/tcp only on tailscale0; public 22/2222 closed or filtered from spot check.',
+    next: 'Document as accepted tailnet risk while password auth remains enabled.',
+  },
+  {
+    id: 'queuem8-forged-cookie',
+    area: 'Auth',
+    target: 'QueueM8 site-admin',
+    status: 'passed',
+    result: 'Forged static cookie rejected',
+    evidence: 'site-admin-session=authenticated redirects to login; protected API returns 401.',
+    next: 'Run rate-limit checks after approval for louder auth testing.',
+  },
+  {
+    id: 'venconx-upload-direct',
+    area: 'Tenant boundary',
+    target: 'VenConX uploads',
+    status: 'watch',
+    result: 'Unauthenticated direct reads blocked',
+    evidence: 'Direct upload path redirects to auth; source checks Document ownership through vendor or contract org.',
+    next: 'Create controlled tenants and files before cross-org retrieval testing.',
+  },
+  {
+    id: 'app-audits',
+    area: 'Dependencies',
+    target: 'Prod web apps',
+    status: 'watch',
+    result: 'High advisories cleared except TimePulse moderate residuals',
+    evidence: 'VenConX, QueueM8, ABEA, YieldDock, Helix audit clean; TimePulse remains 0 high / 4 moderate.',
+    next: 'Track TimePulse moderate advisories until a safe upstream fix path exists.',
+  },
+  {
+    id: 'yielddock-headers',
+    area: 'Headers',
+    target: 'YieldDock',
+    status: 'passed',
+    result: 'Header hardening added',
+    evidence: 'X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and Permissions-Policy now present.',
+    next: 'Consider CSP once app asset/connect requirements are mapped.',
+  },
+  {
+    id: 'active-upload-abuse',
+    area: 'Upload abuse',
+    target: 'File upload parsers',
+    status: 'blocked',
+    result: 'Not started',
+    evidence: 'Crafted files, oversized payloads, zip edge cases, and parser stress tests intentionally held.',
+    next: 'Needs explicit approval before noisy payload testing.',
+  },
+];
+
+const PENTEST_GATES: PentestGate[] = [
+  {
+    label: 'Low-noise validation',
+    status: 'approved',
+    detail: 'HTTP checks, config verification, dependency audits, and small named-port checks.',
+  },
+  {
+    label: 'Controlled fixtures',
+    status: 'needs-approval',
+    detail: 'Create test tenants, users, documents, and reversible records for IDOR and workflow testing.',
+  },
+  {
+    label: 'Louder auth tests',
+    status: 'needs-approval',
+    detail: 'Rate-limit checks, repeated login attempts, session invalidation, and CSRF-sensitive workflows.',
+  },
+  {
+    label: 'Upload abuse',
+    status: 'needs-approval',
+    detail: 'Crafted PDFs, zips, MIME mismatch, size limits, parser behavior, and OCR/PDF safety.',
+  },
+  {
+    label: 'Recovery drills',
+    status: 'deferred',
+    detail: 'Backup restore drill and incident tabletop that can affect operational state.',
+  },
+];
 
 function severityLabel(severity: ThreatSeverity) {
   if (severity === 'critical') return 'Critical';
@@ -138,15 +246,25 @@ function buildThreats(data: SecurityData): ThreatItem[] {
   }
 
   if ((data.firewall?.blockCount ?? 0) > 0) {
+    const blockCount = data.firewall?.blockCount ?? 0;
+    const sampleCount = data.firewall?.sampleCount ?? data.firewall?.recent.length ?? 0;
+    const sampled = sampleCount < blockCount;
+    const topHost = data.firewall?.byHost?.[0];
     threats.push({
       id: 'firewall-blocks',
-      title: `${data.firewall?.blockCount ?? 0} firewall block${(data.firewall?.blockCount ?? 0) === 1 ? '' : 's'}`,
+      title: `${blockCount} firewall block${blockCount === 1 ? '' : 's'}`,
       source: 'firewall',
-      severity: (data.firewall?.blockCount ?? 0) > 100 ? 'warning' : 'info',
+      severity: blockCount > 100 ? 'warning' : 'info',
       status: 'Contained',
-      signal: 'UFW/kernel block events were seen in recent host logs.',
-      evidence: data.firewall?.recent.slice(0, 5) ?? [],
-      action: 'Check top sources if the block volume keeps rising or targets unusual ports.',
+      signal: sampled
+        ? `UFW/kernel block events were counted across hosts; ${sampleCount} sampled events are loaded for evidence.`
+        : 'UFW/kernel block events were counted from the available host logs.',
+      evidence: [
+        ...(topHost ? [`Top host: ${topHost.label} (${topHost.count})`] : []),
+        ...((data.firewall?.topPorts ?? []).slice(0, 2).map((port) => `Port ${port.key}: ${port.count}`)),
+        ...((data.firewall?.topSources ?? []).slice(0, 2).map((source) => `Source ${source.key}: ${source.count}`)),
+      ],
+      action: sampled ? 'Use the breakdown to spot hot hosts, ports, and repeat sources before drilling into raw log evidence.' : 'Check top sources if block volume keeps rising or targets unusual ports.',
     });
   }
 
@@ -167,6 +285,26 @@ function buildThreats(data: SecurityData): ThreatItem[] {
   return threats.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 
+function pentestStatusLabel(status: PentestStatus) {
+  if (status === 'passed') return 'Passed';
+  if (status === 'watch') return 'Watch';
+  if (status === 'blocked') return 'Blocked';
+  return 'Queued';
+}
+
+function pentestStatusTone(status: PentestStatus): 'healthy' | 'warning' | 'critical' | 'info' | 'neutral' {
+  if (status === 'passed') return 'healthy';
+  if (status === 'blocked') return 'warning';
+  if (status === 'watch') return 'info';
+  return 'neutral';
+}
+
+function gateTone(status: PentestGate['status']): 'healthy' | 'warning' | 'info' {
+  if (status === 'approved') return 'healthy';
+  if (status === 'needs-approval') return 'warning';
+  return 'info';
+}
+
 function EvidencePanel({ title, lines, tone = 'neutral' }: { title: string; lines: string[]; tone?: 'neutral' | 'warning' | 'critical' }) {
   const color = tone === 'critical' ? 'var(--sev-critical)' : tone === 'warning' ? 'var(--sev-warning)' : 'var(--text-3)';
 
@@ -185,6 +323,89 @@ function EvidencePanel({ title, lines, tone = 'neutral' }: { title: string; line
               title={line}
             >
               {line}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PentestProgram() {
+  const passed = PENTEST_CHECKS.filter((check) => check.status === 'passed').length;
+  const blocked = PENTEST_CHECKS.filter((check) => check.status === 'blocked').length;
+  const watch = PENTEST_CHECKS.filter((check) => check.status === 'watch').length;
+
+  return (
+    <section className="space-y-4">
+      <SectionTitle title="Pen Testing" subtitle="Controlled validation runs, evidence, and approval gates" />
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <Metric label="Current run" value="Phase 2" delta="Low-noise checks active" status="neutral" />
+        <Metric label="Checks passed" value={String(passed)} delta="Validated controls" status="healthy" />
+        <Metric label="Watch items" value={String(watch)} delta="Residual or partial coverage" status={watch ? 'neutral' : 'healthy'} />
+        <Metric label="Approval gates" value={String(blocked)} delta="Held before louder testing" status={blocked ? 'warning' : 'healthy'} />
+      </div>
+
+      <div className={card + ' overflow-hidden'}>
+        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
+          <SectionTitle title="Test Runs" subtitle="Scope to result to next action" />
+        </div>
+        <div className="divide-y divide-white/10">
+          {PENTEST_CHECKS.map((check) => (
+            <div key={check.id} className="grid gap-4 px-5 py-4 xl:grid-cols-[0.7fr_1fr_1.4fr_1fr]">
+              <div>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <StatusBadge label={pentestStatusLabel(check.status)} status={pentestStatusTone(check.status)} />
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300">{check.area}</span>
+                </div>
+                <div className="text-[14px] font-semibold text-slate-100">{check.target}</div>
+              </div>
+              <div className="text-[13px] leading-5 text-slate-300">{check.result}</div>
+              <div className="min-w-0 rounded-md border border-white/10 bg-white/[0.025] px-3 py-2 font-mono text-[11px] leading-5 text-slate-400">
+                {check.evidence}
+              </div>
+              <div className="text-[13px] leading-5 text-slate-300">{check.next}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className={card + ' overflow-hidden'}>
+        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
+          <SectionTitle title="Approval Gates" subtitle="What can run now and what needs a human checkpoint" />
+        </div>
+        <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-5 lg:divide-x lg:divide-y-0">
+          {PENTEST_GATES.map((gate) => (
+            <div key={gate.label} className="p-5">
+              <div className="mb-3">
+                <StatusBadge label={gate.status.replace('-', ' ')} status={gateTone(gate.status)} />
+              </div>
+              <div className="text-[14px] font-semibold text-slate-100">{gate.label}</div>
+              <div className="mt-2 text-[12px] leading-5 text-slate-400">{gate.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RollupList({ title, items, empty = 'No rollup data available.' }: { title: string; items: Array<{ key: string; label?: string; count: number; sampled?: boolean }>; empty?: string }) {
+  return (
+    <div className={card + ' p-5'}>
+      <SectionTitle title={title} subtitle={`${items.length} grouped item${items.length === 1 ? '' : 's'}`} />
+      {items.length === 0 ? (
+        <div className={muted}>{empty}</div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {items.map((item) => (
+            <div key={item.key} className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 py-2">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-semibold text-slate-200">{item.label ?? item.key}</div>
+                <div className="truncate font-mono text-[11px] text-slate-500">{item.key}{item.sampled ? ' · sampled evidence' : ''}</div>
+              </div>
+              <div className="shrink-0 font-mono text-[13px] font-semibold text-slate-100">{item.count}</div>
             </div>
           ))}
         </div>
@@ -272,12 +493,20 @@ export default function SecurityPage() {
                 status={data.nginx.errorCount > 5000 ? 'critical' : data.nginx.errorCount > 1000 ? 'warning' : 'healthy'}
               />
               <Metric
+                label="Firewall blocks"
+                value={String(data.firewall?.blockCount ?? 0)}
+                delta={(data.firewall?.sampleCount ?? 0) < (data.firewall?.blockCount ?? 0) ? `${data.firewall?.sampleCount ?? 0} sampled evidence rows` : 'All counted rows loaded'}
+                status={(data.firewall?.blockCount ?? 0) > 100 ? 'warning' : 'healthy'}
+              />
+              <Metric
                 label="Reporting hosts"
                 value={`${(data.hosts ?? []).filter((host) => host.reporting).length}/${Math.max((data.hosts ?? []).length, 1)}`}
                 delta={(data.hosts ?? []).every((host) => host.reporting) ? 'All configured channels online' : 'One or more channels need attention'}
                 status={(data.hosts ?? []).every((host) => host.reporting) ? 'healthy' : 'warning'}
               />
             </section>
+
+            <PentestProgram />
 
             <section className={card + ' overflow-hidden'}>
               <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
@@ -351,6 +580,12 @@ export default function SecurityPage() {
             <section className="grid gap-4 xl:grid-cols-2">
               <EvidencePanel title="Auth Evidence" lines={data.auth.recent} tone={data.auth.failCount > 10 ? 'warning' : 'neutral'} />
               <EvidencePanel title="Nginx Evidence" lines={data.nginx.recentErrors} tone={data.nginx.errorCount > 1000 ? 'warning' : 'neutral'} />
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-3">
+              <RollupList title="Firewall By Host" items={(data.firewall?.byHost ?? []).map((host) => ({ key: host.key, label: host.label, count: host.count, sampled: host.sampled }))} />
+              <RollupList title="Firewall Top Ports" items={data.firewall?.topPorts ?? []} />
+              <RollupList title="Firewall Top Sources" items={data.firewall?.topSources ?? []} />
             </section>
 
             <EvidencePanel title="Firewall Evidence" lines={data.firewall?.recent ?? []} tone={(data.firewall?.blockCount ?? 0) > 100 ? 'warning' : 'neutral'} />
