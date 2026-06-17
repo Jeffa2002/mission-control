@@ -52,6 +52,7 @@ interface EffectxApp {
   name: string;
   description: string;
   url: string;
+  iconUrl?: string;
   kind: AppKind;
   healthPath: string;
   upstream: string;
@@ -147,6 +148,80 @@ function appKindLabel(kind: AppKind) {
   return 'Internal';
 }
 
+function initials(name: string) {
+  return name
+    .split(/[\s/-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || 'EX';
+}
+
+function ProjectLogo({ app, size = 42 }: { app: EffectxApp; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  const showIcon = app.iconUrl && !failed;
+
+  return (
+    <div
+      className="grid shrink-0 place-items-center overflow-hidden border border-white/15 bg-black/25"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 10,
+        boxShadow: `0 0 22px ${app.color}2e`,
+      }}
+    >
+      {showIcon ? (
+        <img
+          src={app.iconUrl}
+          alt=""
+          className="h-full w-full object-contain p-1.5"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span className="text-[13px] font-black text-slate-50" style={{ color: app.color }}>{initials(app.name)}</span>
+      )}
+    </div>
+  );
+}
+
+function CertMark({ ssl }: { ssl?: EffectxApp['ssl'] }) {
+  const state: UiStatus = !ssl ? 'neutral' : !ssl.valid ? 'critical' : ssl.daysRemaining < 14 ? 'warning' : 'healthy';
+  const label = !ssl ? 'TLS unchecked' : !ssl.valid ? 'TLS expired' : ssl.daysRemaining < 14 ? `TLS ${ssl.daysRemaining}d` : `TLS ${ssl.daysRemaining}d`;
+  const color = state === 'healthy'
+    ? 'var(--sev-healthy)'
+    : state === 'warning'
+      ? 'var(--sev-warning)'
+      : state === 'critical'
+        ? 'var(--sev-critical)'
+        : 'var(--text-3)';
+
+  return (
+    <span
+      title={label}
+      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold"
+      style={{
+        color,
+        borderColor: state === 'neutral' ? 'rgba(255,255,255,0.12)' : `${color}55`,
+        background: state === 'neutral' ? 'rgba(255,255,255,0.04)' : `${color}14`,
+      }}
+    >
+      <span className="relative grid h-4 w-4 place-items-center">
+        <span className="absolute h-4 w-4 rotate-45 rounded-[4px]" style={{ background: color, opacity: 0.18 }} />
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="relative">
+          <path d="M8 1.6l4.8 1.9v3.3c0 3.2-2 5.8-4.8 7.1-2.8-1.3-4.8-3.9-4.8-7.1V3.5L8 1.6z" stroke={color} strokeWidth="1.4" strokeLinejoin="round" />
+          {state === 'critical' ? (
+            <path d="M5.8 5.8l4.4 4.4m0-4.4l-4.4 4.4" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+          ) : (
+            <path d="M5.3 8.1l1.7 1.7 3.7-4" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          )}
+        </svg>
+      </span>
+      <span>{label}</span>
+    </span>
+  );
+}
+
 function agentState(agent: AgentStatus): UiStatus {
   if (agent.status === 'Working') return 'healthy';
   if (agent.status === 'Idle') return 'warning';
@@ -226,11 +301,6 @@ function ProjectCard({ app }: { app: EffectxApp }) {
       return app.url;
     }
   })();
-  const sslText = app.ssl
-    ? app.ssl.valid
-      ? `TLS ${app.ssl.daysRemaining}d`
-      : 'TLS expired'
-    : 'TLS unchecked';
   const signal = app.error
     ? app.error
     : app.statusCode
@@ -238,17 +308,20 @@ function ProjectCard({ app }: { app: EffectxApp }) {
       : `${app.latencyMs ?? '-'}ms`;
 
   return (
-    <a href={app.url} target="_blank" rel="noreferrer" className={card2 + ' block p-4 transition-colors hover:bg-white/[0.035]'}>
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div style={{ minWidth: 0 }}>
-          <div className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: app.color, boxShadow: `0 0 10px ${app.color}` }} />
-            <div className="truncate text-[15px] font-bold text-slate-100">{app.name}</div>
+    <a href={app.url} target="_blank" rel="noreferrer" className={card2 + ' block overflow-hidden transition-colors hover:bg-white/[0.035]'}>
+      <div className="relative border-b border-white/10 px-4 py-3" style={{ background: `linear-gradient(135deg, ${app.color}24, rgba(255,255,255,0.025))` }}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <ProjectLogo app={app} />
+            <div style={{ minWidth: 0 }}>
+              <div className="truncate text-[15px] font-bold text-slate-100">{app.name}</div>
+              <div className="mt-1 truncate text-[12px] text-slate-400">{host}</div>
+            </div>
           </div>
-          <div className="mt-1 truncate text-[12px] text-slate-500">{host}</div>
+          <StatusBadge label={appStatusLabel(app.status)} status={tone} pulse={tone === 'critical'} />
         </div>
-        <StatusBadge label={appStatusLabel(app.status)} status={tone} pulse={tone === 'critical'} />
       </div>
+      <div className="p-4">
       <div className="min-h-[34px] text-[12px] leading-5 text-slate-400">{app.description}</div>
       <div className="mt-4 grid grid-cols-2 gap-3 text-[12px]">
         <div>
@@ -262,9 +335,10 @@ function ProjectCard({ app }: { app: EffectxApp }) {
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <span className={sevPill(tone)}>{signal}</span>
-        <span className={sevPill(app.ssl && !app.ssl.valid ? 'critical' : 'neutral')}>{sslText}</span>
+        <CertMark ssl={app.ssl} />
       </div>
       <div className="mt-3 truncate rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-[11px] text-slate-500">{app.source}</div>
+      </div>
     </a>
   );
 }

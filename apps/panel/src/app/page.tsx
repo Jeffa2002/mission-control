@@ -29,6 +29,7 @@ interface EffectxApp {
   name: string;
   description?: string;
   url: string;
+  iconUrl?: string;
   status: 'up' | 'degraded' | 'down' | 'unknown';
   kind?: 'app' | 'site' | 'tool' | 'alias' | 'internal';
   upstream?: string;
@@ -89,6 +90,78 @@ function StatusBadge({ status }: { status: 'up' | 'degraded' | 'down' | 'unknown
     }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, display: 'inline-block' }} />
       {s.label}
+    </span>
+  );
+}
+
+function initials(name: string) {
+  return name
+    .split(/[\s/-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || 'EX';
+}
+
+function MiniProjectLogo({ app }: { app: EffectxApp }) {
+  const [failed, setFailed] = useState(false);
+  const showIcon = app.iconUrl && !failed;
+
+  return (
+    <span
+      style={{
+        width: 30,
+        height: 30,
+        borderRadius: 8,
+        display: 'grid',
+        placeItems: 'center',
+        flexShrink: 0,
+        overflow: 'hidden',
+        border: '1px solid rgba(255,255,255,0.14)',
+        background: `linear-gradient(135deg, ${app.color ?? 'var(--accent)'}28, rgba(0,0,0,0.24))`,
+      }}
+    >
+      {showIcon ? (
+        <img src={app.iconUrl} alt="" onError={() => setFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
+      ) : (
+        <span style={{ fontSize: 10, fontWeight: 900, color: app.color ?? 'var(--accent)' }}>{initials(app.name)}</span>
+      )}
+    </span>
+  );
+}
+
+function MiniCertMark({ ssl }: { ssl?: EffectxApp['ssl'] }) {
+  const state = !ssl ? 'neutral' : !ssl.valid ? 'critical' : ssl.daysRemaining < 14 ? 'warning' : 'healthy';
+  const color = state === 'healthy'
+    ? 'var(--sev-healthy)'
+    : state === 'warning'
+      ? 'var(--sev-warning)'
+      : state === 'critical'
+        ? 'var(--sev-critical)'
+        : 'var(--text-3)';
+  const label = !ssl ? 'TLS unchecked' : !ssl.valid ? 'TLS expired' : `TLS ${ssl.daysRemaining}d`;
+
+  return (
+    <span
+      title={label}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        fontSize: 11,
+        fontWeight: 800,
+        color,
+        padding: '2px 7px',
+        borderRadius: 999,
+        border: `1px solid ${state === 'neutral' ? 'rgba(255,255,255,0.12)' : `${color}55`}`,
+        background: state === 'neutral' ? 'rgba(255,255,255,0.04)' : `${color}12`,
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M8 1.7l4.7 1.8v3.4c0 3.1-1.9 5.6-4.7 7-2.8-1.4-4.7-3.9-4.7-7V3.5L8 1.7z" stroke={color} strokeWidth="1.4" strokeLinejoin="round" />
+        <path d="M5.3 8.1l1.7 1.7 3.7-4" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      TLS
     </span>
   );
 }
@@ -515,7 +588,7 @@ export default function Home() {
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: 999, background: app.color ?? 'var(--accent)', boxShadow: `0 0 8px ${app.color ?? 'var(--accent)'}`, flexShrink: 0 }} />
+                        <MiniProjectLogo app={app} />
                         <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{app.name}</span>
                       </div>
                       <StatusBadge status={app.status} />
@@ -528,9 +601,7 @@ export default function Home() {
                         <span>{app.latencyMs}ms</span>
                       )}
                       {app.ssl?.daysRemaining !== undefined && (
-                        <span style={{ color: app.ssl.daysRemaining < 14 ? 'var(--sev-warning)' : 'var(--text-3)' }}>
-                          SSL {app.ssl.daysRemaining}d
-                        </span>
+                        <MiniCertMark ssl={app.ssl} />
                       )}
                     </div>
                   </div>

@@ -261,6 +261,7 @@ interface AppHealth {
   name: string;
   description: string;
   url: string;
+  iconUrl: string;
   kind: AppKind;
   healthPath: string;
   upstream: string;
@@ -331,6 +332,7 @@ async function checkApp(app: typeof APPS[number]): Promise<AppHealth> {
 
   return {
     ...app,
+    iconUrl: new URL('/favicon.ico', app.url).toString(),
     status: httpResult.status,
     statusCode: httpResult.statusCode,
     latencyMs: httpResult.latencyMs,
