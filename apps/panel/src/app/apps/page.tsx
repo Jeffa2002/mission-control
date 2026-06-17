@@ -44,6 +44,40 @@ interface Deploy {
   durationS?: number;
 }
 
+type AppStatus = 'up' | 'degraded' | 'down' | 'unknown';
+type AppKind = 'app' | 'site' | 'tool' | 'alias' | 'internal';
+
+interface EffectxApp {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  kind: AppKind;
+  healthPath: string;
+  upstream: string;
+  source: string;
+  color: string;
+  status: AppStatus;
+  statusCode?: number;
+  latencyMs?: number;
+  error?: string;
+  checkedAt: string;
+  ssl?: {
+    valid: boolean;
+    expiresAt: string;
+    daysRemaining: number;
+    issuer?: string;
+  };
+}
+
+interface EffectxData {
+  ok: boolean;
+  overall: 'green' | 'amber' | 'red';
+  summary: { total: number; up: number; degraded: number; down: number };
+  apps: EffectxApp[];
+  checkedAt: string;
+}
+
 interface ServiceNode {
   id: string;
   label: string;
@@ -89,6 +123,28 @@ function deployState(deploys: Deploy[]): UiStatus {
   if (latest.status === 'failure') return 'critical';
   if (latest.status === 'running') return 'warning';
   return 'healthy';
+}
+
+function appStatusTone(status?: AppStatus): UiStatus {
+  if (status === 'up') return 'healthy';
+  if (status === 'degraded') return 'warning';
+  if (status === 'down') return 'critical';
+  return 'neutral';
+}
+
+function appStatusLabel(status?: AppStatus) {
+  if (status === 'up') return 'Up';
+  if (status === 'degraded') return 'Degraded';
+  if (status === 'down') return 'Down';
+  return 'Unknown';
+}
+
+function appKindLabel(kind: AppKind) {
+  if (kind === 'app') return 'Application';
+  if (kind === 'site') return 'Website';
+  if (kind === 'tool') return 'Tool';
+  if (kind === 'alias') return 'Alias';
+  return 'Internal';
 }
 
 function agentState(agent: AgentStatus): UiStatus {
@@ -161,6 +217,58 @@ function ServiceCard({ node }: { node: ServiceNode }) {
   );
 }
 
+function ProjectCard({ app }: { app: EffectxApp }) {
+  const tone = appStatusTone(app.status);
+  const host = (() => {
+    try {
+      return new URL(app.url).hostname;
+    } catch {
+      return app.url;
+    }
+  })();
+  const sslText = app.ssl
+    ? app.ssl.valid
+      ? `TLS ${app.ssl.daysRemaining}d`
+      : 'TLS expired'
+    : 'TLS unchecked';
+  const signal = app.error
+    ? app.error
+    : app.statusCode
+      ? `HTTP ${app.statusCode} · ${app.latencyMs ?? '-'}ms`
+      : `${app.latencyMs ?? '-'}ms`;
+
+  return (
+    <a href={app.url} target="_blank" rel="noreferrer" className={card2 + ' block p-4 transition-colors hover:bg-white/[0.035]'}>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div style={{ minWidth: 0 }}>
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: app.color, boxShadow: `0 0 10px ${app.color}` }} />
+            <div className="truncate text-[15px] font-bold text-slate-100">{app.name}</div>
+          </div>
+          <div className="mt-1 truncate text-[12px] text-slate-500">{host}</div>
+        </div>
+        <StatusBadge label={appStatusLabel(app.status)} status={tone} pulse={tone === 'critical'} />
+      </div>
+      <div className="min-h-[34px] text-[12px] leading-5 text-slate-400">{app.description}</div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-[12px]">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">Type</div>
+          <div className="mt-1 text-slate-300">{appKindLabel(app.kind)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">Upstream</div>
+          <div className="mt-1 truncate font-mono text-[11px] text-slate-300">{app.upstream}</div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <span className={sevPill(tone)}>{signal}</span>
+        <span className={sevPill(app.ssl && !app.ssl.valid ? 'critical' : 'neutral')}>{sslText}</span>
+      </div>
+      <div className="mt-3 truncate rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-[11px] text-slate-500">{app.source}</div>
+    </a>
+  );
+}
+
 function AgentRow({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: AgentStatus) => void }) {
   const status = agentState(agent);
   return (
@@ -181,6 +289,7 @@ function AgentRow({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: Agent
 
 export default function AppsPage() {
   const [health, setHealth] = useState<HealthData | null>(null);
+  const [effectx, setEffectx] = useState<EffectxData | null>(null);
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [deploys, setDeploys] = useState<Deploy[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<AgentStatus | null>(null);
@@ -190,17 +299,19 @@ export default function AppsPage() {
   async function load() {
     setError(null);
     try {
-      const [healthRes, agentsRes, deploysRes] = await Promise.allSettled([
+      const [healthRes, effectxRes, agentsRes, deploysRes] = await Promise.allSettled([
         fetch('/api/health', { cache: 'no-store' }).then((r) => r.json()),
+        fetch('/api/effectx', { cache: 'no-store' }).then((r) => r.json()),
         fetch('/api/agents/status', { cache: 'no-store' }).then((r) => r.json()),
         fetch('/api/deploys', { cache: 'no-store' }).then((r) => r.json()),
       ]);
 
       if (healthRes.status === 'fulfilled') setHealth(healthRes.value);
+      if (effectxRes.status === 'fulfilled') setEffectx(effectxRes.value);
       if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value.agents ?? []);
       if (deploysRes.status === 'fulfilled') setDeploys(deploysRes.value.deploys ?? []);
 
-      const failed = [healthRes, agentsRes, deploysRes].filter((r) => r.status === 'rejected').length;
+      const failed = [healthRes, effectxRes, agentsRes, deploysRes].filter((r) => r.status === 'rejected').length;
       if (failed) setError(`${failed} app telemetry source${failed === 1 ? '' : 's'} failed to respond`);
     } finally {
       setLoading(false);
@@ -217,8 +328,20 @@ export default function AppsPage() {
     const latestDeploy = deploys[0];
     const deployStatus = deployState(deploys);
     const activeAgents = agents.filter((a) => a.status === 'Working').length;
+    const siteSummary = effectx?.summary;
+    const siteStatus: UiStatus = siteSummary?.down ? 'critical' : siteSummary?.degraded ? 'warning' : siteSummary?.up ? 'healthy' : 'neutral';
 
     return [
+      {
+        id: 'effectx-sites',
+        label: 'EffectX Sites',
+        group: 'public edge',
+        status: siteStatus,
+        signal: siteSummary ? `${siteSummary.up}/${siteSummary.total} up · ${siteSummary.degraded} degraded · ${siteSummary.down} down` : 'waiting for public checks',
+        dependency: 'prod nginx + DNS + TLS',
+        owner: 'EffectX',
+        lastEvent: `public probe ${timeAgo(effectx?.checkedAt)}`,
+      },
       {
         id: 'mission-panel',
         label: 'Mission Panel',
@@ -280,12 +403,19 @@ export default function AppsPage() {
         lastEvent: `pulse ${timeAgo(health?.checked_at)}`,
       },
     ];
-  }, [agents, deploys, health, loading]);
+  }, [agents, deploys, effectx, health, loading]);
 
   const critical = serviceNodes.filter((n) => n.status === 'critical').length;
   const degraded = serviceNodes.filter((n) => n.status === 'warning').length;
   const healthy = serviceNodes.filter((n) => n.status === 'healthy').length;
   const latestDeploy = deploys[0];
+  const projectCritical = effectx?.summary.down ?? 0;
+  const projectDegraded = effectx?.summary.degraded ?? 0;
+  const projectStatus: UiStatus = projectCritical ? 'critical' : projectDegraded ? 'warning' : effectx ? 'healthy' : 'neutral';
+  const sortedProjects = useMemo(() => {
+    const rank: Record<AppStatus, number> = { down: 0, degraded: 1, unknown: 2, up: 3 };
+    return [...(effectx?.apps ?? [])].sort((a, b) => rank[a.status] - rank[b.status] || a.name.localeCompare(b.name));
+  }, [effectx]);
   const commandStatus: UiStatus = critical ? 'critical' : degraded ? 'warning' : healthy ? 'healthy' : 'neutral';
 
   return (
@@ -306,10 +436,29 @@ export default function AppsPage() {
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricTile label="Command State" value={statusLabel(commandStatus)} hint={`${critical} critical · ${degraded} degraded · ${healthy} healthy`} status={commandStatus} />
-          <MetricTile label="Agents" value={`${agents.filter((a) => a.status === 'Working').length}/${agents.length}`} hint="working agents in the current mesh" status={agents.some((a) => a.status === 'Working') ? 'healthy' : agents.length ? 'warning' : 'neutral'} />
+          <MetricTile label="Projects" value={effectx ? `${effectx.summary.up}/${effectx.summary.total}` : '-'} hint={`${projectCritical} down · ${projectDegraded} degraded across public sites`} status={projectStatus} />
           <MetricTile label="Release" value={latestDeploy?.status ?? 'none'} hint={latestDeploy ? `${latestDeploy.app} · ${timeAgo(latestDeploy.startedAt)}` : 'no deploy events recorded'} status={deployState(deploys)} />
-          <MetricTile label="Probe Age" value={timeAgo(health?.checked_at)} hint="latest application health probe" status={statusFromCheck(health?.checks?.app)} />
+          <MetricTile label="Probe Age" value={timeAgo(effectx?.checkedAt ?? health?.checked_at)} hint="latest public project probe" status={projectStatus} />
         </div>
+
+        <section className={card + ' overflow-hidden'}>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[var(--bg-2)] px-4 py-3">
+            <div>
+              <div className="text-[13px] font-bold text-slate-100">Sites & Projects</div>
+              <div className="mt-1 text-[12px] text-slate-500">Live public host checks from the prod nginx inventory</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className={sevPill('critical')}>{effectx?.summary.down ?? 0} down</span>
+              <span className={sevPill('warning')}>{effectx?.summary.degraded ?? 0} degraded</span>
+              <span className={sevPill('healthy')}>{effectx?.summary.up ?? 0} up</span>
+            </div>
+          </div>
+          <div className="grid gap-4 p-4 md:grid-cols-2 2xl:grid-cols-3">
+            {sortedProjects.length ? sortedProjects.map((app) => <ProjectCard key={app.id} app={app} />) : (
+              <div className="p-5 text-[13px] text-slate-500">No project health data is currently reporting.</div>
+            )}
+          </div>
+        </section>
 
         <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
           <section className={card + ' overflow-hidden'}>
@@ -361,6 +510,7 @@ export default function AppsPage() {
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Telemetry Sources</div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <span className={sevPill(health ? 'healthy' : 'neutral')}>health API</span>
+                <span className={sevPill(effectx ? 'healthy' : 'neutral')}>project catalogue</span>
                 <span className={sevPill(agents.length ? 'healthy' : 'neutral')}>agent mesh</span>
                 <span className={sevPill(deploys.length ? 'healthy' : 'neutral')}>deploy stream</span>
               </div>

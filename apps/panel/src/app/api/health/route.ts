@@ -33,9 +33,9 @@ export async function GET(req: Request) {
 
   const checks: Record<string, { status: string; detail?: string }> = {
     app: { status: 'ok', detail: 'responding' },
-    prometheus: { status: 'ok', detail: 'unchecked' },
-    grafana: { status: 'ok', detail: 'unchecked' },
-    heartbeat: { status: 'ok', detail: 'unchecked' },
+    prometheus: { status: 'unknown', detail: 'unchecked' },
+    grafana: { status: 'unknown', detail: 'unchecked' },
+    heartbeat: { status: 'unknown', detail: 'unchecked' },
     panic_latch: panicLatch.latched
       ? { status: 'error', detail: `latched since ${panicLatch.ts}` }
       : { status: 'ok', detail: 'not latched' },

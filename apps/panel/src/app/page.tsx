@@ -27,9 +27,12 @@ interface HealthData {
 interface EffectxApp {
   id: string;
   name: string;
-  emoji: string;
+  description?: string;
   url: string;
   status: 'up' | 'degraded' | 'down' | 'unknown';
+  kind?: 'app' | 'site' | 'tool' | 'alias' | 'internal';
+  upstream?: string;
+  color?: string;
   latencyMs?: number;
   ssl?: { daysRemaining: number; valid: boolean };
 }
@@ -479,7 +482,7 @@ export default function Home() {
 
         {/* ── App Health grid ─────────────────────────────────────────────── */}
         <section>
-          <SectionTitle title="App Health" subtitle="Live status of all Effectx suite apps" />
+          <SectionTitle title="App Health" subtitle="Live status of EffectX sites and projects" />
           {effectx === null ? (
             <div className={card + ' p-6 text-center ' + 'text-slate-400 text-sm'}>Loading app health…</div>
           ) : effectx.length === 0 ? (
@@ -511,11 +514,14 @@ export default function Home() {
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 18 }}>{app.emoji}</span>
-                        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)' }}>{app.name}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 999, background: app.color ?? 'var(--accent)', boxShadow: `0 0 8px ${app.color ?? 'var(--accent)'}`, flexShrink: 0 }} />
+                        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{app.name}</span>
                       </div>
                       <StatusBadge status={app.status} />
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {app.kind ? app.kind.toUpperCase() : 'PROJECT'} · {app.upstream ?? new URL(app.url).hostname}
                     </div>
                     <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-3)' }}>
                       {app.latencyMs !== undefined && (

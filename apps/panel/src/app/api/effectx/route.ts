@@ -1,7 +1,7 @@
 /**
  * GET /api/effectx
  *
- * Health checks for all Effectx suite apps running on prod (203.57.50.240).
+ * Health checks for EffectX-facing sites and apps running behind prod nginx.
  * Each app is checked via HTTP with a 4s timeout.
  * SSL cert expiry is checked via TLS socket connection.
  */
@@ -14,67 +14,26 @@ const TIMEOUT_MS = 4_000;
 
 const APPS = [
   {
-    id: 'helix',
-    name: 'Helix',
-    description: 'ITSM — ticketing, incidents, assets',
-    url: 'https://app.helix.effectx.com.au',
-    healthPath: '/api/auth/providers',
-    color: '#6366F1',
-    emoji: '🎫',
-  },
-  {
-    id: 'helix-web',
-    name: 'Helix Web',
-    description: 'Helix marketing site',
-    url: 'https://helix.effectx.com.au',
-    healthPath: '/',
-    color: '#6366F1',
-    emoji: '🌐',
-  },
-  {
     id: 'venconx',
-    name: 'VenconX',
+    name: 'VenConX',
     description: 'Vendor & contractor management',
     url: 'https://venconx.effectx.com.au',
     healthPath: '/api/auth/providers',
+    kind: 'app',
+    upstream: '127.0.0.1:3010',
+    source: '/var/www/venconx/venconx',
     color: '#0EA5E9',
-    emoji: '🤝',
   },
   {
-    id: 'projectxify',
-    name: 'ProjectXify',
-    description: 'Project & portfolio management',
-    url: 'https://app.projectxify.effectx.com.au',
-    healthPath: '/api/auth/providers',
-    color: '#7C3AED',
-    emoji: '📋',
-  },
-  {
-    id: 'projectxify-web',
-    name: 'ProjectXify Web',
-    description: 'ProjectXify marketing site',
-    url: 'https://projectxify.effectx.com.au',
-    healthPath: '/',
-    color: '#7C3AED',
-    emoji: '🌐',
-  },
-  {
-    id: 'timepulse',
-    name: 'TimePulse',
-    description: 'WA Gov time management & flexi leave',
-    url: 'https://timepulse.effectx.com.au',
-    healthPath: '/api/auth/providers',
-    color: '#10B981',
-    emoji: '⏱️',
-  },
-  {
-    id: 'queuem8',
-    name: 'QueueM8',
-    description: 'Queue & customer flow management',
+    id: 'queuem8-app',
+    name: 'QueueM8 / Cutline App',
+    description: 'Queue and customer flow management',
     url: 'https://app.queuem8.effectx.com.au',
     healthPath: '/',
+    kind: 'app',
+    upstream: '127.0.0.1:3005',
+    source: '/var/www/queuem8/cutline',
     color: '#F59E0B',
-    emoji: '🎟️',
   },
   {
     id: 'queuem8-web',
@@ -82,21 +41,213 @@ const APPS = [
     description: 'QueueM8 marketing site',
     url: 'https://queuem8.effectx.com.au',
     healthPath: '/',
+    kind: 'site',
+    upstream: '127.0.0.1:3032',
+    source: '/var/www/queuem8/cutline-web',
     color: '#F59E0B',
-    emoji: '🌐',
   },
   {
-    id: "crm8",
-    name: "CRM8",
-    description: "CRM & sales pipeline management",
-    url: "https://crm8.effectx.com.au",
-    healthPath: "/login",
-    color: "#EF4444",
-    emoji: "👥",
+    id: 'projenta-app',
+    name: 'Projenta App',
+    description: 'Project and portfolio management',
+    url: 'https://app.projenta.io',
+    healthPath: '/api/auth/providers',
+    kind: 'app',
+    upstream: '127.0.0.1:3022',
+    source: '/var/www/projectxify/projectxify',
+    color: '#7C3AED',
+  },
+  {
+    id: 'projenta-web',
+    name: 'Projenta Web',
+    description: 'Projenta marketing site',
+    url: 'https://projenta.io',
+    healthPath: '/',
+    kind: 'site',
+    upstream: '127.0.0.1:3024',
+    source: '/var/www/projectxify/projenta-web',
+    color: '#7C3AED',
+  },
+  {
+    id: 'projectxify-app-alias',
+    name: 'ProjectXify App Alias',
+    description: 'Legacy ProjectXify app hostname',
+    url: 'https://app.projectxify.effectx.com.au',
+    healthPath: '/api/auth/providers',
+    kind: 'alias',
+    upstream: '127.0.0.1:3022',
+    source: '/var/www/projectxify/projectxify',
+    color: '#8B5CF6',
+  },
+  {
+    id: 'projectxify-web-alias',
+    name: 'ProjectXify Web Alias',
+    description: 'Legacy ProjectXify marketing hostname',
+    url: 'https://projectxify.effectx.com.au',
+    healthPath: '/',
+    kind: 'alias',
+    upstream: '127.0.0.1:3023',
+    source: '/var/www/projectxify/projectxify-web',
+    color: '#8B5CF6',
+  },
+  {
+    id: 'helix-app',
+    name: 'Helix App',
+    description: 'ITSM ticketing, incidents, and assets',
+    url: 'https://app.helix.effectx.com.au',
+    healthPath: '/api/auth/providers',
+    kind: 'app',
+    upstream: '127.0.0.1:3030',
+    source: '/var/www/helix/app',
+    color: '#6366F1',
+  },
+  {
+    id: 'helix-web',
+    name: 'Helix Web',
+    description: 'Helix marketing site',
+    url: 'https://helix.effectx.com.au',
+    healthPath: '/',
+    kind: 'site',
+    upstream: '127.0.0.1:3004',
+    source: '/var/www/helix/web',
+    color: '#6366F1',
+  },
+  {
+    id: 'timepulse',
+    name: 'TimePulse',
+    description: 'WA Gov time management and flexi leave',
+    url: 'https://timepulse.effectx.com.au',
+    healthPath: '/api/auth/providers',
+    kind: 'app',
+    upstream: '127.0.0.1:3027',
+    source: '/root/.openclaw/workspace/timepulse',
+    color: '#10B981',
+  },
+  {
+    id: 'crossbench',
+    name: 'Crossbench',
+    description: 'Crossbench public site and app surface',
+    url: 'https://crossbench.io',
+    healthPath: '/',
+    kind: 'app',
+    upstream: '127.0.0.1:3006',
+    source: '/var/www/crossbench',
+    color: '#22D3EE',
+  },
+  {
+    id: 'abea-ndh',
+    name: 'ABEA NDH',
+    description: 'ABEA NDH public application',
+    url: 'https://abea-ndh.effectx.com.au',
+    healthPath: '/',
+    kind: 'app',
+    upstream: '127.0.0.1:3055',
+    source: 'pm2:pm2-abea',
+    color: '#EF4444',
+  },
+  {
+    id: 'crm8',
+    name: 'CRM8',
+    description: 'CRM and sales pipeline management',
+    url: 'https://crm8.effectx.com.au',
+    healthPath: '/login',
+    kind: 'app',
+    upstream: '100.112.179.70:443',
+    source: 'crm8 tailnet host',
+    color: '#F43F5E',
+  },
+  {
+    id: 'effectx-site',
+    name: 'EffectX Site',
+    description: 'EffectX public website',
+    url: 'https://effectx.com.au',
+    healthPath: '/',
+    kind: 'site',
+    upstream: 'static export',
+    source: '/var/www/effectx-site/out',
+    color: '#14B8A6',
+  },
+  {
+    id: 'equim8-site',
+    name: 'Equim8 Site',
+    description: 'Equim8 public website',
+    url: 'https://equim8.com.au',
+    healthPath: '/',
+    kind: 'site',
+    upstream: 'static export',
+    source: '/var/www/equim8-site/out',
+    color: '#84CC16',
+  },
+  {
+    id: 'equim8-effectx-alias',
+    name: 'Equim8 EffectX Alias',
+    description: 'EffectX-hosted Equim8 alias',
+    url: 'https://equim8.effectx.com.au',
+    healthPath: '/',
+    kind: 'alias',
+    upstream: 'static export',
+    source: '/var/www/equim8-site/out',
+    color: '#84CC16',
+  },
+  {
+    id: 'fuel',
+    name: 'Fuel',
+    description: 'Fuel tool surface',
+    url: 'https://fuel.effectx.com.au',
+    healthPath: '/',
+    kind: 'tool',
+    upstream: '127.0.0.1:3041',
+    source: 'nginx upstream',
+    color: '#F97316',
+  },
+  {
+    id: 'nurturerecord',
+    name: 'NurtureRecord',
+    description: 'NurtureRecord application',
+    url: 'https://nurturerecord.effectx.com.au',
+    healthPath: '/',
+    kind: 'app',
+    upstream: '127.0.0.1:3033',
+    source: 'nginx upstream',
+    color: '#EC4899',
+  },
+  {
+    id: 'orgcharts',
+    name: 'OrgCharts',
+    description: 'Organisation chart tool',
+    url: 'https://orgcharts.effectx.com.au',
+    healthPath: '/',
+    kind: 'tool',
+    upstream: '127.0.0.1:3035',
+    source: '/var/www/orgcharts',
+    color: '#38BDF8',
+  },
+  {
+    id: 'yielddock',
+    name: 'YieldDock',
+    description: 'YieldDock application',
+    url: 'https://yielddock.effectx.com.au',
+    healthPath: '/',
+    kind: 'app',
+    upstream: '127.0.0.1:3034',
+    source: '/var/www/yielddock/app',
+    color: '#A3E635',
+  },
+  {
+    id: 'mission-control',
+    name: 'Mission Control',
+    description: 'Operations panel',
+    url: 'https://mission.effectx.com.au',
+    healthPath: '/',
+    kind: 'internal',
+    upstream: '127.0.0.1:3020',
+    source: '/var/www/mission-control',
+    color: '#22C55E',
   },
 ] as const;
 
 type AppStatus = 'up' | 'degraded' | 'down' | 'unknown';
+type AppKind = 'app' | 'site' | 'tool' | 'alias' | 'internal';
 
 interface SslInfo {
   valid: boolean;
@@ -110,8 +261,11 @@ interface AppHealth {
   name: string;
   description: string;
   url: string;
+  kind: AppKind;
+  healthPath: string;
+  upstream: string;
+  source: string;
   color: string;
-  emoji: string;
   status: AppStatus;
   statusCode?: number;
   latencyMs?: number;
@@ -165,7 +319,7 @@ async function checkApp(app: typeof APPS[number]): Promise<AppHealth> {
           ),
         ]);
         const latencyMs = Date.now() - start;
-        // 2xx and 3xx = up, 4xx = degraded, 5xx = down
+        // 2xx and 3xx = up, 4xx = reachable but unhealthy/auth-blocked, 5xx = down.
         const status: AppStatus = res.status < 400 ? 'up' : res.status < 500 ? 'degraded' : 'down';
         return { status, statusCode: res.status, latencyMs, error: undefined as string | undefined };
       } catch (e: any) {
@@ -194,12 +348,13 @@ export async function GET(req: Request) {
 
   const upCount = results.filter((r) => r.status === 'up').length;
   const downCount = results.filter((r) => r.status === 'down').length;
-  const overall = downCount === 0 ? 'green' : downCount < results.length / 2 ? 'amber' : 'red';
+  const degradedCount = results.filter((r) => r.status === 'degraded').length;
+  const overall = downCount === 0 && degradedCount === 0 ? 'green' : downCount < results.length / 2 ? 'amber' : 'red';
 
   return NextResponse.json({
     ok: true,
     overall,
-    summary: { total: results.length, up: upCount, down: downCount, degraded: results.filter((r) => r.status === 'degraded').length },
+    summary: { total: results.length, up: upCount, down: downCount, degraded: degradedCount },
     apps: results,
     checkedAt: new Date().toISOString(),
   });
