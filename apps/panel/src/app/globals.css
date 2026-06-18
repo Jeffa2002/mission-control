@@ -279,6 +279,18 @@ code, pre, kbd, samp { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regul
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
+  .mc-security-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .mc-security-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .mc-security-killchain {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
   .mc-network-rail {
     position: static;
     max-height: none;
@@ -331,6 +343,11 @@ code, pre, kbd, samp { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regul
   }
 
   .mc-network-stats {
+    grid-template-columns: 1fr !important;
+  }
+
+  .mc-security-stats,
+  .mc-security-killchain {
     grid-template-columns: 1fr !important;
   }
 

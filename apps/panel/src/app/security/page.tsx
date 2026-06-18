@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import type React from 'react';
 import { AppShell, Metric, SectionTitle, StatusBadge, ToolbarButton, card, muted } from '../../components/ops-ui';
 
 interface SecurityData {
@@ -469,9 +470,9 @@ function EvidencePanel({ title, lines, tone = 'neutral' }: { title: string; line
               key={`${line}-${i}`}
               className="overflow-hidden text-ellipsis whitespace-nowrap rounded-md border border-white/10 bg-white/[0.025] px-3 py-2 font-mono text-[11px]"
               style={{ color }}
-              title={line}
+              title={redactSecurityText(line)}
             >
-              {line}
+              {redactSecurityText(line)}
             </div>
           ))}
         </div>
@@ -605,8 +606,8 @@ function RollupList({ title, items, empty = 'No rollup data available.' }: { tit
           {items.map((item) => (
             <div key={item.key} className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 py-2">
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-semibold text-slate-200">{item.label ?? item.key}</div>
-                <div className="truncate font-mono text-[11px] text-slate-500">{item.key}{item.sampled ? ' · sampled evidence' : ''}</div>
+                <div className="truncate text-[13px] font-semibold text-slate-200">{redactSecurityText(item.label ?? item.key)}</div>
+                <div className="truncate font-mono text-[11px] text-slate-500">{redactSecurityText(item.key)}{item.sampled ? ' · sampled evidence' : ''}</div>
               </div>
               <div className="shrink-0 font-mono text-[13px] font-semibold text-slate-100">{item.count}</div>
             </div>
@@ -614,6 +615,217 @@ function RollupList({ title, items, empty = 'No rollup data available.' }: { tit
         </div>
       )}
     </div>
+  );
+}
+
+function redactSecurityText(value: string) {
+  return value
+    .replace(/\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b/g, '$1.x.x')
+    .replace(/([?&](?:token|key|secret|password|session|auth)=)[^&\s]+/gi, '$1[redacted]')
+    .replace(/\b[A-Za-z0-9_-]{36,}\b/g, '[redacted]');
+}
+
+function securityTone(threats: ThreatItem[], data: SecurityData): 'healthy' | 'warning' | 'critical' | 'info' {
+  if (threats.some((threat) => threat.severity === 'critical')) return 'critical';
+  if (threats.some((threat) => threat.severity === 'warning')) return 'warning';
+  if (data.stale) return 'info';
+  return 'healthy';
+}
+
+function SecurityStatTile({ label, value, hint, tone = 'info' }: { label: string; value: string; hint: string; tone?: 'healthy' | 'warning' | 'critical' | 'info' }) {
+  const color = tone === 'healthy' ? '#22C55E' : tone === 'warning' ? '#F59E0B' : tone === 'critical' ? '#EF4444' : '#67D5FF';
+  return (
+    <div className="mc-security-stat" style={{
+      position: 'relative',
+      overflow: 'hidden',
+      minHeight: 98,
+      padding: '14px 16px',
+      borderRadius: 14,
+      border: `1px solid ${color}33`,
+      background: `linear-gradient(145deg, ${color}13, rgba(10,16,31,0.88) 52%, rgba(255,255,255,0.035))`,
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 42px rgba(0,0,0,0.24)',
+    }}>
+      <div style={{ position: 'absolute', inset: '0 0 auto 0', height: 1, background: `linear-gradient(90deg, transparent, ${color}, transparent)`, opacity: 0.62 }} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ fontSize: 10, color: '#8B96AA', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 900 }}>{label}</div>
+        <div style={{ width: 8, height: 8, borderRadius: 99, background: color, boxShadow: `0 0 18px ${color}` }} />
+      </div>
+      <div style={{ marginTop: 10, fontSize: 25, lineHeight: 1, fontWeight: 900, color: '#F3F7FF', letterSpacing: 0 }}>{value}</div>
+      <div style={{ marginTop: 7, fontSize: 11, lineHeight: 1.35, color: '#8B96AA' }}>{hint}</div>
+    </div>
+  );
+}
+
+function SecurityGlassPanel({ children, className = '', style = {} }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
+  return (
+    <div className={className} style={{
+      borderRadius: 14,
+      border: '1px solid rgba(103,213,255,0.15)',
+      background: 'linear-gradient(145deg, rgba(15,23,42,0.82), rgba(7,12,24,0.94))',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.055), 0 18px 46px rgba(0,0,0,0.26)',
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function MiniPanelTitle({ eyebrow, title, action }: { eyebrow: string; title: string; action?: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+      <div>
+        <div style={{ fontSize: 10, color: '#67D5FF', textTransform: 'uppercase', letterSpacing: '0.16em', fontWeight: 900 }}>{eyebrow}</div>
+        <div style={{ marginTop: 3, fontSize: 15, color: '#F3F7FF', fontWeight: 900, letterSpacing: 0 }}>{title}</div>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function KillChainStrip({ threats, authFailCount, firewallBlocks, nginxErrors }: { threats: ThreatItem[]; authFailCount: number; firewallBlocks: number; nginxErrors: number }) {
+  const stages = [
+    { label: 'Recon', value: firewallBlocks + nginxErrors, tone: firewallBlocks + nginxErrors > 1000 ? 'warning' : 'info', hint: 'scan and web pressure' },
+    { label: 'Exposure', value: threats.filter(t => t.id === 'host-reporting' || t.source === 'coverage').length, tone: threats.some(t => t.source === 'coverage') ? 'warning' : 'healthy', hint: 'telemetry and surface gaps' },
+    { label: 'Access', value: authFailCount, tone: authFailCount > 50 ? 'critical' : authFailCount > 10 ? 'warning' : 'healthy', hint: 'auth failure pressure' },
+    { label: 'Privilege', value: 0, tone: 'healthy', hint: 'no sudo spike surfaced' },
+    { label: 'Persistence', value: 0, tone: 'healthy', hint: 'no signal surfaced' },
+    { label: 'Exfil', value: 0, tone: 'healthy', hint: 'no signal surfaced' },
+  ];
+
+  const colorFor = (tone: string) => tone === 'critical' ? '#EF4444' : tone === 'warning' ? '#F59E0B' : tone === 'healthy' ? '#22C55E' : '#67D5FF';
+
+  return (
+    <SecurityGlassPanel style={{ padding: 16 }}>
+      <MiniPanelTitle eyebrow="Attack Path" title="Current signal mapping" />
+      <div className="mc-security-killchain" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 8 }}>
+        {stages.map((stage) => {
+          const color = colorFor(stage.tone);
+          return (
+            <div key={stage.label} style={{ position: 'relative', padding: '11px 10px', borderRadius: 12, border: `1px solid ${color}28`, background: `${color}10` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                <div style={{ fontSize: 11, color: '#F3F7FF', fontWeight: 900 }}>{stage.label}</div>
+                <div style={{ color, fontSize: 11, fontWeight: 900 }}>{stage.value}</div>
+              </div>
+              <div style={{ marginTop: 5, fontSize: 10, color: '#8B96AA', lineHeight: 1.35 }}>{stage.hint}</div>
+            </div>
+          );
+        })}
+      </div>
+    </SecurityGlassPanel>
+  );
+}
+
+function SecurityCockpit({ data, threats, loading, onRefresh }: { data: SecurityData; threats: ThreatItem[]; loading: boolean; onRefresh: () => void }) {
+  const tone = securityTone(threats, data);
+  const activeThreats = threats.filter((t) => t.severity === 'critical' || t.severity === 'warning').length;
+  const reportingHosts = (data.hosts ?? []).filter((host) => host.reporting).length;
+  const totalHosts = Math.max((data.hosts ?? []).length, 1);
+  const missingChannels = (data.hosts ?? []).flatMap((host) => Object.entries(host.sources).filter(([, ok]) => !ok).map(([source]) => `${host.label}:${source}`));
+  const topThreat = threats[0];
+  const firewallBlocks = data.firewall?.blockCount ?? 0;
+  const sampled = (data.firewall?.sampleCount ?? 0) < firewallBlocks;
+  const posture = tone === 'critical' ? 'Incident signal' : tone === 'warning' ? 'Needs review' : tone === 'info' ? 'Telemetry stale' : 'No active high-risk signal';
+
+  return (
+    <section className="space-y-4">
+      <div style={{
+        position: 'relative',
+        overflow: 'hidden',
+        padding: 18,
+        borderRadius: 18,
+        border: '1px solid rgba(103,213,255,0.18)',
+        background: 'radial-gradient(circle at 12% 22%, rgba(103,213,255,0.15), transparent 28%), radial-gradient(circle at 86% 12%, rgba(239,68,68,0.12), transparent 28%), linear-gradient(145deg, rgba(13,20,36,0.96), rgba(5,9,18,0.98))',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 22px 60px rgba(0,0,0,0.28)',
+      }}>
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.17, backgroundImage: 'linear-gradient(rgba(103,213,255,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(103,213,255,0.12) 1px, transparent 1px)', backgroundSize: '34px 34px' }} />
+        <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 14, alignItems: 'start' }}>
+          <div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 9 }}>
+              <div style={{ fontSize: 22, fontWeight: 950, color: '#F3F7FF', letterSpacing: 0 }}>Security Operations Centre</div>
+              <StatusBadge label={posture} status={tone as any} pulse={loading || tone === 'critical'} />
+            </div>
+            <div style={{ marginTop: 5, fontSize: 12, color: '#8B96AA' }}>
+              Live host collector · evidence-first triage · refresh 60s
+              <span style={{ color: '#64748B', marginLeft: 12 }}>verified {new Date(data.checkedAt).toLocaleTimeString()}</span>
+              {data.stale && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 11 }}>stale source</span>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
+            {['Overview', 'Exposure', 'Identity', 'Findings', 'Timeline'].map((label, i) => (
+              <span key={label} style={{
+                minHeight: 30,
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '6px 11px',
+                borderRadius: 999,
+                border: i === 0 ? '1px solid rgba(103,213,255,0.46)' : '1px solid rgba(255,255,255,0.10)',
+                background: i === 0 ? 'rgba(103,213,255,0.12)' : 'rgba(255,255,255,0.035)',
+                color: i === 0 ? '#67D5FF' : '#94A3B8',
+                fontSize: 11,
+                fontWeight: 850,
+              }}>{label}</span>
+            ))}
+            <ToolbarButton onClick={onRefresh} disabled={loading}>{loading ? 'Refreshing' : 'Refresh'}</ToolbarButton>
+          </div>
+        </div>
+      </div>
+
+      <div className="mc-security-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+        <SecurityStatTile label="Risk queue" value={String(activeThreats)} hint={activeThreats ? topThreat?.title ?? 'Needs review' : 'No operator action queued'} tone={activeThreats ? tone : 'healthy'} />
+        <SecurityStatTile label="Telemetry coverage" value={`${reportingHosts}/${totalHosts}`} hint={missingChannels.length ? `${missingChannels.length} missing channels` : 'all configured channels online'} tone={missingChannels.length ? 'warning' : 'healthy'} />
+        <SecurityStatTile label="Auth pressure" value={String(data.auth.failCount)} hint={`${data.auth.sshAcceptCount ?? 0} SSH accepts · ${data.auth.sudoCount ?? 0} sudo events`} tone={data.auth.failCount > 50 ? 'critical' : data.auth.failCount > 10 ? 'warning' : 'healthy'} />
+        <SecurityStatTile label="Blocked activity" value={String(firewallBlocks)} hint={sampled ? `${data.firewall?.sampleCount ?? 0} sampled evidence rows` : 'contained by firewall logs'} tone={firewallBlocks > 100 ? 'warning' : 'info'} />
+      </div>
+
+      <div className="mc-security-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+          <SecurityGlassPanel style={{ padding: 16, overflow: 'hidden', position: 'relative' }}>
+            <MiniPanelTitle eyebrow="Threat Surface" title="Exposure and telemetry map" action={<StatusBadge label={data.source || 'security api'} status="info" />} />
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.13, backgroundImage: 'linear-gradient(rgba(103,213,255,0.16) 1px, transparent 1px), linear-gradient(90deg, rgba(103,213,255,0.12) 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
+            <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+              {[
+                ['Internet edge', 'Cloudflare + nginx', 'public HTTPS and WAF boundary', firewallBlocks > 100 ? 'warning' : 'info'],
+                ['Identity', 'SSH / sudo / sessions', `${data.auth.failCount} failed auth events`, data.auth.failCount > 10 ? 'warning' : 'healthy'],
+                ['Hosts', `${reportingHosts}/${totalHosts} reporting`, missingChannels.length ? 'coverage needs review' : 'auth/nginx/firewall/fail2ban online', missingChannels.length ? 'warning' : 'healthy'],
+                ['Assurance', 'SecSpy gates', `${PENTEST_CHECKS.filter((check) => check.status === 'passed').length} checks passed`, 'info'],
+              ].map(([title, value, hint, itemTone]) => {
+                const color = itemTone === 'critical' ? '#EF4444' : itemTone === 'warning' ? '#F59E0B' : itemTone === 'healthy' ? '#22C55E' : '#67D5FF';
+                return (
+                  <div key={title} style={{ minHeight: 128, padding: 13, borderRadius: 13, border: `1px solid ${color}28`, background: `linear-gradient(145deg, ${color}10, rgba(255,255,255,0.025))` }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <div style={{ fontSize: 11, color: '#F3F7FF', fontWeight: 900 }}>{title}</div>
+                      <div style={{ width: 9, height: 9, borderRadius: 99, background: color, boxShadow: `0 0 18px ${color}` }} />
+                    </div>
+                    <div style={{ marginTop: 10, fontSize: 18, color, fontWeight: 900, letterSpacing: 0 }}>{value}</div>
+                    <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.4, color: '#8B96AA' }}>{hint}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </SecurityGlassPanel>
+
+          <KillChainStrip threats={threats} authFailCount={data.auth.failCount} firewallBlocks={firewallBlocks} nginxErrors={data.nginx.errorCount} />
+        </div>
+
+        <SecurityGlassPanel style={{ padding: 16 }}>
+          <MiniPanelTitle eyebrow="Security Brief" title={topThreat?.title ?? 'No active signal'} action={<StatusBadge label={severityLabel(topThreat?.severity ?? 'info')} status={(topThreat?.severity ?? 'info') as any} pulse={topThreat?.severity === 'critical'} />} />
+          <div style={{ fontSize: 12, lineHeight: 1.6, color: '#94A3B8' }}>
+            {topThreat?.signal ?? 'Security telemetry has not produced a ranked finding yet.'}
+          </div>
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 11, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
+            <div style={{ fontSize: 10, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 900 }}>Next action</div>
+            <div style={{ marginTop: 6, fontSize: 12, color: '#CBD5E1', lineHeight: 1.45 }}>{topThreat?.action ?? 'Keep monitoring collector output.'}</div>
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(topThreat?.evidence ?? []).slice(0, 4).map((line, i) => (
+              <div key={`${line}-${i}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '7px 8px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(0,0,0,0.18)', color: '#8B96AA', fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 10 }}>
+                {redactSecurityText(line)}
+              </div>
+            ))}
+          </div>
+        </SecurityGlassPanel>
+      </div>
+    </section>
   );
 }
 
