@@ -275,6 +275,10 @@ code, pre, kbd, samp { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regul
     grid-template-columns: 1fr !important;
   }
 
+  .mc-network-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
   .mc-network-rail {
     position: static;
     max-height: none;
@@ -324,6 +328,10 @@ code, pre, kbd, samp { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regul
 @media (max-width: 640px) {
   .mc-sidebar nav {
     grid-template-columns: 1fr;
+  }
+
+  .mc-network-stats {
+    grid-template-columns: 1fr !important;
   }
 
   .mc-network-canvas {

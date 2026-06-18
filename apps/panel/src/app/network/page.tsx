@@ -413,7 +413,7 @@ function NetworkHistorySection() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 8 }}>
       {/* Section header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-1)', letterSpacing: -0.3, whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-1)', letterSpacing: 0, whiteSpace: 'nowrap' }}>
           📈 Network History
         </div>
         <div style={{ flex: 1, height: 1, background: 'rgba(148,163,184,0.1)' }} />
@@ -458,6 +458,335 @@ function NetworkHistorySection() {
   );
 }
 
+/* ─── Command centre helpers ─────────────────────────────────────────── */
+function fmtMbps(v?: number | null) {
+  if (v == null || Number.isNaN(v)) return '—';
+  return v >= 1000 ? `${(v / 1000).toFixed(1)}Gbps` : `${Math.round(v)}Mbps`;
+}
+
+function routeQuality(link: LinkData) {
+  if (!link.active) return { label: 'Down', status: 'critical', score: 0, color: '#EF4444' };
+  if ((link.packetLoss ?? 0) > 0 || (link.latencyMs ?? 999) > 50) return { label: 'Poor', status: 'critical', score: 42, color: '#EF4444' };
+  if ((link.latencyMs ?? 999) > 20 || (link.iperf?.retransmits ?? 0) > 0) return { label: 'Watch', status: 'warning', score: 76, color: '#F59E0B' };
+  return { label: 'Excellent', status: 'healthy', score: 98, color: '#22C55E' };
+}
+
+function StatTile({ label, value, hint, tone = 'info' }: { label: string; value: string; hint: string; tone?: 'healthy' | 'warning' | 'critical' | 'info' }) {
+  const color = tone === 'healthy' ? '#22C55E' : tone === 'warning' ? '#F59E0B' : tone === 'critical' ? '#EF4444' : '#67D5FF';
+  return (
+    <div style={{
+      position: 'relative', overflow: 'hidden', minHeight: 96, padding: '14px 16px', borderRadius: 14,
+      border: `1px solid ${color}33`,
+      background: `linear-gradient(145deg, ${color}14, rgba(10,16,31,0.86) 48%, rgba(255,255,255,0.035))`,
+      boxShadow: `inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 40px rgba(0,0,0,0.22)`,
+    }}>
+      <div style={{ position: 'absolute', inset: '0 0 auto 0', height: 1, background: `linear-gradient(90deg, transparent, ${color}, transparent)`, opacity: 0.65 }} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ fontSize: 10, color: '#8B96AA', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 800 }}>{label}</div>
+        <div style={{ width: 8, height: 8, borderRadius: 99, background: color, boxShadow: `0 0 18px ${color}` }} />
+      </div>
+      <div style={{ marginTop: 10, fontSize: 26, lineHeight: 1, fontWeight: 900, color: '#F3F7FF', letterSpacing: 0 }}>{value}</div>
+      <div style={{ marginTop: 7, fontSize: 11, lineHeight: 1.35, color: '#8B96AA' }}>{hint}</div>
+    </div>
+  );
+}
+
+function PanelTitle({ eyebrow, title, action }: { eyebrow: string; title: string; action?: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+      <div>
+        <div style={{ fontSize: 10, color: '#67D5FF', textTransform: 'uppercase', letterSpacing: '0.16em', fontWeight: 900 }}>{eyebrow}</div>
+        <div style={{ marginTop: 3, fontSize: 15, color: '#F3F7FF', fontWeight: 900, letterSpacing: 0 }}>{title}</div>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function GlassPanel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div style={{
+      borderRadius: 14,
+      border: '1px solid rgba(103,213,255,0.16)',
+      background: 'linear-gradient(145deg, rgba(15,23,42,0.82), rgba(7,12,24,0.92))',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.055), 0 18px 46px rgba(0,0,0,0.26)',
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function DetailRow({ k, v, color }: { k: string; v: React.ReactNode; color?: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12, padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.055)' }}>
+      <span style={{ color: '#64748B' }}>{k}</span>
+      <span style={{ color: color ?? '#CBD5E1', fontWeight: 700, textAlign: 'right' }}>{v}</span>
+    </div>
+  );
+}
+
+function InspectorCard({ selectedNodeData, selectedLinkData, nodeMap, totals, stateTitle }: any) {
+  return (
+    <GlassPanel style={{ padding: 16 }}>
+      {!selectedNodeData && !selectedLinkData && (
+        <>
+          <PanelTitle eyebrow="Network Brief" title={stateTitle} action={<StatusBadge label="AI brief" status="info" />} />
+          <div style={{ fontSize: 12, lineHeight: 1.6, color: '#94A3B8' }}>
+            Tailnet telemetry is live. Select a node or route to lock the inspector and trace role, address, current RTT, iperf throughput, retransmits, and packet loss.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 14 }}>
+            {[
+              ['Reachable', `${totals.online}/${totals.total}`],
+              ['Routes', String(totals.links)],
+              ['Packet loss', `${totals.loss}%`],
+              ['Best link', totals.bestLink],
+            ].map(([k, v]) => (
+              <div key={k} style={{ padding: '10px 8px', borderRadius: 10, background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.075)', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#64748B' }}>{k}</div>
+                <div style={{ fontSize: 13, fontWeight: 900, color: '#67D5FF', marginTop: 3 }}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {selectedNodeData && (
+        <>
+          <PanelTitle eyebrow="Node Inspector" title={`${selectedNodeData.emoji} ${selectedNodeData.label}`} action={<StatusBadge label={selectedNodeData.status} status={selectedNodeData.status === 'online' ? 'healthy' : selectedNodeData.status === 'degraded' ? 'warning' : 'critical'} />} />
+          <DetailRow k="IP" v={selectedNodeData.ip} />
+          <DetailRow k="Location" v={selectedNodeData.location} />
+          <DetailRow k="Role" v={selectedNodeData.role} />
+          <DetailRow k="Latency" v={fmtMs(selectedNodeData.latencyMs)} color={latencyColor(selectedNodeData.latencyMs)} />
+          <DetailRow k="Last seen" v={selectedNodeData.latencyMs === null ? 'unreachable' : 'current scan'} color={selectedNodeData.latencyMs === null ? '#EF4444' : '#22C55E'} />
+
+          {selectedNodeData?.iperf && (
+            <div style={{ marginTop: 12, padding: '11px 12px', borderRadius: 11, background: 'rgba(103,213,255,0.07)', border: '1px solid rgba(103,213,255,0.16)' }}>
+              <div style={{ fontSize: 10, color: '#67D5FF', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 9, fontWeight: 900 }}>iperf3 stream</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {[
+                  ['Send', fmtMbps(selectedNodeData.iperf.mbpsSend)],
+                  ['Recv', fmtMbps(selectedNodeData.iperf.mbpsRecv)],
+                  ['RTT', `${selectedNodeData.iperf.rttMs ?? 0}ms`],
+                  ['Retransmits', `${selectedNodeData.iperf.retransmits ?? 0}`],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ padding: '7px 6px', borderRadius: 8, background: 'rgba(0,0,0,0.22)', textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: '#64748B' }}>{k}</div>
+                    <div style={{ fontSize: 13, fontWeight: 900, color: '#F3F7FF', marginTop: 2 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedNodeData.history.length > 1 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 10, color: '#64748B', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 800 }}>Latency trace</div>
+              <Sparkline data={selectedNodeData.history} color={latencyColor(selectedNodeData.latencyMs)} w={252} h={38} />
+            </div>
+          )}
+        </>
+      )}
+
+      {selectedLinkData && (
+        <>
+          {(() => {
+            const quality = routeQuality(selectedLinkData);
+            return (
+              <>
+                <PanelTitle
+                  eyebrow="Route Inspector"
+                  title={`${nodeMap[selectedLinkData.from]?.label} → ${nodeMap[selectedLinkData.to]?.label}`}
+                  action={<StatusBadge label={quality.label} status={quality.status as any} />}
+                />
+                <div style={{ fontSize: 11, color: '#67D5FF', marginBottom: 10, fontWeight: 800 }}>{selectedLinkData.label}</div>
+                <DetailRow k="Direction" v={selectedLinkData.direction} />
+                <DetailRow k="Latency" v={fmtMs(selectedLinkData.latencyMs)} color={latencyColor(selectedLinkData.latencyMs)} />
+                <DetailRow k="Packet loss" v={`${selectedLinkData.packetLoss}%`} color={selectedLinkData.packetLoss > 0 ? '#EF4444' : '#22C55E'} />
+                <DetailRow k="Quality score" v={`${quality.score}/100`} color={quality.color} />
+                <DetailRow k="Status" v={selectedLinkData.active ? 'ACTIVE' : 'DOWN'} color={selectedLinkData.active ? '#22C55E' : '#EF4444'} />
+
+                {selectedLinkData?.iperf && (
+                  <div style={{ marginTop: 12, padding: '11px 12px', borderRadius: 11, background: 'rgba(103,213,255,0.07)', border: '1px solid rgba(103,213,255,0.16)' }}>
+                    <div style={{ fontSize: 10, color: '#67D5FF', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 9, fontWeight: 900 }}>route throughput</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      {[
+                        ['Send', fmtMbps(selectedLinkData.iperf.mbpsSend)],
+                        ['Recv', fmtMbps(selectedLinkData.iperf.mbpsRecv)],
+                        ['RTT', `${selectedLinkData.iperf.rttMs ?? 0}ms`],
+                        ['Retransmits', `${selectedLinkData.iperf.retransmits ?? 0}`],
+                      ].map(([k, v]) => (
+                        <div key={k} style={{ padding: '7px 6px', borderRadius: 8, background: 'rgba(0,0,0,0.22)', textAlign: 'center' }}>
+                          <div style={{ fontSize: 10, color: '#64748B' }}>{k}</div>
+                          <div style={{ fontSize: 13, fontWeight: 900, color: '#F3F7FF', marginTop: 2 }}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </>
+      )}
+    </GlassPanel>
+  );
+}
+
+function NodeStatusList({ nodes, selectedNode, setSelectedNode, setSelectedLink }: any) {
+  return (
+    <GlassPanel style={{ padding: 14 }}>
+      <PanelTitle eyebrow="Tailnet Nodes" title="Fleet reachability" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {(nodes || []).map((node: NodeData) => (
+          <div key={node.id}
+            onClick={() => { setSelectedNode(selectedNode === node.id ? null : node.id); setSelectedLink(null); }}
+            style={{
+              display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 9, padding: '9px 10px',
+              borderRadius: 11, cursor: 'pointer',
+              background: selectedNode === node.id ? 'rgba(103,213,255,0.10)' : 'rgba(255,255,255,0.025)',
+              border: `1px solid ${selectedNode === node.id ? 'rgba(103,213,255,0.28)' : 'rgba(255,255,255,0.045)'}`,
+              transition: 'all 0.15s',
+            }}>
+            <span style={{ fontSize: 16 }}>{node.emoji}</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: '#F3F7FF' }}>{node.label}</div>
+              <div style={{ fontSize: 10, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.role} · {node.ip}</div>
+            </div>
+            <Sparkline data={node.history ?? []} color={latencyColor(node.latencyMs)} w={54} h={20} />
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, fontWeight: 900, color: latencyColor(node.latencyMs) }}>{fmtMs(node.latencyMs)}</div>
+              <div style={{ fontSize: 9, color: statusColor(node.status), textTransform: 'uppercase', letterSpacing: '0.07em' }}>{node.status}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </GlassPanel>
+  );
+}
+
+function EventStrip({ nodes, links, measuredAt }: { nodes: NodeData[]; links: LinkData[]; measuredAt?: string }) {
+  const events = [
+    ...nodes
+      .filter(n => n.status !== 'online')
+      .map(n => ({ tone: n.status === 'degraded' ? '#F59E0B' : '#EF4444', title: `${n.label} ${n.status}`, body: n.latencyMs === null ? 'No ping response from latest scan.' : `RTT is ${fmtMs(n.latencyMs)}.` })),
+    ...links
+      .filter(l => !l.active || l.packetLoss > 0 || (l.latencyMs ?? 0) > 50)
+      .map(l => ({ tone: !l.active ? '#EF4444' : '#F59E0B', title: `${l.from} → ${l.to}`, body: !l.active ? 'Route inactive or one endpoint offline.' : `Route latency is ${fmtMs(l.latencyMs)}.` })),
+  ].slice(0, 5);
+
+  const visibleEvents = events.length ? events : [
+    { tone: '#22C55E', title: 'Tailnet healthy', body: 'All observed nodes responded in the latest scan.' },
+    { tone: '#67D5FF', title: 'Telemetry loop active', body: measuredAt ? `Snapshot received ${new Date(measuredAt).toLocaleTimeString()}.` : 'Waiting for first live snapshot.' },
+  ];
+
+  return (
+    <GlassPanel style={{ padding: 16 }}>
+      <PanelTitle eyebrow="Incident Strip" title="What changed / what matters" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
+        {visibleEvents.map((e, i) => (
+          <div key={`${e.title}-${i}`} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 10, padding: 11, borderRadius: 11, border: `1px solid ${e.tone}25`, background: `linear-gradient(145deg, ${e.tone}12, rgba(255,255,255,0.025))` }}>
+            <div style={{ width: 8, height: 8, marginTop: 4, borderRadius: 99, background: e.tone, boxShadow: `0 0 16px ${e.tone}` }} />
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 900, color: '#F3F7FF' }}>{e.title}</div>
+              <div style={{ marginTop: 3, fontSize: 11, lineHeight: 1.35, color: '#8B96AA' }}>{e.body}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </GlassPanel>
+  );
+}
+
+function LayerPanel({ view, nodes, links, nodeMap, setSelectedNode, setSelectedLink }: any) {
+  if (view === 'Services') {
+    const groups = [
+      { title: 'Prod edge', subtitle: 'public nginx + app upstreams', items: ['Mission Control', 'EffectX apps', 'Hearth preview'] },
+      { title: 'Telemetry', subtitle: 'OpenClaw + security collectors', items: ['Bazza', 'Sec1', 'agent sync'] },
+      { title: 'Continuity', subtitle: 'backup and recovery routes', items: ['Backup Melb', 'DB backup paths', 'workspace backups'] },
+    ];
+    return (
+      <GlassPanel style={{ padding: 16 }}>
+        <PanelTitle eyebrow="Service Layer" title="Host responsibilities" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
+          {groups.map(g => (
+            <div key={g.title} style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(103,213,255,0.14)', background: 'rgba(255,255,255,0.03)' }}>
+              <div style={{ fontSize: 13, fontWeight: 900, color: '#F3F7FF' }}>{g.title}</div>
+              <div style={{ marginTop: 3, fontSize: 11, color: '#64748B' }}>{g.subtitle}</div>
+              <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {g.items.map(item => <span key={item} style={{ padding: '4px 7px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.035)', color: '#94A3B8', fontSize: 10, fontWeight: 800 }}>{item}</span>)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </GlassPanel>
+    );
+  }
+
+  if (view === 'Exposure') {
+    return (
+      <GlassPanel style={{ padding: 16 }}>
+        <PanelTitle eyebrow="Exposure Layer" title="External, tailnet, and backup zones" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+          {[
+            ['Public HTTPS edge', 'prod / per-web', '#F59E0B', 'Cloudflare + nginx routes'],
+            ['Tailnet control', `${nodes.length || '—'} observed hosts`, '#67D5FF', 'private admin and telemetry'],
+            ['Backup plane', 'backup-melb', '#22C55E', 'recovery and replication paths'],
+            ['Unknown devices', '0 observed', '#94A3B8', 'no unknowns in current source'],
+          ].map(([k, v, color, hint]) => (
+            <div key={k} style={{ padding: 12, borderRadius: 12, border: `1px solid ${color}26`, background: `${color}10` }}>
+              <div style={{ fontSize: 10, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 900 }}>{k}</div>
+              <div style={{ marginTop: 5, fontSize: 14, color, fontWeight: 900 }}>{v}</div>
+              <div style={{ marginTop: 4, fontSize: 11, color: '#8B96AA' }}>{hint}</div>
+            </div>
+          ))}
+        </div>
+      </GlassPanel>
+    );
+  }
+
+  if (view === 'Timeline') {
+    return <EventStrip nodes={nodes} links={links} measuredAt={undefined} />;
+  }
+
+  return (
+    <GlassPanel style={{ padding: 16 }}>
+      <PanelTitle eyebrow="Route Quality" title="Live path scoring" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
+        {(links || []).slice(0, 6).map((link: LinkData) => {
+          const key = `${link.from}-${link.to}`;
+          const quality = routeQuality(link);
+          return (
+            <div key={key} onClick={() => { setSelectedLink(key); setSelectedNode(null); }} style={{ padding: 11, borderRadius: 12, cursor: 'pointer', border: `1px solid ${quality.color}26`, background: `linear-gradient(145deg, ${quality.color}10, rgba(255,255,255,0.025))` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: '#F3F7FF', fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {nodeMap[link.from]?.label ?? link.from} → {nodeMap[link.to]?.label ?? link.to}
+                  </div>
+                  <div style={{ marginTop: 3, fontSize: 10, color: '#64748B' }}>{link.label}</div>
+                </div>
+                <div style={{ fontSize: 11, color: quality.color, fontWeight: 900 }}>{quality.label}</div>
+              </div>
+              <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                {[
+                  ['RTT', fmtMs(link.latencyMs)],
+                  ['Loss', `${link.packetLoss}%`],
+                  ['Flow', fmtMbps(link.iperf?.mbpsSend)],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ padding: '6px 4px', borderRadius: 8, background: 'rgba(0,0,0,0.18)', textAlign: 'center' }}>
+                    <div style={{ fontSize: 9, color: '#64748B' }}>{k}</div>
+                    <div style={{ marginTop: 2, fontSize: 11, color: '#CBD5E1', fontWeight: 850 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </GlassPanel>
+  );
+}
+
 /* ─── Main page ──────────────────────────────────────────────────────── */
 export default function NetworkPage() {
   const [data, setData] = useState<NetworkData | null>(null);
@@ -465,6 +794,7 @@ export default function NetworkPage() {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedLink, setSelectedLink] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState('');
+  const [view, setView] = useState<'Topology' | 'Services' | 'Exposure' | 'Timeline'>('Topology');
 
   const load = useCallback(async () => {
     try {
@@ -490,330 +820,213 @@ export default function NetworkPage() {
     ? data?.links.find(l => `${l.from}-${l.to}` === selectedLink)
     : null;
 
+  const nodes = data?.nodes ?? [];
+  const links = data?.links ?? [];
   const totalNodes = data?.nodes.length ?? (loading ? 0 : HISTORY_NODES.length);
-  const onlineCount = data?.nodes.filter(n => n.status === 'online').length ?? 0;
-  const avgLatency = data?.nodes.filter(n => n.latencyMs !== null).reduce((a, n, _, arr) =>
+  const onlineCount = nodes.filter(n => n.status === 'online').length;
+  const degradedCount = nodes.filter(n => n.status === 'degraded').length;
+  const offlineCount = nodes.filter(n => n.status === 'offline').length;
+  const activeLinks = links.filter(l => l.active).length;
+  const lossPct = links.length ? Math.round(links.reduce((a, l) => a + (l.packetLoss ?? 0), 0) / links.length) : 0;
+  const avgLatency = nodes.filter(n => n.latencyMs !== null).reduce((a, n, _, arr) =>
     a + (n.latencyMs! / arr.length), 0) ?? 0;
+  const bestThroughput = Math.max(0, ...nodes.map(n => Math.max(n.iperf?.mbpsSend ?? 0, n.iperf?.mbpsRecv ?? 0)));
+  const bestLink = links
+    .filter(l => l.active && l.latencyMs !== null)
+    .sort((a, b) => (a.latencyMs ?? 999) - (b.latencyMs ?? 999))[0];
+  const networkTone = offlineCount ? 'critical' : degradedCount || lossPct ? 'warning' : onlineCount === totalNodes && totalNodes > 0 ? 'healthy' : 'info';
+  const networkState = networkTone === 'healthy' ? 'Operational' : networkTone === 'warning' ? 'Degraded' : networkTone === 'critical' ? 'Attention required' : 'Scanning';
 
   return (
     <AppShell>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-        {/* Header */}
-        <div className="mc-network-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: '#F1F5F9', letterSpacing: -0.5 }}>
-              Network Operations Centre
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div style={{
+          position: 'relative', overflow: 'hidden', padding: 18, borderRadius: 18,
+          border: '1px solid rgba(103,213,255,0.18)',
+          background: 'radial-gradient(circle at 15% 20%, rgba(103,213,255,0.16), transparent 28%), radial-gradient(circle at 86% 12%, rgba(124,140,255,0.16), transparent 30%), linear-gradient(145deg, rgba(13,20,36,0.95), rgba(5,9,18,0.98))',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 22px 60px rgba(0,0,0,0.26)',
+        }}>
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.18, backgroundImage: 'linear-gradient(rgba(103,213,255,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(103,213,255,0.14) 1px, transparent 1px)', backgroundSize: '34px 34px' }} />
+          <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 14, alignItems: 'start' }}>
+            <div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 9 }}>
+                <div style={{ fontSize: 22, fontWeight: 950, color: '#F3F7FF', letterSpacing: 0 }}>Network Operations Centre</div>
+                <StatusBadge label={networkState} status={networkTone as any} pulse={loading || Boolean(data?.stale)} />
+              </div>
+              <div style={{ marginTop: 5, fontSize: 12, color: '#8B96AA' }}>
+                Tailscale mesh · prod-origin ping telemetry · refresh 15s
+                {lastUpdated && <span style={{ color: '#64748B', marginLeft: 12 }}>last scan {lastUpdated}</span>}
+                {data?.stale && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 11 }}>refreshing cache</span>}
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>
-              Tailscale mesh · {totalNodes} nodes · auto-refresh 15s
-              {lastUpdated && <span style={{ color: '#64748B', marginLeft: 12 }}>last ping: {lastUpdated}</span>}{data?.stale && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 11 }}>↻ refreshing…</span>}
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
+              {(['Topology', 'Services', 'Exposure', 'Timeline'] as const).map(label => (
+                <button key={label} onClick={() => setView(label)} type="button" style={{
+                  minHeight: 30, padding: '6px 11px', borderRadius: 999,
+                  border: view === label ? '1px solid rgba(103,213,255,0.46)' : '1px solid rgba(255,255,255,0.10)',
+                  background: view === label ? 'rgba(103,213,255,0.12)' : 'rgba(255,255,255,0.035)',
+                  color: view === label ? '#67D5FF' : '#94A3B8',
+                  fontSize: 11, fontWeight: 850, cursor: 'pointer',
+                }}>{label}</button>
+              ))}
             </div>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-            <StatusBadge label={loading ? 'Pinging' : `${onlineCount}/${totalNodes} online`} status={onlineCount === totalNodes ? 'healthy' : 'warning'} pulse={loading} />
-            <StatusBadge label={`Avg ${avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'}`} status="info" />
           </div>
         </div>
 
-        {/* Main grid */}
-        <div className="mc-network-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 16 }}>
+        <div className="mc-network-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+          <StatTile label="Reachability" value={`${onlineCount}/${totalNodes || '—'}`} hint={`${degradedCount} degraded · ${offlineCount} offline`} tone={networkTone as any} />
+          <StatTile label="Route Quality" value={`${activeLinks}/${links.length || '—'}`} hint={`${lossPct}% average packet loss`} tone={lossPct ? 'critical' : activeLinks === links.length && links.length ? 'healthy' : 'warning'} />
+          <StatTile label="Avg RTT" value={avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'} hint="live ping average across reachable hosts" tone={avgLatency > 50 ? 'critical' : avgLatency > 20 ? 'warning' : 'healthy'} />
+          <StatTile label="Throughput" value={fmtMbps(bestThroughput)} hint="best recent iperf stream observed" tone="info" />
+        </div>
 
-          {/* Topology canvas */}
-          <div className="mc-network-canvas" style={{ borderRadius: 14, border: '1px solid rgba(124,232,255,0.12)', background: '#090d1a', padding: 8, position: 'relative', minHeight: 380 }}>
-            {/* Scanline overlay */}
-            <div style={{
-              position: 'absolute', inset: 0, borderRadius: 14, pointerEvents: 'none',
-              background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.05) 2px, rgba(0,0,0,0.05) 4px)',
-              zIndex: 1,
-            }} />
-            {/* Grid dots */}
-            <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0 }}>
-              <defs>
-                <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-                  <circle cx={15} cy={15} r={1} fill="rgba(124,232,255,0.08)" />
-                </pattern>
-              </defs>
-              <rect width="100%" height="100%" fill="url(#grid)" />
-            </svg>
-
-            <svg
-              viewBox="0 0 600 340"
-              style={{ width: '100%', height: '100%', minHeight: 340, position: 'relative', zIndex: 2 }}
-            >
-              <defs>
-                <filter id="glow">
-                  <feGaussianBlur stdDeviation="3" result="blur" />
-                  <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-                </filter>
-              </defs>
-
-              {/* Links */}
-              {(data?.links || []).map(link => {
-                const fromPos = NODE_POS[link.from];
-                const toPos = NODE_POS[link.to];
-                if (!fromPos || !toPos) return null;
-                const key = `${link.from}-${link.to}`;
-                return (
-                  <AnimatedLink key={key}
-                    x1={fromPos.x} y1={fromPos.y}
-                    x2={toPos.x} y2={toPos.y}
-                    color={latencyColor(link.latencyMs)}
-                    active={link.active}
-                    latencyMs={link.latencyMs}
-                    mbps={link.iperf?.mbpsSend ?? null}
-                    selected={selectedLink === key}
-                    onClick={() => {
-                      setSelectedLink(selectedLink === key ? null : key);
-                      setSelectedNode(null);
-                    }}
-                  />
-                );
-              })}
-
-              {/* Nodes */}
-              {(data?.nodes || []).map(node => (
-                <NodeCircle key={node.id} node={node}
-                  selected={selectedNode === node.id}
-                  onClick={() => {
-                    setSelectedNode(selectedNode === node.id ? null : node.id);
-                    setSelectedLink(null);
-                  }}
-                />
-              ))}
-
-              {/* Legend */}
-              {[
-                { color: '#10B981', label: '< 20ms' },
-                { color: '#F59E0B', label: '20–50ms' },
-                { color: '#EF4444', label: '> 50ms' },
-                { color: '#6B7280', label: 'offline' },
-              ].map(({ color, label }, i) => (
-                <g key={label} transform={`translate(${12 + i * 72}, 320)`}>
-                  <line x1={0} y1={6} x2={16} y2={6} stroke={color} strokeWidth={2} />
-                  <text x={20} y={10} fontSize={9} fill="#64748B">{label}</text>
-                </g>
-              ))}
-            </svg>
-
-            {loading && (
+        <div className="mc-network-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+            <div className="mc-network-canvas" style={{
+              borderRadius: 18,
+              border: '1px solid rgba(103,213,255,0.18)',
+              background: 'radial-gradient(circle at 50% 45%, rgba(103,213,255,0.10), transparent 35%), linear-gradient(145deg, #070b16, #0B1020)',
+              padding: 10,
+              position: 'relative',
+              minHeight: 420,
+              overflow: 'hidden',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 22px 56px rgba(0,0,0,0.30)',
+            }}>
+              <div style={{ position: 'absolute', left: 14, top: 12, zIndex: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {[
+                  ['Zone', 'Tailnet'],
+                  ['Origin', 'prod'],
+                  ['Flow', `${activeLinks} active`],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '5px 9px', borderRadius: 999, border: '1px solid rgba(103,213,255,0.16)', background: 'rgba(4,8,18,0.72)', backdropFilter: 'blur(8px)' }}>
+                    <span style={{ fontSize: 9, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 900 }}>{k}</span>
+                    <span style={{ fontSize: 10, color: '#CBD5E1', fontWeight: 850 }}>{v}</span>
+                  </div>
+                ))}
+              </div>
               <div style={{
-                position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                borderRadius: 14, background: 'rgba(9,13,26,0.8)', zIndex: 10,
-              }}>
-                <div style={{ fontSize: 13, color: '#475569' }}>Pinging nodes…</div>
-              </div>
-            )}
-          </div>
+                position: 'absolute', inset: 0, pointerEvents: 'none',
+                background: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255,255,255,0.025) 3px, rgba(255,255,255,0.025) 4px)',
+                zIndex: 1,
+              }} />
+              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0 }}>
+                <defs>
+                  <pattern id="network-grid" width="28" height="28" patternUnits="userSpaceOnUse">
+                    <path d="M 28 0 L 0 0 0 28" fill="none" stroke="rgba(103,213,255,0.055)" strokeWidth="1" />
+                    <circle cx={14} cy={14} r={1} fill="rgba(103,213,255,0.12)" />
+                  </pattern>
+                  <radialGradient id="network-radar">
+                    <stop offset="0%" stopColor="rgba(103,213,255,0.20)" />
+                    <stop offset="70%" stopColor="rgba(103,213,255,0.04)" />
+                    <stop offset="100%" stopColor="rgba(103,213,255,0)" />
+                  </radialGradient>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#network-grid)" />
+                <circle cx="50%" cy="50%" r="34%" fill="url(#network-radar)" />
+              </svg>
 
-          {/* Right panel */}
-          <div className="mc-network-rail" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <svg viewBox="0 0 600 340" style={{ width: '100%', height: '100%', minHeight: 386, position: 'relative', zIndex: 2 }}>
+                <defs>
+                  <filter id="glow">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                  </filter>
+                </defs>
+                <circle cx="300" cy="152" r="124" fill="none" stroke="rgba(103,213,255,0.10)" strokeWidth="1" strokeDasharray="2 8" />
+                <circle cx="300" cy="152" r="204" fill="none" stroke="rgba(103,213,255,0.07)" strokeWidth="1" strokeDasharray="2 10" />
 
-            {/* Detail panel — node or link */}
-            <div style={{ borderRadius: 14, border: '1px solid rgba(124,232,255,0.2)', background: '#0d1424', padding: 16 }}>
-              {!selectedNodeData && !selectedLinkData && (
-                <>
-                  <div style={{ fontSize: 10, color: '#7ce8ff', textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: 8, fontWeight: 800 }}>Inspector</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#F1F5F9', marginBottom: 8 }}>Mesh overview</div>
-                  <div style={{ fontSize: 12, lineHeight: 1.6, color: '#94A3B8' }}>
-                    Select a node or link to inspect address, role, latency, throughput, and packet loss.
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 14 }}>
-                    {[
-                      ['Nodes', String(totalNodes)],
-                      ['Online', String(onlineCount)],
-                      ['Links', String(data?.links.length ?? 0)],
-                      ['Avg RTT', avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'],
-                    ].map(([k, v]) => (
-                      <div key={k} style={{ padding: '8px 6px', borderRadius: 9, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', textAlign: 'center' }}>
-                        <div style={{ fontSize: 10, color: '#475569' }}>{k}</div>
-                        <div style={{ fontSize: 13, fontWeight: 800, color: '#7ce8ff', marginTop: 2 }}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-              {(selectedNodeData || selectedLinkData) && (
-                <>
-                {selectedNodeData && (
-                  <>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: '#F1F5F9', marginBottom: 10 }}>
-                      {selectedNodeData.emoji} {selectedNodeData.label}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {[
-                        ['IP',       selectedNodeData.ip],
-                        ['Location', selectedNodeData.location],
-                        ['Role',     selectedNodeData.role],
-                        ['Latency',  fmtMs(selectedNodeData.latencyMs)],
-                        ['Status',   selectedNodeData.status.toUpperCase()],
-                      ].map(([k, v]) => (
-                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                          <span style={{ color: '#64748B' }}>{k}</span>
-                          <span style={{ color: k === 'Status' ? statusColor(selectedNodeData.status) : '#CBD5E1', fontWeight: 600 }}>{v}</span>
-                        </div>
-                      ))}
-                    </div>
-                    {selectedNodeData?.iperf && (
-                      <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, background: 'rgba(124,232,255,0.06)', border: '1px solid rgba(124,232,255,0.15)' }}>
-                        <div style={{ fontSize: 10, color: '#7ce8ff', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8, fontWeight: 700 }}>⚡ iperf3 Throughput</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                          {[
-                            ['↑ Send', `${selectedNodeData?.iperf?.mbpsSend ?? 0} Mbps`],
-                            ['↓ Recv', `${selectedNodeData?.iperf?.mbpsRecv ?? 0} Mbps`],
-                            ['RTT', `${selectedNodeData?.iperf?.rttMs ?? 0}ms`],
-                            ['Retransmits', `${selectedNodeData?.iperf?.retransmits ?? 0}`],
-                          ].map(([k, v]) => (
-                            <div key={k} style={{ textAlign: 'center', padding: '6px 4px', borderRadius: 8, background: 'rgba(0,0,0,0.2)' }}>
-                              <div style={{ fontSize: 10, color: '#475569' }}>{k}</div>
-                              <div style={{ fontSize: 13, fontWeight: 700, color: '#7ce8ff', marginTop: 2 }}>{v}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <div style={{ fontSize: 9, color: '#374151', marginTop: 6, textAlign: 'right' }}>
-                          tested {selectedNodeData?.iperf?.measuredAt ? new Date(selectedNodeData?.iperf?.measuredAt).toLocaleString() : '—'}
-                        </div>
-                      </div>
-                    )}
-                    {selectedNodeData.history.length > 1 && (
-                      <div style={{ marginTop: 12 }}>
-                        <div style={{ fontSize: 10, color: '#475569', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Latency history</div>
-                        <Sparkline data={selectedNodeData.history} color={latencyColor(selectedNodeData.latencyMs)} w={252} h={36} />
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#475569', marginTop: 2 }}>
-                          <span>min: {Math.min(...selectedNodeData.history).toFixed(1)}ms</span>
-                          <span>max: {Math.max(...selectedNodeData.history).toFixed(1)}ms</span>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-                {selectedLinkData && (
-                  <>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: '#F1F5F9', marginBottom: 10 }}>
-                      🔗 {nodeMap[selectedLinkData.from]?.emoji} {nodeMap[selectedLinkData.from]?.label} → {nodeMap[selectedLinkData.to]?.emoji} {nodeMap[selectedLinkData.to]?.label}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#7ce8ff', marginBottom: 10, fontWeight: 600 }}>{selectedLinkData.label}</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {[
-                        ['Direction',   selectedLinkData.direction],
-                        ['Latency',     fmtMs(selectedLinkData.latencyMs)],
-                        ['Packet loss', `${selectedLinkData.packetLoss}%`],
-                        ['Status',      selectedLinkData.active ? 'ACTIVE' : 'DOWN'],
-                      ].map(([k, v]) => (
-                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                          <span style={{ color: '#64748B' }}>{k}</span>
-                          <span style={{ color: k === 'Status' ? (selectedLinkData.active ? '#10B981' : '#EF4444') : '#CBD5E1', fontWeight: 600 }}>{v}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-                    {selectedLinkData?.iperf && (
-                      <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, background: 'rgba(124,232,255,0.06)', border: '1px solid rgba(124,232,255,0.15)' }}>
-                        <div style={{ fontSize: 10, color: '#7ce8ff', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8, fontWeight: 700 }}>⚡ iperf3 Throughput</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                          {[
-                            ['↑ Send', `${selectedLinkData?.iperf?.mbpsSend ?? 0} Mbps`],
-                            ['↓ Recv', `${selectedLinkData?.iperf?.mbpsRecv ?? 0} Mbps`],
-                            ['RTT', `${selectedLinkData?.iperf?.rttMs ?? 0}ms`],
-                            ['Retransmits', `${selectedLinkData?.iperf?.retransmits ?? 0}`],
-                          ].map(([k, v]) => (
-                            <div key={k} style={{ textAlign: 'center', padding: '6px 4px', borderRadius: 8, background: 'rgba(0,0,0,0.2)' }}>
-                              <div style={{ fontSize: 10, color: '#475569' }}>{k}</div>
-                              <div style={{ fontSize: 13, fontWeight: 700, color: '#7ce8ff', marginTop: 2 }}>{v}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                </>
-              )}
-            </div>
-
-            {/* Node list */}
-            <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: '#0d1424', padding: 14 }}>
-              <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>Node Status</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {(data?.nodes || []).map(node => (
-                  <div key={node.id}
-                    onClick={() => { setSelectedNode(selectedNode === node.id ? null : node.id); setSelectedLink(null); }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-                      borderRadius: 10, cursor: 'pointer',
-                      background: selectedNode === node.id ? 'rgba(124,232,255,0.07)' : 'rgba(255,255,255,0.02)',
-                      border: `1px solid ${selectedNode === node.id ? 'rgba(124,232,255,0.2)' : 'transparent'}`,
-                      transition: 'all 0.15s',
-                    }}>
-                    <span style={{ fontSize: 16 }}>{node.emoji}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: '#F1F5F9' }}>{node.label}</div>
-                      <div style={{ fontSize: 10, color: '#475569' }}>{node.location} · {node.ip}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: latencyColor(node.latencyMs) }}>{fmtMs(node.latencyMs)}</div>
-                      <div style={{ fontSize: 9, color: statusColor(node.status), textTransform: 'uppercase', letterSpacing: '0.06em' }}>{node.status}</div>
-                    </div>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(node.status), flexShrink: 0,
-                      boxShadow: node.status === 'online' ? `0 0 6px ${statusColor(node.status)}` : 'none' }} />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Latency sparklines */}
-            <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: '#0d1424', padding: 14 }}>
-              <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>Latency Trends</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {(data?.nodes || []).filter(n => n.history?.length > 0).map(node => (
-                  <div key={node.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 12, width: 20 }}>{node.emoji}</span>
-                    <Sparkline data={node.history} color={latencyColor(node.latencyMs)} w={150} h={24} />
-                    <span style={{ fontSize: 11, color: latencyColor(node.latencyMs), fontWeight: 700, minWidth: 40, textAlign: 'right' }}>
-                      {fmtMs(node.latencyMs)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Connections list */}
-            <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: '#0d1424', padding: 14 }}>
-              <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>Active Links</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {(data?.links || []).map(link => {
+                {(links || []).map(link => {
+                  const fromPos = NODE_POS[link.from];
+                  const toPos = NODE_POS[link.to];
+                  if (!fromPos || !toPos) return null;
                   const key = `${link.from}-${link.to}`;
                   return (
-                    <div key={key}
-                      onClick={() => { setSelectedLink(selectedLink === key ? null : key); setSelectedNode(null); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
-                        borderRadius: 8, cursor: 'pointer',
-                        background: selectedLink === key ? 'rgba(124,232,255,0.07)' : 'rgba(255,255,255,0.02)',
-                        border: `1px solid ${selectedLink === key ? 'rgba(124,232,255,0.2)' : 'transparent'}`,
-                      }}>
-                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: link.active ? latencyColor(link.latencyMs) : '#374151', flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 10, color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {nodeMap[link.from]?.emoji} {nodeMap[link.from]?.label} → {nodeMap[link.to]?.emoji} {nodeMap[link.to]?.label}
-                        </div>
-                        <div style={{ fontSize: 9, color: '#475569' }}>{link.label}</div>
-                      </div>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: latencyColor(link.latencyMs) }}>{fmtMs(link.latencyMs)}</span>
-                    </div>
+                    <AnimatedLink key={key}
+                      x1={fromPos.x} y1={fromPos.y}
+                      x2={toPos.x} y2={toPos.y}
+                      color={latencyColor(link.latencyMs)}
+                      active={link.active}
+                      latencyMs={link.latencyMs}
+                      mbps={link.iperf?.mbpsSend ?? null}
+                      selected={selectedLink === key}
+                      onClick={() => {
+                        setSelectedLink(selectedLink === key ? null : key);
+                        setSelectedNode(null);
+                      }}
+                    />
                   );
                 })}
-              </div>
+
+                {(nodes || []).map(node => (
+                  <NodeCircle key={node.id} node={node}
+                    selected={selectedNode === node.id}
+                    onClick={() => {
+                      setSelectedNode(selectedNode === node.id ? null : node.id);
+                      setSelectedLink(null);
+                    }}
+                  />
+                ))}
+
+                {[
+                  { color: '#22C55E', label: 'excellent' },
+                  { color: '#F59E0B', label: 'watch' },
+                  { color: '#EF4444', label: 'poor/down' },
+                  { color: '#6B7280', label: 'offline' },
+                ].map(({ color, label }, i) => (
+                  <g key={label} transform={`translate(${12 + i * 82}, 320)`}>
+                    <line x1={0} y1={6} x2={16} y2={6} stroke={color} strokeWidth={2} />
+                    <text x={20} y={10} fontSize={9} fill="#64748B">{label}</text>
+                  </g>
+                ))}
+              </svg>
+
+              {loading && (
+                <div style={{
+                  position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 18, background: 'rgba(7,11,22,0.82)', backdropFilter: 'blur(8px)', zIndex: 10,
+                }}>
+                  <div style={{ color: '#67D5FF', fontSize: 12, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase' }}>scanning mesh</div>
+                </div>
+              )}
             </div>
 
+            <LayerPanel view={view} nodes={nodes} links={links} nodeMap={nodeMap} setSelectedNode={setSelectedNode} setSelectedLink={setSelectedLink} />
+            {view !== 'Timeline' && <EventStrip nodes={nodes} links={links} measuredAt={data?.measuredAt} />}
+          </div>
+
+          <div className="mc-network-rail" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <InspectorCard
+              selectedNodeData={selectedNodeData}
+              selectedLinkData={selectedLinkData}
+              nodeMap={nodeMap}
+              totals={{ online: onlineCount, total: totalNodes, links: links.length, loss: lossPct, bestLink: bestLink ? `${bestLink.from}→${bestLink.to}` : '—' }}
+              stateTitle={networkTone === 'healthy' ? 'Mesh operating normally' : networkState}
+            />
+            <NodeStatusList nodes={nodes} selectedNode={selectedNode} setSelectedNode={setSelectedNode} setSelectedLink={setSelectedLink} />
+            <GlassPanel style={{ padding: 14 }}>
+              <PanelTitle eyebrow="Exposure" title="Reachability zones" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {[
+                  ['Public edge', 'prod', '#F59E0B'],
+                  ['Tailnet', `${totalNodes} hosts`, '#67D5FF'],
+                  ['Backups', 'Melbourne', '#22C55E'],
+                  ['Unknown', '0 seen', '#94A3B8'],
+                ].map(([k, v, color]) => (
+                  <div key={k} style={{ padding: 10, borderRadius: 10, border: `1px solid ${color}26`, background: `${color}10` }}>
+                    <div style={{ fontSize: 10, color: '#64748B' }}>{k}</div>
+                    <div style={{ marginTop: 3, fontSize: 12, color, fontWeight: 900 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </GlassPanel>
           </div>
         </div>
 
-        {/* ── Network History ─────────────────────────────────────────── */}
         <NetworkHistorySection />
 
-        <div style={{ fontSize: 11, color: '#374151', textAlign: 'right' }}>
+        <div style={{ fontSize: 11, color: '#475569', textAlign: 'right' }}>
           Pings measured from prod · Tailscale mesh · refreshes every 15s
-          {data?.measuredAt && <span style={{ marginLeft: 8 }}>measured {new Date(data.measuredAt).toLocaleTimeString()}</span>}
+          {data?.measuredAt && <span style={{ marginLeft: 8 }}>snapshot {new Date(data.measuredAt).toLocaleTimeString()}</span>}
         </div>
       </div>
     </AppShell>
