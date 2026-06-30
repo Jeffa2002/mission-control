@@ -271,13 +271,44 @@ function parseHostSignalLine(line: string, host: string, category: HostSignalEve
 
 function parseFail2Ban(raw: string): Fail2BanState {
   const available = /Status for the jail|Currently banned|Total failed/i.test(raw);
-  const banned = Number(raw.match(/Currently banned:\s*(\d+)/i)?.[1] || 0);
-  const totalFailed = Number(raw.match(/Total failed:\s*(\d+)/i)?.[1] || 0);
-  const bannedIPs = (raw.match(/Banned IP list:\s*(.*)/i)?.[1] || '')
-    .split(/\s+/)
-    .map((ip) => ip.trim())
-    .filter(Boolean);
-  return { available, banned, totalFailed, bannedIPs };
+  if (available) {
+    const banned = Number(raw.match(/Currently banned:\s*(\d+)/i)?.[1] || 0);
+    const totalFailed = Number(raw.match(/Total failed:\s*(\d+)/i)?.[1] || 0);
+    const bannedIPs = (raw.match(/Banned IP list:\s*(.*)/i)?.[1] || '')
+      .split(/\s+/)
+      .map((ip) => ip.trim())
+      .filter(Boolean);
+    return { available, banned, totalFailed, bannedIPs };
+  }
+
+  const active = new Set<string>();
+  let totalFailed = 0;
+  for (const line of raw.split('\n')) {
+    const ban = line.match(/\[(?:sshd|ssh)\].*\bBan\s+([0-9a-fA-F:.]+)/);
+    const unban = line.match(/\[(?:sshd|ssh)\].*\bUnban\s+([0-9a-fA-F:.]+)/);
+    if (/fail2ban\.filter.*Found\s+([0-9a-fA-F:.]+)/i.test(line)) totalFailed += 1;
+    if (ban) active.add(ban[1]);
+    if (unban) active.delete(unban[1]);
+  }
+  const bannedIPs = [...active];
+  return {
+    available: raw.includes('fail2ban') || bannedIPs.length > 0 || totalFailed > 0,
+    banned: bannedIPs.length,
+    totalFailed,
+    bannedIPs,
+  };
+}
+
+async function readLocalFail2Ban() {
+  const client = safeExec('fail2ban-client status sshd 2>/dev/null || fail2ban-client status ssh 2>/dev/null || true');
+  if (/Status for the jail|Currently banned|Total failed/i.test(client)) return client;
+
+  const log = await readFirstExisting(['/host-logs/fail2ban.log', '/var/log/fail2ban.log']);
+  return log
+    .split('\n')
+    .filter((line) => line.includes('fail2ban') && /\[(?:sshd|ssh)\]/.test(line))
+    .slice(-SIGNAL_SAMPLE_LIMIT)
+    .join('\n');
 }
 
 function commandFailed(raw: string) {
@@ -389,7 +420,9 @@ async function collectHost(host: SecurityHostConfig) {
   const firewallRaw = host.kind === 'local'
     ? await readLocalFirewall()
     : runHostCommand(host, `tmp=$(mktemp); journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" > "$tmp" || true; printf "__FIREWALL_TOTAL__ %s\\n" "$(wc -l < "$tmp" | tr -d " ")"; tail -n ${FIREWALL_SAMPLE_LIMIT} "$tmp"; rm -f "$tmp"`);
-  const fail2banRaw = runHostCommand(host, 'fail2ban-client status sshd 2>/dev/null || fail2ban-client status ssh 2>/dev/null || true');
+  const fail2banRaw = host.kind === 'local'
+    ? await readLocalFail2Ban()
+    : runHostCommand(host, 'fail2ban-client status sshd 2>/dev/null || fail2ban-client status ssh 2>/dev/null || true');
   const kernelRaw = host.kind === 'local'
     ? await readLocalKernelIssues()
     : runHostCommand(host, `journalctl -k -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`);
