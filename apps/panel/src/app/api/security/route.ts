@@ -47,8 +47,11 @@ export async function GET(req: Request) {
     hosts: [],
     registeredHosts: [],
     fail2ban: { available: false, banned: 0, totalFailed: 0, bannedIPs: [] },
-    nginx: { errorCount: 0, recentErrors: [] },
-    auth: { failCount: 0, recent: [] },
-    firewall: { blockCount: 0, recent: [] },
+    nginx: { errorCount: 0, errorLogCount: 0, recentErrors: [], recentErrorLogs: [], byHost: [], topSources: [], topPaths: [], topStatuses: [] },
+    auth: { failCount: 0, sshAcceptCount: 0, sudoCount: 0, recent: [], recentAccepts: [], recentSudo: [], byHost: [], topUsers: [] },
+    firewall: { blockCount: 0, sampleCount: 0, recent: [], byHost: [], topSources: [], topPorts: [] },
+    kernel: { issueCount: 0, criticalCount: 0, byHost: [], recent: [] },
+    system: { issueCount: 0, criticalCount: 0, byHost: [], recent: [] },
+    timeline: { recent: [] },
   });
 }

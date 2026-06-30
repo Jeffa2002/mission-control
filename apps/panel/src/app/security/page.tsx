@@ -15,7 +15,7 @@ interface SecurityData {
     label: string;
     reporting: boolean;
     checkedAt: string;
-    sources: { auth: boolean; nginx: boolean; firewall: boolean; fail2ban: boolean };
+    sources: Record<string, boolean>;
     error?: string;
   }>;
   registeredHosts?: Array<{
@@ -32,13 +32,23 @@ interface SecurityData {
   };
   nginx: {
     errorCount: number;
+    errorLogCount?: number;
     recentErrors: string[];
+    recentErrorLogs?: string[];
+    byHost?: Array<{ key: string; label?: string; count: number; sampled?: boolean }>;
+    topSources?: Array<{ key: string; count: number }>;
+    topPaths?: Array<{ key: string; count: number }>;
+    topStatuses?: Array<{ key: string; count: number }>;
   };
   auth: {
     failCount: number;
     sshAcceptCount?: number;
     sudoCount?: number;
     recent: string[];
+    recentAccepts?: string[];
+    recentSudo?: string[];
+    byHost?: Array<{ key: string; label?: string; count: number; sampled?: boolean }>;
+    topUsers?: Array<{ key: string; count: number }>;
   };
   firewall?: {
     blockCount: number;
@@ -47,6 +57,21 @@ interface SecurityData {
     byHost?: Array<{ key: string; label: string; count: number; sampled: boolean }>;
     topSources?: Array<{ key: string; count: number }>;
     topPorts?: Array<{ key: string; count: number }>;
+    recent: string[];
+  };
+  kernel?: {
+    issueCount: number;
+    criticalCount?: number;
+    byHost?: Array<{ key: string; label?: string; count: number; sampled?: boolean }>;
+    recent: string[];
+  };
+  system?: {
+    issueCount: number;
+    criticalCount?: number;
+    byHost?: Array<{ key: string; label?: string; count: number; sampled?: boolean }>;
+    recent: string[];
+  };
+  timeline?: {
     recent: string[];
   };
 }
@@ -389,6 +414,20 @@ function buildThreats(data: SecurityData): ThreatItem[] {
     });
   }
 
+  if ((data.nginx.errorLogCount ?? 0) > 0) {
+    const errorLogCount = data.nginx.errorLogCount ?? 0;
+    threats.push({
+      id: 'nginx-error-log',
+      title: `${errorLogCount} nginx error-log signal${errorLogCount === 1 ? '' : 's'}`,
+      source: 'nginx',
+      severity: errorLogCount > 100 ? 'warning' : 'info',
+      status: errorLogCount > 100 ? 'Investigate' : 'Observe',
+      signal: 'Nginx error logs include proxy, TLS, upstream, or request handling errors.',
+      evidence: (data.nginx.recentErrorLogs ?? []).slice(0, 5),
+      action: errorLogCount > 100 ? 'Check the affected upstream and source pattern before treating web errors as normal scan noise.' : 'Sample the latest error-log entries and confirm they are expected.',
+    });
+  }
+
   if ((data.firewall?.blockCount ?? 0) > 0) {
     const blockCount = data.firewall?.blockCount ?? 0;
     const sampleCount = data.firewall?.sampleCount ?? data.firewall?.recent.length ?? 0;
@@ -409,6 +448,36 @@ function buildThreats(data: SecurityData): ThreatItem[] {
         ...((data.firewall?.topSources ?? []).slice(0, 2).map((source) => `Source ${source.key}: ${source.count}`)),
       ],
       action: sampled ? 'Use the breakdown to spot hot hosts, ports, and repeat sources before drilling into raw log evidence.' : 'Check top sources if block volume keeps rising or targets unusual ports.',
+    });
+  }
+
+  if ((data.kernel?.issueCount ?? 0) > 0) {
+    const issueCount = data.kernel?.issueCount ?? 0;
+    const criticalCount = data.kernel?.criticalCount ?? 0;
+    threats.push({
+      id: 'kernel-issues',
+      title: `${issueCount} kernel issue signal${issueCount === 1 ? '' : 's'}`,
+      source: 'kernel',
+      severity: criticalCount > 0 ? 'critical' : issueCount > 20 ? 'warning' : 'info',
+      status: criticalCount > 0 ? 'Investigate now' : 'Review',
+      signal: 'Kernel logs include warning-or-higher entries outside normal firewall blocks.',
+      evidence: (data.kernel?.recent ?? []).slice(0, 5),
+      action: criticalCount > 0 ? 'Check affected host dmesg/journal and confirm no disk, memory, driver, or container fault is active.' : 'Review repeated kernel warnings for hardware or networking drift.',
+    });
+  }
+
+  if ((data.system?.issueCount ?? 0) > 0) {
+    const issueCount = data.system?.issueCount ?? 0;
+    const criticalCount = data.system?.criticalCount ?? 0;
+    threats.push({
+      id: 'system-issues',
+      title: `${issueCount} system issue signal${issueCount === 1 ? '' : 's'}`,
+      source: 'system',
+      severity: criticalCount > 0 ? 'critical' : issueCount > 20 ? 'warning' : 'info',
+      status: criticalCount > 0 ? 'Investigate now' : 'Review',
+      signal: 'System journal or failed-unit checks found warning-or-higher operational events.',
+      evidence: (data.system?.recent ?? []).slice(0, 5),
+      action: criticalCount > 0 ? 'Inspect failed units and recent journal entries on the affected host.' : 'Check whether the entries are one-off service noise or repeated failures.',
     });
   }
 
@@ -682,13 +751,13 @@ function MiniPanelTitle({ eyebrow, title, action }: { eyebrow: string; title: st
   );
 }
 
-function KillChainStrip({ threats, authFailCount, firewallBlocks, nginxErrors }: { threats: ThreatItem[]; authFailCount: number; firewallBlocks: number; nginxErrors: number }) {
+function KillChainStrip({ threats, authFailCount, firewallBlocks, nginxErrors, kernelIssues, systemIssues, sudoCount }: { threats: ThreatItem[]; authFailCount: number; firewallBlocks: number; nginxErrors: number; kernelIssues: number; systemIssues: number; sudoCount: number }) {
   const stages = [
     { label: 'Recon', value: firewallBlocks + nginxErrors, tone: firewallBlocks + nginxErrors > 1000 ? 'warning' : 'info', hint: 'scan and web pressure' },
     { label: 'Exposure', value: threats.filter(t => t.id === 'host-reporting' || t.source === 'coverage').length, tone: threats.some(t => t.source === 'coverage') ? 'warning' : 'healthy', hint: 'telemetry and surface gaps' },
     { label: 'Access', value: authFailCount, tone: authFailCount > 50 ? 'critical' : authFailCount > 10 ? 'warning' : 'healthy', hint: 'auth failure pressure' },
-    { label: 'Privilege', value: 0, tone: 'healthy', hint: 'no sudo spike surfaced' },
-    { label: 'Persistence', value: 0, tone: 'healthy', hint: 'no signal surfaced' },
+    { label: 'Privilege', value: sudoCount, tone: sudoCount > 20 ? 'warning' : 'healthy', hint: 'sudo activity surfaced' },
+    { label: 'Stability', value: kernelIssues + systemIssues, tone: kernelIssues + systemIssues > 20 ? 'warning' : kernelIssues + systemIssues > 0 ? 'info' : 'healthy', hint: 'kernel and system signals' },
     { label: 'Exfil', value: 0, tone: 'healthy', hint: 'no signal surfaced' },
   ];
 
@@ -734,7 +803,7 @@ function SecurityCockpit({ data, threats, loading, onRefresh }: { data: Security
         padding: 18,
         borderRadius: 18,
         border: '1px solid rgba(103,213,255,0.18)',
-        background: 'radial-gradient(circle at 12% 22%, rgba(103,213,255,0.15), transparent 28%), radial-gradient(circle at 86% 12%, rgba(239,68,68,0.12), transparent 28%), linear-gradient(145deg, rgba(13,20,36,0.96), rgba(5,9,18,0.98))',
+        background: 'linear-gradient(145deg, rgba(13,20,36,0.96), rgba(5,9,18,0.98))',
         boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 22px 60px rgba(0,0,0,0.28)',
       }}>
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.17, backgroundImage: 'linear-gradient(rgba(103,213,255,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(103,213,255,0.12) 1px, transparent 1px)', backgroundSize: '34px 34px' }} />
@@ -787,7 +856,7 @@ function SecurityCockpit({ data, threats, loading, onRefresh }: { data: Security
                 ['Internet edge', 'Cloudflare + nginx', 'public HTTPS and WAF boundary', firewallBlocks > 100 ? 'warning' : 'info'],
                 ['Identity', 'SSH / sudo / sessions', `${data.auth.failCount} failed auth events`, data.auth.failCount > 10 ? 'warning' : 'healthy'],
                 ['Hosts', `${reportingHosts}/${totalHosts} reporting`, missingChannels.length ? 'coverage needs review' : 'auth/nginx/firewall/fail2ban online', missingChannels.length ? 'warning' : 'healthy'],
-                ['Assurance', 'SecSpy gates', `${PENTEST_CHECKS.filter((check) => check.status === 'passed').length} checks passed`, 'info'],
+                ['Host health', 'Kernel + systemd', `${(data.kernel?.issueCount ?? 0) + (data.system?.issueCount ?? 0)} issue signals`, (data.kernel?.criticalCount ?? 0) + (data.system?.criticalCount ?? 0) > 0 ? 'critical' : (data.kernel?.issueCount ?? 0) + (data.system?.issueCount ?? 0) > 20 ? 'warning' : 'healthy'],
               ].map(([title, value, hint, itemTone]) => {
                 const color = itemTone === 'critical' ? '#EF4444' : itemTone === 'warning' ? '#F59E0B' : itemTone === 'healthy' ? '#22C55E' : '#67D5FF';
                 return (
@@ -804,7 +873,15 @@ function SecurityCockpit({ data, threats, loading, onRefresh }: { data: Security
             </div>
           </SecurityGlassPanel>
 
-          <KillChainStrip threats={threats} authFailCount={data.auth.failCount} firewallBlocks={firewallBlocks} nginxErrors={data.nginx.errorCount} />
+          <KillChainStrip
+            threats={threats}
+            authFailCount={data.auth.failCount}
+            firewallBlocks={firewallBlocks}
+            nginxErrors={data.nginx.errorCount}
+            kernelIssues={data.kernel?.issueCount ?? 0}
+            systemIssues={data.system?.issueCount ?? 0}
+            sudoCount={data.auth.sudoCount ?? 0}
+          />
         </div>
 
         <SecurityGlassPanel style={{ padding: 16 }}>
@@ -863,7 +940,7 @@ export default function SecurityPage() {
       <div className="space-y-8">
         <SectionTitle
           title="Security Triage"
-          subtitle="Ranked operational signals from prod and bazza"
+          subtitle="Ranked operational signals across the server fleet"
           action={<ToolbarButton onClick={load} disabled={loading}>{loading ? 'Refreshing' : 'Refresh'}</ToolbarButton>}
         />
 
@@ -882,6 +959,8 @@ export default function SecurityPage() {
 
         {data && (
           <>
+            <SecurityCockpit data={data} threats={threats} loading={loading} onRefresh={load} />
+
             <section className="grid gap-4 md:grid-cols-4">
               <Metric
                 label="Triage state"
@@ -908,6 +987,12 @@ export default function SecurityPage() {
                 status={data.nginx.errorCount > 5000 ? 'critical' : data.nginx.errorCount > 1000 ? 'warning' : 'healthy'}
               />
               <Metric
+                label="Nginx error log"
+                value={String(data.nginx.errorLogCount ?? 0)}
+                delta={(data.nginx.errorLogCount ?? 0) > 0 ? 'Proxy/TLS/upstream signals' : 'No error-log pressure'}
+                status={(data.nginx.errorLogCount ?? 0) > 100 ? 'warning' : 'healthy'}
+              />
+              <Metric
                 label="Firewall blocks"
                 value={String(data.firewall?.blockCount ?? 0)}
                 delta={(data.firewall?.sampleCount ?? 0) < (data.firewall?.blockCount ?? 0) ? `${data.firewall?.sampleCount ?? 0} sampled evidence rows` : 'All counted rows loaded'}
@@ -918,6 +1003,18 @@ export default function SecurityPage() {
                 value={`${(data.hosts ?? []).filter((host) => host.reporting).length}/${Math.max((data.hosts ?? []).length, 1)}`}
                 delta={(data.hosts ?? []).every((host) => host.reporting) ? 'All configured channels online' : 'One or more channels need attention'}
                 status={(data.hosts ?? []).every((host) => host.reporting) ? 'healthy' : 'warning'}
+              />
+              <Metric
+                label="Kernel issues"
+                value={String(data.kernel?.issueCount ?? 0)}
+                delta={(data.kernel?.criticalCount ?? 0) > 0 ? `${data.kernel?.criticalCount} critical` : 'Warnings and criticals'}
+                status={(data.kernel?.criticalCount ?? 0) > 0 ? 'critical' : (data.kernel?.issueCount ?? 0) > 20 ? 'warning' : 'healthy'}
+              />
+              <Metric
+                label="System issues"
+                value={String(data.system?.issueCount ?? 0)}
+                delta={(data.system?.criticalCount ?? 0) > 0 ? `${data.system?.criticalCount} critical` : 'Journal and failed units'}
+                status={(data.system?.criticalCount ?? 0) > 0 ? 'critical' : (data.system?.issueCount ?? 0) > 20 ? 'warning' : 'healthy'}
               />
             </section>
 
@@ -998,12 +1095,44 @@ export default function SecurityPage() {
             </section>
 
             <section className="grid gap-4 xl:grid-cols-3">
+              <RollupList title="Auth By Host" items={data.auth.byHost ?? []} />
+              <RollupList title="Auth Top Users" items={data.auth.topUsers ?? []} />
+              <RollupList title="Web Error Status" items={data.nginx.topStatuses ?? []} />
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-3">
+              <RollupList title="Web Errors By Host" items={data.nginx.byHost ?? []} />
+              <RollupList title="Web Top Sources" items={data.nginx.topSources ?? []} />
+              <RollupList title="Web Top Paths" items={data.nginx.topPaths ?? []} />
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-2">
+              <EvidencePanel title="Nginx Error Log" lines={data.nginx.recentErrorLogs ?? []} tone={(data.nginx.errorLogCount ?? 0) > 100 ? 'warning' : 'neutral'} />
+              <EvidencePanel title="SSH Accepts" lines={data.auth.recentAccepts ?? []} />
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-2">
+              <EvidencePanel title="Sudo Evidence" lines={data.auth.recentSudo ?? []} />
+              <EvidencePanel title="SOC Timeline" lines={data.timeline?.recent ?? []} tone={activeThreats ? 'warning' : 'neutral'} />
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-3">
               <RollupList title="Firewall By Host" items={(data.firewall?.byHost ?? []).map((host) => ({ key: host.key, label: host.label, count: host.count, sampled: host.sampled }))} />
               <RollupList title="Firewall Top Ports" items={data.firewall?.topPorts ?? []} />
               <RollupList title="Firewall Top Sources" items={data.firewall?.topSources ?? []} />
             </section>
 
             <EvidencePanel title="Firewall Evidence" lines={data.firewall?.recent ?? []} tone={(data.firewall?.blockCount ?? 0) > 100 ? 'warning' : 'neutral'} />
+
+            <section className="grid gap-4 xl:grid-cols-2">
+              <EvidencePanel title="Kernel Issues" lines={data.kernel?.recent ?? []} tone={(data.kernel?.criticalCount ?? 0) > 0 ? 'critical' : (data.kernel?.issueCount ?? 0) > 20 ? 'warning' : 'neutral'} />
+              <EvidencePanel title="System Issues" lines={data.system?.recent ?? []} tone={(data.system?.criticalCount ?? 0) > 0 ? 'critical' : (data.system?.issueCount ?? 0) > 20 ? 'warning' : 'neutral'} />
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-2">
+              <RollupList title="Kernel Issues By Host" items={data.kernel?.byHost ?? []} />
+              <RollupList title="System Issues By Host" items={data.system?.byHost ?? []} />
+            </section>
 
             {data.fail2ban.available && data.fail2ban.bannedIPs.length > 0 && (
               <div className={card + ' p-5'}>

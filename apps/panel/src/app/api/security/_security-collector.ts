@@ -22,8 +22,11 @@ export type HostSecurityStatus = {
   sources: {
     auth: boolean;
     nginx: boolean;
+    nginxError: boolean;
     firewall: boolean;
     fail2ban: boolean;
+    kernel: boolean;
+    system: boolean;
   };
   error?: string;
 };
@@ -45,6 +48,14 @@ type WebEvent = {
   status: number;
 };
 
+type HostSignalEvent = {
+  ts: string;
+  host: string;
+  severity: 'warning' | 'error' | 'critical';
+  category: 'kernel' | 'system' | 'nginx-error';
+  detail: string;
+};
+
 type FirewallEvent = {
   ts: string;
   host: string;
@@ -54,6 +65,16 @@ type FirewallEvent = {
   proto: string;
 };
 
+type FirewallRollup = {
+  key: string;
+  count: number;
+};
+
+type FirewallHostRollup = FirewallRollup & {
+  label: string;
+  sampled: boolean;
+};
+
 type Fail2BanState = {
   available: boolean;
   banned: number;
@@ -61,11 +82,25 @@ type Fail2BanState = {
   bannedIPs: string[];
 };
 
+const FIREWALL_SAMPLE_LIMIT = 500;
+const EVIDENCE_LIMIT = 25;
+const SIGNAL_SAMPLE_LIMIT = 500;
+
 const LOCAL_HOST: SecurityHostConfig = {
   id: process.env.SECURITY_LOCAL_HOST_ID || 'prod',
   label: process.env.SECURITY_LOCAL_HOST_LABEL || 'Prod / per-web',
   kind: 'local',
 };
+
+const SECURITY_FLEET_REGISTRY = [
+  { id: 'prod', label: 'Prod / per-web' },
+  { id: 'bazza', label: 'Bazza' },
+  { id: 'crm8', label: 'CRM8' },
+  { id: 'sec1', label: 'Sec1' },
+  { id: 'backup-melb', label: 'Backup Melbourne' },
+  { id: 'shazza', label: 'Shazza' },
+  { id: 'ubuntu-geekom', label: 'Ubuntu Geekom' },
+];
 
 function parseConfiguredHosts(): SecurityHostConfig[] {
   const raw = process.env.SECURITY_REMOTE_HOSTS;
@@ -100,7 +135,11 @@ export function getSecurityHosts(): SecurityHostConfig[] {
 
 export function getRegisteredHostCoverage(configuredHosts = getSecurityHosts()) {
   const configuredIds = new Set(configuredHosts.map((host) => host.id));
-  return SYSTEM_REGISTRY.map((system) => ({
+  const registered = new Map<string, { id: string; label: string }>();
+  for (const system of SYSTEM_REGISTRY) registered.set(system.id, { id: system.id, label: system.label });
+  for (const system of SECURITY_FLEET_REGISTRY) registered.set(system.id, system);
+
+  return [...registered.values()].map((system) => ({
     id: system.id,
     label: system.label,
     reporting: configuredIds.has(system.id),
@@ -177,6 +216,21 @@ function parseNginxLine(line: string, host: string): WebEvent | null {
   };
 }
 
+function parseNginxErrorLine(line: string, host: string): HostSignalEvent | null {
+  const m = line.match(/^(\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2})\s+\[(\w+)\]\s+\d+#\d+:\s+(.*)$/);
+  if (!m) return null;
+  const [, rawTs, level, detail] = m;
+  const parsed = new Date(rawTs.replace(/\//g, '-'));
+  const severity = /crit|alert|emerg/i.test(level) ? 'critical' : /error/i.test(level) ? 'error' : 'warning';
+  return {
+    ts: Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString(),
+    host,
+    category: 'nginx-error',
+    severity,
+    detail,
+  };
+}
+
 function parseFirewallLine(line: string, host: string): FirewallEvent | null {
   if (!line.includes('UFW BLOCK')) return null;
   const tsMatch = line.match(/^([A-Z][a-z]{2}\s+\d{1,2}\s[\d:]{8})/);
@@ -188,6 +242,31 @@ function parseFirewallLine(line: string, host: string): FirewallEvent | null {
     dpt: line.match(/DPT=(\d+)/)?.[1] ?? 'unknown',
     proto: line.match(/PROTO=([A-Za-z0-9]+)/)?.[1] ?? 'unknown',
   };
+}
+
+function parseHostSignalLine(line: string, host: string, category: HostSignalEvent['category']): HostSignalEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.includes('UFW BLOCK')) return null;
+
+  if (trimmed.startsWith('__FAILED_UNIT__ ')) {
+    return {
+      ts: new Date().toISOString(),
+      host,
+      category: 'system',
+      severity: 'error',
+      detail: trimmed.replace('__FAILED_UNIT__ ', '').trim(),
+    };
+  }
+
+  const syslogTs = trimmed.match(/^([A-Z][a-z]{2}\s+\d{1,2}\s[\d:]{8})/);
+  const isoTs = trimmed.match(/^(\d{4}-\d{2}-\d{2}T[\d:.+-]+)/);
+  const ts = syslogTs ? tsFromSyslog(syslogTs[1]) : isoTs ? new Date(isoTs[1]).toISOString() : new Date().toISOString();
+  const severity = /panic|critical|crit|alert|emerg|segfault|oom|out of memory|BUG:/i.test(trimmed)
+    ? 'critical'
+    : /error|failed|failure|denied|unreachable/i.test(trimmed)
+      ? 'error'
+      : 'warning';
+  return { ts, host, category, severity, detail: trimmed };
 }
 
 function parseFail2Ban(raw: string): Fail2BanState {
@@ -214,10 +293,85 @@ async function readLocalNginx() {
   return await readFirstExisting(['/host-logs/nginx/access.log', '/var/log/nginx/access.log']);
 }
 
+async function readLocalNginxError() {
+  return await readFirstExisting(['/host-logs/nginx/error.log', '/var/log/nginx/error.log']);
+}
+
 async function readLocalFirewall() {
   const file = await readFirstExisting(['/host-logs/kern.log', '/host-logs/syslog', '/var/log/kern.log', '/var/log/syslog']);
-  if (file) return file.split('\n').filter((line) => line.includes('UFW BLOCK')).slice(-500).join('\n');
-  return safeExec('journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" | tail -500 || true');
+  if (file) return file.split('\n').filter((line) => line.includes('UFW BLOCK')).join('\n');
+  return safeExec(`tmp=$(mktemp); journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" > "$tmp" || true; printf "__FIREWALL_TOTAL__ %s\\n" "$(wc -l < "$tmp" | tr -d " ")"; tail -n ${FIREWALL_SAMPLE_LIMIT} "$tmp"; rm -f "$tmp"`);
+}
+
+async function readLocalKernelIssues() {
+  const file = await readFirstExisting(['/host-logs/kern.log', '/host-logs/syslog', '/var/log/kern.log', '/var/log/syslog']);
+  if (file) {
+    return file
+      .split('\n')
+      .filter((line) => !line.includes('UFW BLOCK') && /(error|fail|warn|critical|segfault|oom|out of memory|blocked|denied|panic|BUG:|Call Trace)/i.test(line))
+      .slice(-SIGNAL_SAMPLE_LIMIT)
+      .join('\n');
+  }
+  return safeExec(`journalctl -k -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`);
+}
+
+async function readLocalSystemIssues() {
+  const file = await readFirstExisting(['/host-logs/syslog', '/var/log/syslog']);
+  const syslog = file
+    ? file
+        .split('\n')
+        .filter((line) => /(systemd|kernel|docker|containerd|nginx|fail2ban|cron|sudo).*?(error|fail|warn|critical|denied|timeout|unreachable)/i.test(line))
+        .slice(-SIGNAL_SAMPLE_LIMIT)
+        .join('\n')
+    : safeExec(`journalctl -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`);
+  const failedUnits = safeExec("systemctl --failed --no-legend --plain 2>/dev/null | sed 's/^/__FAILED_UNIT__ /' || true");
+  return [syslog, failedUnits].filter(Boolean).join('\n');
+}
+
+function splitFirewallRaw(raw: string) {
+  const lines = raw.split('\n');
+  const marker = lines.find((line) => line.startsWith('__FIREWALL_TOTAL__ '));
+  const total = marker ? Number(marker.replace('__FIREWALL_TOTAL__ ', '').trim()) : undefined;
+  const eventLines = lines.filter((line) => line.includes('UFW BLOCK'));
+  return { total: Number.isFinite(total) ? total : undefined, eventLines };
+}
+
+function topRollups(events: FirewallEvent[], keyFor: (event: FirewallEvent) => string, limit = 8): FirewallRollup[] {
+  const counts = new Map<string, number>();
+  for (const event of events) {
+    const key = keyFor(event);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
+    .slice(0, limit);
+}
+
+function topValues<T>(events: T[], keyFor: (event: T) => string, limit = 8): FirewallRollup[] {
+  const counts = new Map<string, number>();
+  for (const event of events) {
+    const key = keyFor(event) || 'unknown';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
+    .slice(0, limit);
+}
+
+function countByHost<T extends { host: string }>(events: T[], hosts: HostSecurityStatus[]): FirewallHostRollup[] {
+  const labels = new Map(hosts.map((host) => [host.id, host.label]));
+  return topValues(events, (event) => event.host, hosts.length)
+    .map((item) => ({
+      ...item,
+      label: labels.get(item.key) || item.key,
+      sampled: false,
+    }));
+}
+
+function formatSignal(event: HostSignalEvent) {
+  return `${event.host} ${event.severity} ${event.category}: ${event.detail}`;
 }
 
 async function collectHost(host: SecurityHostConfig) {
@@ -229,23 +383,39 @@ async function collectHost(host: SecurityHostConfig) {
   const nginxRaw = host.kind === 'local'
     ? await readLocalNginx()
     : runHostCommand(host, 'tail -n 1000 /var/log/nginx/access.log /var/log/nginx/*access.log 2>/dev/null');
+  const nginxErrorRaw = host.kind === 'local'
+    ? await readLocalNginxError()
+    : runHostCommand(host, `tail -n ${SIGNAL_SAMPLE_LIMIT} /var/log/nginx/error.log /var/log/nginx/*error.log 2>/dev/null`);
   const firewallRaw = host.kind === 'local'
     ? await readLocalFirewall()
-    : runHostCommand(host, 'journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" | tail -500 || true');
+    : runHostCommand(host, `tmp=$(mktemp); journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" > "$tmp" || true; printf "__FIREWALL_TOTAL__ %s\\n" "$(wc -l < "$tmp" | tr -d " ")"; tail -n ${FIREWALL_SAMPLE_LIMIT} "$tmp"; rm -f "$tmp"`);
   const fail2banRaw = runHostCommand(host, 'fail2ban-client status sshd 2>/dev/null || fail2ban-client status ssh 2>/dev/null || true');
+  const kernelRaw = host.kind === 'local'
+    ? await readLocalKernelIssues()
+    : runHostCommand(host, `journalctl -k -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`);
+  const systemRaw = host.kind === 'local'
+    ? await readLocalSystemIssues()
+    : runHostCommand(host, `journalctl -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}; systemctl --failed --no-legend --plain 2>/dev/null | sed 's/^/__FAILED_UNIT__ /' || true`);
 
   const auth = authRaw.split('\n').map((line) => parseAuthLine(line, host.id)).filter((event): event is AuthEvent => Boolean(event)).filter((event) => +new Date(event.ts) >= cutoff);
   const nginx = nginxRaw.split('\n').map((line) => parseNginxLine(line, host.id)).filter((event): event is WebEvent => Boolean(event)).filter((event) => +new Date(event.ts) >= cutoff);
-  const firewall = firewallRaw.split('\n').map((line) => parseFirewallLine(line, host.id)).filter((event): event is FirewallEvent => Boolean(event)).filter((event) => +new Date(event.ts) >= cutoff);
+  const nginxError = nginxErrorRaw.split('\n').map((line) => parseNginxErrorLine(line, host.id)).filter((event): event is HostSignalEvent => Boolean(event)).filter((event) => +new Date(event.ts) >= cutoff);
+  const firewallSplit = splitFirewallRaw(firewallRaw);
+  const firewall = firewallSplit.eventLines.map((line) => parseFirewallLine(line, host.id)).filter((event): event is FirewallEvent => Boolean(event)).filter((event) => +new Date(event.ts) >= cutoff);
   const fail2ban = parseFail2Ban(fail2banRaw);
-  const hostFailed = commandFailed(authRaw) && commandFailed(firewallRaw) && commandFailed(fail2banRaw);
+  const kernel = kernelRaw.split('\n').map((line) => parseHostSignalLine(line, host.id, 'kernel')).filter((event): event is HostSignalEvent => Boolean(event)).filter((event) => +new Date(event.ts) >= cutoff);
+  const system = systemRaw.split('\n').map((line) => parseHostSignalLine(line, host.id, 'system')).filter((event): event is HostSignalEvent => Boolean(event)).filter((event) => +new Date(event.ts) >= cutoff);
+  const hostFailed = commandFailed(authRaw) && commandFailed(firewallRaw) && commandFailed(fail2banRaw) && commandFailed(kernelRaw) && commandFailed(systemRaw);
   const error = hostFailed
-    ? [authRaw, nginxRaw, firewallRaw, fail2banRaw].join('\n').split('\n').find((line) => /__SECURITY_COMMAND_ERROR__/.test(line))?.replace('__SECURITY_COMMAND_ERROR__', '').trim()
+    ? [authRaw, nginxRaw, nginxErrorRaw, firewallRaw, fail2banRaw, kernelRaw, systemRaw].join('\n').split('\n').find((line) => /__SECURITY_COMMAND_ERROR__/.test(line))?.replace('__SECURITY_COMMAND_ERROR__', '').trim()
     : undefined;
   const authAvailable = authRaw.trim().length > 0 && !commandFailed(authRaw);
   const nginxAvailable = nginxRaw.trim().length > 0 && !commandFailed(nginxRaw);
+  const nginxErrorAvailable = nginxErrorRaw.trim().length > 0 && !commandFailed(nginxErrorRaw);
   const firewallAvailable = (firewallRaw.trim().length > 0 || firewall.length > 0) && !commandFailed(firewallRaw);
   const fail2banAvailable = fail2ban.available && !commandFailed(fail2banRaw);
+  const kernelAvailable = kernelRaw.trim().length > 0 && !commandFailed(kernelRaw);
+  const systemAvailable = systemRaw.trim().length > 0 && !commandFailed(systemRaw);
 
   const status: HostSecurityStatus = {
     id: host.id,
@@ -255,13 +425,17 @@ async function collectHost(host: SecurityHostConfig) {
     sources: {
       auth: authAvailable,
       nginx: nginxAvailable,
+      nginxError: nginxErrorAvailable,
       firewall: firewallAvailable,
       fail2ban: fail2banAvailable,
+      kernel: kernelAvailable,
+      system: systemAvailable,
     },
     error,
   };
 
-  return { host: status, auth, nginx, firewall, fail2ban };
+  const firewallTotal = firewallSplit.total ?? firewall.length;
+  return { host: status, auth, nginx, nginxError, firewall, firewallTotal, firewallSampled: firewallTotal > firewall.length, fail2ban, kernel, system };
 }
 
 export async function collectSecurityData() {
@@ -270,7 +444,20 @@ export async function collectSecurityData() {
   const results = await Promise.all(hosts.map(collectHost));
   const authEvents = results.flatMap((result) => result.auth).sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
   const webEvents = results.flatMap((result) => result.nginx).sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
+  const nginxErrorEvents = results.flatMap((result) => result.nginxError).sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
   const firewallEvents = results.flatMap((result) => result.firewall).sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
+  const kernelEvents = results.flatMap((result) => result.kernel).sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
+  const systemEvents = results.flatMap((result) => result.system).sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
+  const firewallTotal = results.reduce((sum, result) => sum + result.firewallTotal, 0);
+  const firewallByHost: FirewallHostRollup[] = results
+    .map((result) => ({
+      key: result.host.id,
+      label: result.host.label,
+      count: result.firewallTotal,
+      sampled: result.firewallSampled,
+    }))
+    .filter((host) => host.count > 0)
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   const fail2banStates = results.map((result) => result.fail2ban);
   const fail2ban: Fail2BanState = {
     available: fail2banStates.some((state) => state.available),
@@ -280,30 +467,69 @@ export async function collectSecurityData() {
   };
   const nginxErrors = webEvents.filter((event) => event.status >= 400);
   const authFailures = authEvents.filter((event) => event.type === 'auth-fail');
+  const sshAccepts = authEvents.filter((event) => event.type === 'ssh-accept');
+  const sudoEvents = authEvents.filter((event) => event.type === 'sudo');
+  const hostSignals = [...nginxErrorEvents, ...kernelEvents, ...systemEvents].sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
   const hostStatus = results.map((result) => result.host);
 
   return {
     ok: true,
     checkedAt,
     source: 'live-host-collector',
-    hasThreats: fail2ban.banned > 0 || authFailures.length > 0 || nginxErrors.length > 0 || firewallEvents.length > 0 || hostStatus.some((host) => !host.reporting),
+    hasThreats: fail2ban.banned > 0 || authFailures.length > 0 || nginxErrors.length > 0 || nginxErrorEvents.length > 0 || kernelEvents.length > 0 || systemEvents.length > 0 || firewallEvents.length > 0 || hostStatus.some((host) => !host.reporting),
     stale: false,
     hosts: hostStatus,
     registeredHosts: getRegisteredHostCoverage(hosts),
     fail2ban,
     nginx: {
       errorCount: nginxErrors.length,
-      recentErrors: nginxErrors.slice(0, 25).map((event) => `${event.host} ${event.status} ${event.method} ${event.path} from ${event.ip}`),
+      errorLogCount: nginxErrorEvents.length,
+      recentErrors: nginxErrors.slice(0, EVIDENCE_LIMIT).map((event) => `${event.host} ${event.status} ${event.method} ${event.path} from ${event.ip}`),
+      recentErrorLogs: nginxErrorEvents.slice(0, EVIDENCE_LIMIT).map(formatSignal),
+      byHost: countByHost(nginxErrors, hostStatus),
+      topSources: topValues(nginxErrors, (event) => event.ip),
+      topPaths: topValues(nginxErrors, (event) => event.path),
+      topStatuses: topValues(nginxErrors, (event) => String(event.status)),
     },
     auth: {
       failCount: authFailures.length,
-      sshAcceptCount: authEvents.filter((event) => event.type === 'ssh-accept').length,
-      sudoCount: authEvents.filter((event) => event.type === 'sudo').length,
-      recent: authFailures.slice(0, 25).map((event) => `${event.host} ${event.user}: ${event.detail}`),
+      sshAcceptCount: sshAccepts.length,
+      sudoCount: sudoEvents.length,
+      recent: authFailures.slice(0, EVIDENCE_LIMIT).map((event) => `${event.host} ${event.user}: ${event.detail}`),
+      recentAccepts: sshAccepts.slice(0, EVIDENCE_LIMIT).map((event) => `${event.host} ${event.user} from ${event.detail}`),
+      recentSudo: sudoEvents.slice(0, EVIDENCE_LIMIT).map((event) => `${event.host} ${event.user}: ${event.detail}`),
+      byHost: countByHost(authFailures, hostStatus),
+      topUsers: topValues(authFailures, (event) => event.user),
     },
     firewall: {
-      blockCount: firewallEvents.length,
-      recent: firewallEvents.slice(0, 25).map((event) => `${event.host} ${event.proto} ${event.src} -> ${event.dst}:${event.dpt}`),
+      blockCount: firewallTotal,
+      sampleCount: firewallEvents.length,
+      sampleLimitPerHost: FIREWALL_SAMPLE_LIMIT,
+      byHost: firewallByHost,
+      topSources: topRollups(firewallEvents, (event) => event.src),
+      topPorts: topRollups(firewallEvents, (event) => `${event.proto}/${event.dpt}`),
+      recent: firewallEvents.slice(0, EVIDENCE_LIMIT).map((event) => `${event.host} ${event.proto} ${event.src} -> ${event.dst}:${event.dpt}`),
+    },
+    kernel: {
+      issueCount: kernelEvents.length,
+      criticalCount: kernelEvents.filter((event) => event.severity === 'critical').length,
+      byHost: countByHost(kernelEvents, hostStatus),
+      recent: kernelEvents.slice(0, EVIDENCE_LIMIT).map(formatSignal),
+    },
+    system: {
+      issueCount: systemEvents.length,
+      criticalCount: systemEvents.filter((event) => event.severity === 'critical').length,
+      byHost: countByHost(systemEvents, hostStatus),
+      recent: systemEvents.slice(0, EVIDENCE_LIMIT).map(formatSignal),
+    },
+    timeline: {
+      recent: [...authFailures.map((event) => ({ ts: event.ts, line: `${event.host} auth-fail ${event.user}` })),
+        ...nginxErrors.map((event) => ({ ts: event.ts, line: `${event.host} web-${event.status} ${event.path}` })),
+        ...firewallEvents.map((event) => ({ ts: event.ts, line: `${event.host} firewall ${event.proto}/${event.dpt} from ${event.src}` })),
+        ...hostSignals.map((event) => ({ ts: event.ts, line: formatSignal(event) }))]
+        .sort((a, b) => +new Date(b.ts) - +new Date(a.ts))
+        .slice(0, EVIDENCE_LIMIT)
+        .map((event) => event.line),
     },
   };
 }
