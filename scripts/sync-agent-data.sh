@@ -115,6 +115,12 @@ rsync -az --delete \
     -e "ssh -i $PROD_KEY -p $PROD_PORT -o StrictHostKeyChecking=no" \
     --exclude="*.reset.*" \
     --exclude="*.deleted.*" \
+    --exclude="*.sqlite" \
+    --exclude="*.sqlite-wal" \
+    --exclude="*.sqlite-shm" \
+    --exclude="cache/" \
+    --exclude="shell_snapshots/" \
+    --exclude="models_cache.json" \
     --exclude="agent-status.json" \
     "$AGENTS_DIR/" \
     "${PROD_HOST}:${PROD_AGENT_DATA}/" 2>/dev/null
@@ -176,8 +182,9 @@ PINGEOF
 fi
 
 # ── 6c. Sync network-history.db to prod ──────────────────────────────────────
-if [ -f "$DB" ]; then
-  scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
+if [ -f "$DB" ] && [ $((10#$(date +%M) % 10)) -eq 0 ]; then
+  rsync -az \
+      -e "ssh -i $PROD_KEY -p $PROD_PORT -o StrictHostKeyChecking=no" \
       "$DB" \
       "${PROD_HOST}:${PROD_AGENT_DATA}/network-history.db" 2>/dev/null && true
 fi

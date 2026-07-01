@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-23.
 
-This is the working backlog after the `/systems` health registry and `/deploys` GitHub Actions feed fixes. Priorities are ordered by risk and operational value.
+This is the working backlog after the `/systems`, `/deploys`, and live `/security` telemetry fixes. Priorities are ordered by risk and operational value.
 
 ## P0 - Security And Correctness
 
@@ -26,62 +26,72 @@ This is the working backlog after the `/systems` health registry and `/deploys` 
    - Do: collect prod auth/firewall/fail2ban/nginx signals live from mounted host logs, expose reporting coverage by server, and show registered hosts that still need a security channel.
    - Files: `apps/docker-compose.yml`, `apps/panel/src/app/api/security/route.ts`, `apps/panel/src/app/api/security/_security-collector.ts`, `apps/panel/src/app/security/page.tsx`.
 
+5. `[doing]` Make firewall block volume actionable.
+   - Why: The headline block count can look alarming without showing whether it is an exact count, sampled evidence, which host is noisy, or which ports/sources are being hit.
+   - Do: expose firewall totals separately from sampled evidence rows, add host/source/port rollups, and make the `/security` triage card explain the difference.
+   - Files: `apps/panel/src/app/api/security/_security-collector.ts`, `apps/panel/src/app/security/page.tsx`.
+
 ## P1 - Product Value
 
-5. `[todo]` Make incident controls real and persistent.
+6. `[todo]` Make incident controls real and persistent.
    - Why: Incidents have Ack/Assign/Close buttons, but they are inert and incident state is rebuilt from live signals every refresh.
    - Do: add `/api/incidents` with persisted state for ack, owner, close, silence-until, and notes; merge persisted state into the incident builder; audit each action.
    - Files: `apps/panel/src/app/incidents/page.tsx`, new `apps/panel/src/app/api/incidents/route.ts`.
 
-6. `[todo]` Replace placeholder overview/status contracts.
+7. `[todo]` Replace placeholder overview/status contracts.
    - Why: `/api/overview` only says the endpoint exists, and `/api/status` returns null Prometheus fields. These should be trustworthy aggregate APIs.
    - Do: build overview/status from health, systems, alerts, agents, deploys, security, and activity; include stale/error metadata per source.
    - Files: `apps/panel/src/app/api/overview/route.ts`, `apps/panel/src/app/api/status/route.ts`.
 
-7. `[published]` Update Activity to use the GitHub deploy feed.
+8. `[published]` Update Activity to use the GitHub deploy feed.
    - Why: `/api/activity` still reads `DEPLOY_LOG_FILE`, so deploy activity can remain empty even though `/api/deploys` now correctly reads GitHub Actions.
    - Do: share deploy-fetching logic or call an internal helper from both routes; show failed/running/success deploys in the unified activity stream.
    - Files: `apps/panel/src/app/api/activity/route.ts`, `apps/panel/src/app/api/deploys/route.ts`.
 
-8. `[published]` Improve `/deploys` operator usefulness.
+9. `[published]` Improve `/deploys` operator usefulness.
    - Why: The feed now loads, but the UI does not expose run URLs, failure detail, or workflow filters.
    - Do: include run URL in the API contract; make rows link to GitHub run details; add status/workflow filters and a compact failure badge.
    - Files: `apps/panel/src/app/deploys/page.tsx`, `apps/panel/src/app/api/deploys/route.ts`.
 
+10. `[doing]` Surface `/deploys` feed trust state.
+   - Why: The page can be reading GitHub correctly while still looking like a static deploy log, and fallback mode was not obvious.
+   - Do: show whether the feed is live GitHub Actions or local deploy-log fallback, include loaded run count, and surface GitHub API warnings.
+   - Files: `apps/panel/src/app/deploys/page.tsx`.
+
 ## P1 - Reliability And Ops
 
-9. `[todo]` Reduce panel container blast radius.
+11. `[todo]` Reduce panel container blast radius.
    - Why: The panel publishes `3020` on `0.0.0.0` and mounts Docker socket, workspace, SSH keys, and agent data into one web process.
    - Do: bind panel to localhost if nginx is the public entrypoint; split privileged host probes into a narrow sidecar/API; remove Docker socket and SSH mounts from the main panel where possible.
    - Files: `apps/docker-compose.yml`, host probe API routes.
 
-10. `[todo]` Stop disabling SSH host verification.
+12. `[todo]` Stop disabling SSH host verification.
    - Why: Deploy and remote log paths use `StrictHostKeyChecking=no`, which weakens prod access.
    - Do: use the existing SSH config/known-host aliases; fail closed with `BatchMode=yes` and explicit known-host handling.
    - Files: `scripts/deploy-prod.sh`, `apps/panel/src/app/api/security/_security-logs.ts`.
 
-11. `[todo]` Add a working verification gate before deploy.
+13. `[todo]` Add a working verification gate before deploy.
     - Why: `next lint` is obsolete here and there are no route contract/security checks.
     - Do: add route smoke tests for auth coverage and API shape; run build plus smoke tests in GitHub Actions before restarting prod.
     - Files: `apps/panel/package.json`, `.github/workflows/deploy-mission-control.yml`, new test scripts.
 
 ## P2 - Repo Hygiene
 
-12. `[todo]` Clean generated/runtime artifacts out of Git.
+14. `[todo]` Clean generated/runtime artifacts out of Git.
     - Why: `agent-status.json`, `iperf-results.json`, `network-history.db`, and `tsconfig.tsbuildinfo` cause noisy diffs and risk accidental runtime-data commits.
     - Do: update `.gitignore`; intentionally untrack generated files after confirming prod/deploy expectations; document runtime source-of-truth paths.
     - Files: `.gitignore`, `agent-status.json`, `iperf-results.json`, `network-history.db`, `apps/panel/tsconfig.tsbuildinfo`.
 
-13. `[todo]` Split shared data helpers for deploys, agents, systems, and activity.
+15. `[todo]` Split shared data helpers for deploys, agents, systems, and activity.
     - Why: API routes duplicate file paths and parsing logic, which is how `/deploys` and `/activity` diverged.
     - Do: create small server-only helper modules for deploy events, agent status, system health, and activity aggregation; keep route files thin.
     - Files: `apps/panel/src/app/api/_*.ts`, `apps/panel/src/app/api/activity/route.ts`.
 
 ## Suggested Execution Order
 
-1. P0 API guards and deploy write lock.
-2. P0 network history validation.
-3. Activity deploy feed follow-up.
+1. Finish and publish firewall block rollups.
+2. Finish and publish `/deploys` trust-state visibility.
+3. Decide whether Shazza should get a security channel or be intentionally excluded from `/security` coverage.
 4. Real incident state/actions.
 5. Overview/status aggregate contracts.
 6. Container and SSH hardening.

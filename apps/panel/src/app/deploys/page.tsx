@@ -18,6 +18,13 @@ interface Deploy {
   runUrl?: string;
 }
 
+interface DeployFeedMeta {
+  ok: boolean;
+  source: 'github-actions' | 'deploy-log';
+  count: number;
+  warning?: string;
+}
+
 function statusColor(s: Deploy['status']) {
   if (s === 'success') return 'var(--sev-healthy)';
   if (s === 'failure') return 'var(--sev-critical)';
@@ -42,6 +49,7 @@ function timeAgo(iso: string) {
 
 export default function DeploysPage() {
   const [deploys, setDeploys] = useState<Deploy[]>([]);
+  const [feedMeta, setFeedMeta] = useState<DeployFeedMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | Deploy['status']>('all');
@@ -52,7 +60,11 @@ export default function DeploysPage() {
     setError(null);
     fetch('/api/deploys', { cache: 'no-store' })
       .then(r => r.json())
-      .then(d => { setDeploys(d.deploys ?? []); setLoading(false); })
+      .then(d => {
+        setDeploys(d.deploys ?? []);
+        setFeedMeta({ ok: Boolean(d.ok), source: d.source ?? 'deploy-log', count: Number(d.count ?? 0), warning: d.warning });
+        setLoading(false);
+      })
       .catch(e => { setError(String(e)); setLoading(false); });
   };
 
@@ -74,9 +86,28 @@ export default function DeploysPage() {
       <div className="space-y-6">
         <SectionTitle
           title="Deploys"
-          subtitle="Recent GitHub Actions deployments and release state"
+          subtitle={feedMeta?.source === 'github-actions' ? 'Live GitHub Actions deployment and release state' : 'Local deploy log fallback'}
           action={<ToolbarButton onClick={load} disabled={loading}>{loading ? 'Refreshing' : 'Refresh'}</ToolbarButton>}
         />
+
+        {feedMeta && (
+          <div className={card + ` border px-5 py-4 ${feedMeta.source === 'github-actions' ? 'border-[rgba(34,197,94,0.22)] bg-[rgba(34,197,94,0.05)]' : 'border-[rgba(245,158,11,0.30)] bg-[rgba(245,158,11,0.07)]'}`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-semibold text-slate-100">
+                  Source: {feedMeta.source === 'github-actions' ? 'GitHub Actions API' : 'local deploy log'}
+                </div>
+                <div className="mt-1 text-[12px] text-slate-400">
+                  {feedMeta.source === 'github-actions'
+                    ? `${feedMeta.count} workflow run${feedMeta.count === 1 ? '' : 's'} loaded from GitHub.`
+                    : `GitHub read failed; showing ${feedMeta.count} local deploy log entr${feedMeta.count === 1 ? 'y' : 'ies'}.`}
+                </div>
+              </div>
+              <StatusBadge label={feedMeta.source === 'github-actions' ? 'Live' : 'Fallback'} status={feedMeta.source === 'github-actions' ? 'healthy' : 'warning'} />
+            </div>
+            {feedMeta.warning && <div className="mt-3 truncate font-mono text-[11px] text-[var(--sev-warning)]" title={feedMeta.warning}>{feedMeta.warning}</div>}
+          </div>
+        )}
 
         {error && (
           <div className={card + ' border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.07)] p-5'}>

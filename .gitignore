@@ -8,4 +8,8 @@ node_modules/
 runtime/
 tmp_*.js
 security-data.json
+agent-status.json
+iperf-results.json
+network-history.db
 network-history.db-journal
+apps/panel/tsconfig.tsbuildinfo
