@@ -147,6 +147,7 @@ export const ROUTES: Route[] = [
   { href: '/', label: 'Overview', icon: 'overview', group: 'MONITOR' },
   { href: '/activity', label: 'Activity', icon: 'activity', group: 'MONITOR' },
   { href: '/apps', label: 'App Health', icon: 'agents', group: 'MONITOR' },
+  { href: '/estate', label: 'Estate', icon: 'systems', group: 'MONITOR' },
   { href: '/systems', label: 'Systems', icon: 'systems', group: 'MONITOR' },
   { href: '/network', label: 'Network', icon: 'network', group: 'MONITOR' },
   { href: '/security', label: 'Security', icon: 'security', group: 'MONITOR' },
