@@ -54,6 +54,15 @@ function mapRunStatus(run: any): EstateStatus {
   return 'critical';
 }
 
+function isPrimaryRun(run: any, repo: EstateRepo) {
+  const name = String(run?.name || run?.workflow_name || '');
+  const event = String(run?.event || '');
+  const branch = String(run?.head_branch || '');
+  if (event === 'dynamic' || name.toLowerCase().includes('dependabot')) return false;
+  if (branch && branch !== repo.productionBranch) return false;
+  return /deploy|validate|production|ci|build/i.test(name);
+}
+
 function severityRank(severity: string) {
   return { critical: 4, high: 3, medium: 2, low: 1 }[severity] ?? 0;
 }
@@ -77,7 +86,7 @@ async function collectRepo(repo: EstateRepo) {
   const alerts = alertsResult.status === 'fulfilled' && Array.isArray(alertsResult.value)
     ? alertsResult.value
     : [];
-  const latestRun = runs[0];
+  const latestRun = runs.find((run: any) => isPrimaryRun(run, repo)) ?? runs.find((run: any) => String(run?.event || '') !== 'dynamic') ?? runs[0];
   const alertCounts = alerts.reduce((counts: Record<string, number>, alert: any) => {
     const severity = alert?.security_advisory?.severity ?? 'unknown';
     counts[severity] = (counts[severity] ?? 0) + 1;
