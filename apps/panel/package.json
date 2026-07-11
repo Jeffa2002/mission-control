@@ -9,22 +9,22 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@tailwindcss/postcss": "^4.3.0",
+    "@tailwindcss/postcss": "^4.3.2",
     "d3-geo": "^3.1.1",
     "jszip": "^3.10.1",
-    "next": "^16.2.7",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "next": "^16.2.10",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "react-simple-maps": "^3.0.0",
-    "tailwindcss": "^4.3.0",
+    "tailwindcss": "^4.3.2",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^26",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   },
   "overrides": {
     "postcss": "8.5.15",

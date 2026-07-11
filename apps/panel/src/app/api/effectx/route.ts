@@ -287,7 +287,8 @@ async function checkSsl(hostname: string, port = 443): Promise<SslInfo | null> {
           if (!cert?.valid_to) return resolve(null);
           const expiresAt = new Date(cert.valid_to).toISOString();
           const daysRemaining = Math.floor((new Date(cert.valid_to).getTime() - Date.now()) / 86_400_000);
-          const issuer = cert.issuer?.O ?? undefined;
+          const issuerValue = cert.issuer?.O;
+          const issuer = Array.isArray(issuerValue) ? issuerValue.join(', ') : issuerValue ?? undefined;
           resolve({ valid: daysRemaining > 0, expiresAt, daysRemaining, issuer });
         } catch {
           resolve(null);
