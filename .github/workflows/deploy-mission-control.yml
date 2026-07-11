@@ -23,10 +23,24 @@ jobs:
       - mission-control-prod
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - name: Prepare repository
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo_dir=/tmp/mission-control-deploy-src
+          repo_url="https://x-access-token:${GITHUB_TOKEN}@github.com/Jeffa2002/mission-control.git"
+          if [ ! -d "$repo_dir/.git" ]; then
+            rm -rf "$repo_dir"
+            git clone "$repo_url" "$repo_dir"
+          fi
+          cd "$repo_dir"
+          git fetch "$repo_url" master
+          git reset --hard FETCH_HEAD
+          git clean -fd
 
       - name: Sync source into production tree
+        working-directory: /tmp/mission-control-deploy-src
         run: |
           rsync -az --delete \
             --exclude .git \
