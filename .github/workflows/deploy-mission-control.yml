@@ -69,7 +69,7 @@ jobs:
           set +a
           for attempt in $(seq 1 20); do
             if html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)" \
-              && printf "%s" "$html" | grep -q "Operational Brief" \
+              && printf "%s" "$html" | grep -qi "operational brief" \
               && printf "%s" "$html" | grep -q "Needs action" \
               && curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null; then
               exit 0
