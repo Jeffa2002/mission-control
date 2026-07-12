@@ -978,6 +978,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <AppShellContext.Provider value={contextValue}>
       <div
+        className="mc-app-shell"
         style={{
           minHeight: '100vh',
           background: 'var(--bg-0)',

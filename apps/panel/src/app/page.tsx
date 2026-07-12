@@ -1,738 +1,728 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { AppShell, Metric, SectionTitle, StatusBadge as OpsStatusBadge, ToolbarButton, card, muted, sevPill } from '../components/ops-ui';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppShell } from '../components/ops-ui';
+import styles from './page.module.css';
 
-// ─── Types ─────────────────────────────────────────────────────────────────
+type Tone = 'nominal' | 'attention' | 'incident' | 'unknown';
+type ActivitySeverity = 'healthy' | 'warning' | 'critical' | 'info' | 'neutral';
 
-interface AgentStatusItem {
+type AgentStatusItem = {
   id: string;
   label?: string;
   emoji?: string;
-  status: 'Working' | 'Idle' | 'Offline' | 'working' | 'idle' | 'offline';
+  status?: string;
   busy?: boolean;
   uptime?: string;
   restarts?: number;
   pm_id?: number;
-}
+};
 
-interface HealthData {
+type HealthData = {
   ok: boolean;
   overall: 'green' | 'amber' | 'red';
   checks: Record<string, { status: string; detail?: string }>;
   checked_at: string;
-}
+};
 
-interface EffectxApp {
+type EffectxApp = {
   id: string;
   name: string;
   description?: string;
   url: string;
   iconUrl?: string;
   status: 'up' | 'degraded' | 'down' | 'unknown';
-  kind?: 'app' | 'site' | 'tool' | 'alias' | 'internal';
-  upstream?: string;
-  color?: string;
+  kind?: string;
   latencyMs?: number;
   ssl?: { daysRemaining: number; valid: boolean };
-}
+};
 
-interface Deploy {
+type Deploy = {
   id: string;
   app: string;
-  repo: string;
   commit: string;
   commitMsg: string;
   branch: string;
   status: 'success' | 'failure' | 'running';
   triggeredBy: string;
   startedAt: string;
-  finishedAt?: string;
   durationS?: number;
-}
+};
 
-interface ShazzaData {
-  ok: boolean;
-  reachable: boolean;
-  memory?: { used_pct?: number; usedMb?: number; totalMb?: number; pct?: number } | null;
-  disk?: { used_pct?: number; pct?: string } | null;
-  uptime?: { pretty?: string | null; since?: string | null } | string | null;
+type HostData = {
+  ok?: boolean;
+  reachable?: boolean;
+  label?: string;
   error?: string;
-}
+  checkedAt?: string;
+  cpu?: { pct?: number | null; cores?: number };
+  memory?: { pct?: number; used_pct?: number; usedMb?: number; totalMb?: number } | null;
+  disk?: { pct?: number | string; used_pct?: number } | null;
+  uptime?: { pretty?: string | null; since?: string | null } | string | null;
+  containerCount?: number;
+};
 
-interface ActivityItem {
+type ActivityItem = {
   id: string;
   ts: string;
   source: string;
   title: string;
   detail: string;
-  severity: 'healthy' | 'warning' | 'critical' | 'info' | 'neutral';
+  severity: ActivitySeverity;
   href?: string;
+};
+
+type PromAlert = {
+  state?: string;
+  activeAt?: string;
+  value?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+};
+
+type BriefData = {
+  health: HealthData | null;
+  agents: AgentStatusItem[];
+  apps: EffectxApp[];
+  deploys: Deploy[];
+  activity: ActivityItem[];
+  alerts: PromAlert[];
+  bazza: HostData | null;
+  shazza: HostData | null;
+};
+
+type InspectorItem = {
+  key: string;
+  group: 'Action' | 'Application' | 'Host' | 'Agent';
+  title: string;
+  tone: Tone;
+  state: string;
+  summary: string;
+  facts: Array<[string, string]>;
+  href: string;
+  hrefLabel: string;
+  suggestion: string;
+  metric?: { label: string; value: number; threshold: number; unit: string };
+};
+
+type QueueItem = InspectorItem & { rank: number; priority: number; age?: string };
+
+type ChangeItem = {
+  id: string;
+  title: string;
+  detail: string;
+  ts: string;
+  tone: Tone;
+  source: string;
+  href: string;
+};
+
+const EMPTY_DATA: BriefData = {
+  health: null,
+  agents: [],
+  apps: [],
+  deploys: [],
+  activity: [],
+  alerts: [],
+  bazza: null,
+  shazza: null,
+};
+
+function toneLabel(tone: Tone) {
+  if (tone === 'nominal') return 'Nominal';
+  if (tone === 'attention') return 'Attention';
+  if (tone === 'incident') return 'Incident';
+  return 'Unknown';
 }
 
-// ─── Helper components ─────────────────────────────────────────────────────
+function relativeTime(value?: string) {
+  if (!value) return 'Time unavailable';
+  const milliseconds = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(milliseconds)) return 'Time unavailable';
+  const minutes = Math.max(0, Math.floor(milliseconds / 60_000));
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
 
-function StatusBadge({ status }: { status: 'up' | 'degraded' | 'down' | 'unknown' }) {
-  const map: Record<string, { label: string; color: string; bg: string; border: string }> = {
-    up: { label: 'Online', color: 'var(--sev-healthy)', bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.25)' },
-    degraded: { label: 'Degraded', color: 'var(--sev-warning)', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.25)' },
-    down: { label: 'Down', color: 'var(--sev-critical)', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.25)' },
-    unknown: { label: 'Unknown', color: 'var(--text-3)', bg: 'rgba(255,255,255,0.04)', border: 'rgba(255,255,255,0.10)' },
-  };
-  const s = map[status] ?? map.unknown;
+function numericPercent(value?: number | string | null) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value.replace('%', ''));
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function hostMemory(host: HostData | null) {
+  return numericPercent(host?.memory?.pct ?? host?.memory?.used_pct);
+}
+
+function hostDisk(host: HostData | null) {
+  return numericPercent(host?.disk?.pct ?? host?.disk?.used_pct);
+}
+
+function hostUptime(host: HostData | null) {
+  if (typeof host?.uptime === 'string') return host.uptime;
+  return host?.uptime?.pretty ?? undefined;
+}
+
+function appTone(status: EffectxApp['status']): Tone {
+  if (status === 'up') return 'nominal';
+  if (status === 'degraded') return 'attention';
+  if (status === 'down') return 'incident';
+  return 'unknown';
+}
+
+function activityTone(severity: ActivitySeverity): Tone {
+  if (severity === 'critical') return 'incident';
+  if (severity === 'warning') return 'attention';
+  if (severity === 'healthy' || severity === 'info') return 'nominal';
+  return 'unknown';
+}
+
+function hostTone(host: HostData | null): Tone {
+  if (!host) return 'unknown';
+  if (host.ok === false || host.reachable === false) return 'incident';
+  const memory = hostMemory(host);
+  const disk = hostDisk(host);
+  if ((memory ?? 0) >= 90 || (disk ?? 0) >= 95) return 'incident';
+  if ((memory ?? 0) >= 75 || (disk ?? 0) >= 85) return 'attention';
+  return 'nominal';
+}
+
+function agentTone(agent: AgentStatusItem): Tone {
+  const status = (agent.status ?? '').toLowerCase();
+  if (status === 'working' || status === 'idle') return 'nominal';
+  if (status === 'offline') return 'attention';
+  return 'unknown';
+}
+
+function ToneBadge({ tone, label }: { tone: Tone; label?: string }) {
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      padding: '2px 8px', borderRadius: 999,
-      fontSize: 11, fontWeight: 700, letterSpacing: 0.2,
-      color: s.color, background: s.bg, border: `1px solid ${s.border}`,
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, display: 'inline-block' }} />
-      {s.label}
+    <span className={styles.toneBadge} data-tone={tone}>
+      <span aria-hidden="true" />
+      {label ?? toneLabel(tone)}
     </span>
   );
 }
 
-function initials(name: string) {
-  return name
-    .split(/[\s/-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join('') || 'EX';
-}
-
-function MiniProjectLogo({ app }: { app: EffectxApp }) {
-  const [failed, setFailed] = useState(false);
-  const showIcon = app.iconUrl && !failed;
-
-  return (
-    <span
-      style={{
-        width: 30,
-        height: 30,
-        borderRadius: 8,
-        display: 'grid',
-        placeItems: 'center',
-        flexShrink: 0,
-        overflow: 'hidden',
-        border: '1px solid rgba(255,255,255,0.14)',
-        background: `linear-gradient(135deg, ${app.color ?? 'var(--accent)'}28, rgba(0,0,0,0.24))`,
-      }}
-    >
-      {showIcon ? (
-        <img src={app.iconUrl} alt="" onError={() => setFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
-      ) : (
-        <span style={{ fontSize: 10, fontWeight: 900, color: app.color ?? 'var(--accent)' }}>{initials(app.name)}</span>
-      )}
-    </span>
-  );
-}
-
-function MiniCertMark({ ssl }: { ssl?: EffectxApp['ssl'] }) {
-  const state = !ssl ? 'neutral' : !ssl.valid ? 'critical' : ssl.daysRemaining < 14 ? 'warning' : 'healthy';
-  const color = state === 'healthy'
-    ? 'var(--sev-healthy)'
-    : state === 'warning'
-      ? 'var(--sev-warning)'
-      : state === 'critical'
-        ? 'var(--sev-critical)'
-        : 'var(--text-3)';
-  const label = !ssl ? 'TLS unchecked' : !ssl.valid ? 'TLS expired' : `TLS ${ssl.daysRemaining}d`;
-
-  return (
-    <span
-      title={label}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        fontSize: 11,
-        fontWeight: 800,
-        color,
-        padding: '2px 7px',
-        borderRadius: 999,
-        border: `1px solid ${state === 'neutral' ? 'rgba(255,255,255,0.12)' : `${color}55`}`,
-        background: state === 'neutral' ? 'rgba(255,255,255,0.04)' : `${color}12`,
-      }}
-    >
-      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M8 1.7l4.7 1.8v3.4c0 3.1-1.9 5.6-4.7 7-2.8-1.4-4.7-3.9-4.7-7V3.5L8 1.7z" stroke={color} strokeWidth="1.4" strokeLinejoin="round" />
-        <path d="M5.3 8.1l1.7 1.7 3.7-4" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      TLS
-    </span>
-  );
-}
-
-function ServerCard({ label, memPct, diskPct, uptime, online }: {
-  label: string;
-  memPct?: number;
-  diskPct?: number;
-  uptime?: string;
-  online: boolean;
+function SectionHeading({ eyebrow, title, copy, action }: {
+  eyebrow: string;
+  title: string;
+  copy?: string;
+  action?: React.ReactNode;
 }) {
-  const barColor = (pct?: number) => {
-    if (!pct) return 'var(--sev-healthy)';
-    if (pct > 90) return 'var(--sev-critical)';
-    if (pct > 75) return 'var(--sev-warning)';
-    return 'var(--sev-healthy)';
-  };
-
   return (
-    <div style={{
-      background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: 12, padding: '12px 14px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)' }}>{label}</span>
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: 4,
-          fontSize: 11, fontWeight: 700,
-          color: online ? 'var(--sev-healthy)' : 'var(--sev-critical)',
-        }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: '50%',
-            background: online ? 'var(--sev-healthy)' : 'var(--sev-critical)',
-            display: 'inline-block',
-          }} />
-          {online ? 'Online' : 'Offline'}
-        </span>
+    <div className={styles.sectionHeading}>
+      <div>
+        <p className={styles.eyebrow}>{eyebrow}</p>
+        <h2>{title}</h2>
+        {copy ? <p className={styles.sectionCopy}>{copy}</p> : null}
       </div>
-      {online ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-          {memPct !== undefined && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-3)', marginBottom: 3 }}>
-                <span>Memory</span><span>{memPct.toFixed(0)}%</span>
-              </div>
-              <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.08)' }}>
-                <div style={{ width: `${Math.min(memPct, 100)}%`, height: '100%', borderRadius: 2, background: barColor(memPct), transition: 'width 0.4s' }} />
-              </div>
-            </div>
-          )}
-          {diskPct !== undefined && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-3)', marginBottom: 3 }}>
-                <span>Disk</span><span>{diskPct.toFixed(0)}%</span>
-              </div>
-              <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.08)' }}>
-                <div style={{ width: `${Math.min(diskPct, 100)}%`, height: '100%', borderRadius: 2, background: barColor(diskPct), transition: 'width 0.4s' }} />
-              </div>
-            </div>
-          )}
-          {uptime && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Up {uptime}</div>}
-        </div>
-      ) : (
-        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Unreachable</div>
-      )}
+      {action}
     </div>
   );
 }
 
-function deployStatusColor(s: string) {
-  if (s === 'success') return 'var(--sev-healthy)';
-  if (s === 'failure') return 'var(--sev-critical)';
-  return 'var(--sev-warning)';
-}
-
-function relTime(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
-function formatUptime(ms: number) {
-  if (!ms) return '—';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ${m % 60}m`;
-  return `${Math.floor(h / 24)}d ${h % 24}h`;
-}
-
-function CommandBrief({
-  health,
-  alertCount,
-  panicLatched,
-  latestDeploy,
-  liveAgents,
-  totalAgents,
-}: {
-  health: HealthData | null;
-  alertCount: number;
-  panicLatched: boolean;
-  latestDeploy?: Deploy;
-  liveAgents: number;
-  totalAgents: number;
-}) {
-  const failingChecks = health?.checks
-    ? Object.entries(health.checks).filter(([, c]) => c.status === 'error' || c.status === 'degraded')
-    : [];
-  const riskState = panicLatched ? 'critical' : alertCount > 0 ? 'warning' : 'healthy';
-  const riskLabel = panicLatched ? 'Panic latched' : alertCount > 0 ? `${alertCount} degraded check${alertCount === 1 ? '' : 's'}` : 'No immediate risk';
-  const changedLabel = latestDeploy
-    ? `${latestDeploy.app} deployed ${relTime(latestDeploy.startedAt)}`
-    : health?.checked_at
-      ? `Health refreshed ${new Date(health.checked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-      : 'Waiting for live telemetry';
-  const actionLabel = panicLatched
-    ? 'Review panic latch before continuing operations'
-    : failingChecks[0]
-      ? `Investigate ${failingChecks[0][0].replace(/_/g, ' ')}: ${failingChecks[0][1].detail ?? failingChecks[0][1].status}`
-      : liveAgents > 0
-        ? `${liveAgents}/${totalAgents} agents active; monitor current work`
-        : 'No operator action required';
-
-  const tile = (eyebrow: string, title: string, detail: string, state: 'healthy' | 'warning' | 'critical' | 'info') => {
-    const color = state === 'healthy' ? 'var(--sev-healthy)' : state === 'warning' ? 'var(--sev-warning)' : state === 'critical' ? 'var(--sev-critical)' : 'var(--sev-info)';
-    return (
-      <div
-        className="rounded-[12px] border border-white/10 bg-[rgba(255,255,255,0.025)] p-4"
-        style={{ borderLeft: `3px solid ${color}` }}
-      >
-        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">{eyebrow}</div>
-        <div className="mt-2 text-[15px] font-semibold text-slate-100">{title}</div>
-        <div className="mt-1 text-[12px] leading-5 text-slate-400">{detail}</div>
-      </div>
-    );
+function makeAppInspector(app: EffectxApp): InspectorItem {
+  const tone = appTone(app.status);
+  const ssl = !app.ssl ? 'Not reported' : app.ssl.valid ? `${app.ssl.daysRemaining} days remaining` : 'Invalid or expired';
+  return {
+    key: `app:${app.id}`,
+    group: 'Application',
+    title: app.name,
+    tone,
+    state: app.status === 'up' ? 'Online' : app.status === 'degraded' ? 'Degraded' : app.status === 'down' ? 'Down' : 'Unknown',
+    summary: app.description || `Live application check for ${app.name}.`,
+    facts: [
+      ['Status', app.status],
+      ['Latency', app.latencyMs == null ? 'Not reported' : `${app.latencyMs} ms`],
+      ['TLS', ssl],
+      ['Type', app.kind ?? 'app'],
+    ],
+    href: '/apps',
+    hrefLabel: 'Open app health',
+    suggestion: tone === 'incident' ? 'Confirm the failed health check before opening an incident.' : tone === 'attention' ? 'Review latency, TLS, and upstream health.' : 'No action required.',
   };
+}
+
+function makeHostInspector(id: string, host: HostData | null): InspectorItem {
+  const title = host?.label || (id === 'bazza' ? 'Bazza' : 'Shazza');
+  const tone = hostTone(host);
+  const memory = hostMemory(host);
+  const disk = hostDisk(host);
+  const primaryMetric = (memory ?? 0) >= 75
+    ? { label: 'Memory', value: memory ?? 0, threshold: 90, unit: '%' }
+    : (disk ?? 0) >= 85
+      ? { label: 'Disk', value: disk ?? 0, threshold: 95, unit: '%' }
+      : undefined;
+  return {
+    key: `host:${id}`,
+    group: 'Host',
+    title,
+    tone,
+    state: tone === 'incident' ? 'Unavailable' : tone === 'attention' ? 'Watching' : tone === 'nominal' ? 'Healthy' : 'Unknown',
+    summary: host?.error || (tone === 'attention' ? 'A host resource has crossed its preferred operating range.' : tone === 'nominal' ? 'Reachability and reported host resources are within operating thresholds.' : 'Host telemetry is not currently available.'),
+    facts: [
+      ['Reachability', host?.reachable === false || host?.ok === false ? 'Unreachable' : host ? 'Reachable' : 'Unknown'],
+      ['Memory', memory == null ? 'Not reported' : `${Math.round(memory)}%`],
+      ['Disk', disk == null ? 'Not reported' : `${Math.round(disk)}%`],
+      ['Uptime', hostUptime(host) || 'Not reported'],
+    ],
+    href: '/estate',
+    hrefLabel: 'Open estate detail',
+    suggestion: tone === 'incident' ? 'Check host reachability and dependent services now.' : tone === 'attention' ? 'Review resource use before it reaches the escalation threshold.' : 'No action required.',
+    metric: primaryMetric,
+  };
+}
+
+function makeAgentInspector(agent: AgentStatusItem): InspectorItem {
+  const tone = agentTone(agent);
+  const status = agent.status || 'Unknown';
+  return {
+    key: `agent:${agent.id}`,
+    group: 'Agent',
+    title: agent.label || agent.id,
+    tone,
+    state: status,
+    summary: tone === 'attention' ? 'The agent process is reported offline.' : tone === 'nominal' ? `The agent is ${status.toLowerCase()} and available in the mesh.` : 'Agent state has not been reported.',
+    facts: [
+      ['State', status],
+      ['Busy', agent.busy == null ? 'Not reported' : agent.busy ? 'Yes' : 'No'],
+      ['Uptime', agent.uptime || 'Not reported'],
+      ['Restarts', agent.restarts == null ? 'Not reported' : String(agent.restarts)],
+    ],
+    href: `/agents/${encodeURIComponent(agent.id)}`,
+    hrefLabel: 'Open agent detail',
+    suggestion: tone === 'attention' ? 'Check the agent process before assigning new work.' : 'No action required.',
+  };
+}
+
+function buildQueue(data: BriefData): QueueItem[] {
+  const items: Array<Omit<QueueItem, 'rank'>> = [];
+
+  data.alerts.filter((alert) => alert.state === 'firing').forEach((alert, index) => {
+    const severity = (alert.labels?.severity ?? '').toLowerCase();
+    const tone: Tone = severity === 'critical' || severity === 'page' ? 'incident' : 'attention';
+    const name = alert.labels?.alertname || `Monitoring alert ${index + 1}`;
+    items.push({
+      key: `alert:${name}:${index}`,
+      group: 'Action',
+      title: name,
+      tone,
+      state: 'Firing',
+      summary: alert.annotations?.summary || alert.annotations?.description || 'Prometheus reports an active alert.',
+      facts: [
+        ['State', alert.state || 'firing'],
+        ['Severity', alert.labels?.severity || 'Not labelled'],
+        ['Instance', alert.labels?.instance || 'Not labelled'],
+        ['Value', alert.value || 'Not reported'],
+      ],
+      href: '/incidents',
+      hrefLabel: 'Review incidents',
+      suggestion: 'Validate impact and follow the relevant incident runbook.',
+      priority: tone === 'incident' ? 100 : 78,
+      age: relativeTime(alert.activeAt),
+    });
+  });
+
+  Object.entries(data.health?.checks ?? {}).forEach(([name, check]) => {
+    if (check.status !== 'error' && check.status !== 'degraded') return;
+    const tone: Tone = check.status === 'error' ? 'incident' : 'attention';
+    items.push({
+      key: `health:${name}`,
+      group: 'Action',
+      title: name.replaceAll('_', ' '),
+      tone,
+      state: check.status === 'error' ? 'Failed' : 'Degraded',
+      summary: check.detail || 'Health check requires review.',
+      facts: [['Check', name], ['State', check.status], ['Detail', check.detail || 'Not reported']],
+      href: '/systems',
+      hrefLabel: 'Review systems',
+      suggestion: check.status === 'error' ? 'Confirm service impact and escalate if persistent.' : 'Review the degraded check before it worsens.',
+      priority: tone === 'incident' ? 96 : 72,
+      age: relativeTime(data.health?.checked_at),
+    });
+  });
+
+  data.apps.forEach((app) => {
+    const inspector = makeAppInspector(app);
+    const tlsIncident = app.ssl && !app.ssl.valid;
+    const tlsAttention = app.ssl && app.ssl.valid && app.ssl.daysRemaining < 14;
+    if (inspector.tone === 'nominal' && !tlsIncident && !tlsAttention) return;
+    const tone: Tone = tlsIncident || inspector.tone === 'incident' ? 'incident' : inspector.tone === 'unknown' ? 'attention' : 'attention';
+    items.push({
+      ...inspector,
+      tone,
+      state: tlsIncident ? 'TLS invalid' : tlsAttention ? 'TLS expiring' : inspector.state,
+      summary: tlsIncident ? 'The reported TLS certificate is invalid or expired.' : tlsAttention ? `TLS certificate expires in ${app.ssl?.daysRemaining} days.` : inspector.summary,
+      priority: tone === 'incident' ? 92 : 68,
+    });
+  });
+
+  [makeHostInspector('bazza', data.bazza), makeHostInspector('shazza', data.shazza)].forEach((host) => {
+    if (host.tone !== 'incident' && host.tone !== 'attention') return;
+    items.push({ ...host, priority: host.tone === 'incident' ? 90 : 66 });
+  });
+
+  data.deploys.forEach((deploy) => {
+    if (deploy.status === 'success') return;
+    const tone: Tone = deploy.status === 'failure' ? 'incident' : 'attention';
+    items.push({
+      key: `deploy:${deploy.id}`,
+      group: 'Action',
+      title: `${deploy.app} deploy ${deploy.status}`,
+      tone,
+      state: deploy.status === 'failure' ? 'Failed' : 'In progress',
+      summary: deploy.commitMsg || `${deploy.branch} at ${deploy.commit}`,
+      facts: [['Application', deploy.app], ['Branch', deploy.branch], ['Commit', deploy.commit || 'Not reported'], ['Triggered by', deploy.triggeredBy || 'Not reported']],
+      href: '/deploys',
+      hrefLabel: 'Open deploys',
+      suggestion: deploy.status === 'failure' ? 'Review the deployment log and confirm service health.' : 'Observe service health until the deployment completes.',
+      priority: tone === 'incident' ? 88 : 62,
+      age: relativeTime(deploy.startedAt),
+    });
+  });
+
+  data.agents.forEach((agent) => {
+    const inspector = makeAgentInspector(agent);
+    if (inspector.tone !== 'attention') return;
+    items.push({ ...inspector, priority: 45 });
+  });
+
+  return items
+    .sort((left, right) => right.priority - left.priority)
+    .slice(0, 6)
+    .map((item, index) => ({ ...item, rank: index + 1 }));
+}
+
+function buildChanges(data: BriefData): ChangeItem[] {
+  const activity: ChangeItem[] = data.activity.map((item) => ({
+    id: `activity:${item.id}`,
+    title: item.title,
+    detail: item.detail,
+    ts: item.ts,
+    tone: activityTone(item.severity),
+    source: item.source,
+    href: item.href || '/activity',
+  }));
+  const deploys: ChangeItem[] = data.deploys.map((deploy) => ({
+    id: `deploy:${deploy.id}`,
+    title: `${deploy.app} deploy ${deploy.status}`,
+    detail: [deploy.branch, deploy.commit?.slice(0, 8), deploy.commitMsg].filter(Boolean).join(' · '),
+    ts: deploy.startedAt,
+    tone: deploy.status === 'failure' ? 'incident' : deploy.status === 'running' ? 'attention' : 'nominal',
+    source: 'deploy',
+    href: '/deploys',
+  }));
+  const seen = new Set<string>();
+  return [...activity, ...deploys]
+    .filter((item) => {
+      const key = `${item.title}:${item.ts}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => new Date(right.ts).getTime() - new Date(left.ts).getTime())
+    .slice(0, 5);
+}
+
+function SignalRibbon({ changes, currentTone }: { changes: ChangeItem[]; currentTone: Tone }) {
+  const now = Date.now();
+  const bins = Array.from({ length: 24 }, (_, index) => {
+    const start = now - (23 - index) * 3_600_000;
+    const end = start + 3_600_000;
+    const events = changes.filter((change) => {
+      const time = new Date(change.ts).getTime();
+      return time >= start && time < end;
+    });
+    let tone: Tone = 'unknown';
+    if (events.some((event) => event.tone === 'incident')) tone = 'incident';
+    else if (events.some((event) => event.tone === 'attention')) tone = 'attention';
+    else if (events.length > 0) tone = 'nominal';
+    if (index === 23 && currentTone !== 'unknown' && tone === 'unknown') tone = currentTone;
+    return { tone, count: events.length, start };
+  });
+  const eventCount = bins.reduce((sum, bin) => sum + bin.count, 0);
 
   return (
-    <section className={card + ' p-5'}>
-      <SectionTitle title="Command Brief" subtitle="Current risk, recent change, and next operator action" />
-      <div className="grid gap-3 xl:grid-cols-3">
-        {tile('Risk now', riskLabel, failingChecks.length ? failingChecks.map(([name]) => name.replace(/_/g, ' ')).join(' · ') : 'Telemetry is reporting a clear operational state.', riskState)}
-        {tile('Changed', changedLabel, latestDeploy?.commitMsg || 'No recent deployment event is available in the local deploy log.', latestDeploy?.status === 'failure' ? 'critical' : latestDeploy?.status === 'running' ? 'warning' : 'info')}
-        {tile('Next action', actionLabel, panicLatched || failingChecks.length ? 'Prioritise this before lower-signal telemetry.' : 'Continue monitoring from the Network and Security surfaces.', panicLatched || failingChecks.length ? riskState : 'healthy')}
+    <section className={styles.ribbonPanel} aria-labelledby="signal-title">
+      <div className={styles.ribbonIntro}>
+        <p className={styles.eyebrow}>Last 24 hours</p>
+        <h2 id="signal-title">Signal ribbon</h2>
+        <p>{eventCount ? `${eventCount} recorded operational changes` : 'No timestamped changes in the loaded activity window'}</p>
       </div>
+      <div className={styles.ribbon} role="img" aria-label={`Twenty-four hour operational signal ribbon with ${eventCount} recorded changes`}>
+        {bins.map((bin, index) => (
+          <span
+            key={bin.start}
+            data-tone={bin.tone}
+            title={`${new Date(bin.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}: ${bin.count ? `${bin.count} recorded change${bin.count === 1 ? '' : 's'}` : index === 23 && bin.tone !== 'unknown' ? `current state ${toneLabel(bin.tone)}` : 'no recorded change'}`}
+          />
+        ))}
+      </div>
+      <div className={styles.ribbonScale} aria-hidden="true"><span>24h ago</span><span>12h</span><span>Now</span></div>
     </section>
   );
 }
 
-function ActivityPreview({ items }: { items: ActivityItem[] }) {
+function Inspector({ item, onClose }: { item: InspectorItem | null; onClose: () => void }) {
+  const [actionState, setActionState] = useState<'idle' | 'busy'>('idle');
+  const [actionMessage, setActionMessage] = useState('');
+
+  async function captureDiagnostics() {
+    if (!item) return;
+    setActionState('busy');
+    setActionMessage('Recording diagnostic intent…');
+    try {
+      const response = await fetch('/api/runbook-actions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'capture_diagnostics', source: `operational_brief:${item.key}` }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Unable to record diagnostic intent');
+      setActionMessage(result.next || 'Diagnostic intent recorded in the audit trail.');
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Unable to record diagnostic intent');
+    } finally {
+      setActionState('idle');
+    }
+  }
+
+  if (!item) {
+    return (
+      <aside className={styles.inspector} aria-label="Contextual inspector">
+        <p className={styles.eyebrow}>Context</p>
+        <h2>Select an operational signal</h2>
+        <p className={styles.inspectorSummary}>Choose an action or estate node to inspect the evidence behind its current state.</p>
+      </aside>
+    );
+  }
+
   return (
-    <section className={card + ' overflow-hidden'}>
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-[var(--bg-2)] px-4 py-3">
-        <div>
-          <div className="text-[13px] font-bold text-slate-100">Unified Activity</div>
-          <div className="mt-1 text-[12px] text-slate-500">Latest audit, deploy, and agent signals</div>
-        </div>
-        <Link className="mc-toolbar-button" href="/activity">Open</Link>
+    <aside className={styles.inspector} aria-label="Contextual inspector" aria-live="polite">
+      <div className={styles.inspectorTop}>
+        <div><p className={styles.eyebrow}>{item.group}</p><h2>{item.title}</h2></div>
+        <button className={styles.closeButton} type="button" onClick={onClose} aria-label="Clear inspector selection">×</button>
       </div>
-      {items.length === 0 ? (
-        <div className="p-5 text-[13px] text-slate-500">Waiting for activity stream...</div>
-      ) : (
-        <div className="divide-y divide-white/10">
-          {items.slice(0, 6).map((item) => (
-            <Link key={item.id} href={item.href ?? '/activity'} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 transition-colors hover:bg-white/[0.025]">
-              <div style={{ minWidth: 0 }}>
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <OpsStatusBadge label={item.severity === 'critical' ? 'Critical' : item.severity === 'warning' ? 'Warning' : item.severity === 'healthy' ? 'OK' : 'Signal'} status={item.severity} pulse={item.severity === 'critical'} />
-                  <span className={sevPill('neutral')}>{item.source}</span>
-                </div>
-                <div className="truncate text-[13px] font-bold text-slate-100">{item.title}</div>
-                <div className="mt-1 truncate text-[12px] text-slate-500">{item.detail}</div>
-              </div>
-              <div className="font-mono text-[11px] text-slate-600">{relTime(item.ts)}</div>
-            </Link>
-          ))}
+      <div className={styles.inspectorState}><ToneBadge tone={item.tone} label={item.state} /></div>
+      <p className={styles.inspectorSummary}>{item.summary}</p>
+      <dl className={styles.facts}>
+        {item.facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+      </dl>
+      {item.metric ? (
+        <div className={styles.threshold}>
+          <div><span>{item.metric.label} threshold</span><strong>{Math.round(item.metric.value)}{item.metric.unit} / {item.metric.threshold}{item.metric.unit}</strong></div>
+          <div className={styles.thresholdTrack} aria-hidden="true"><span style={{ width: `${Math.min(100, item.metric.value)}%` }} /></div>
+          <small>Escalation threshold is explicit; current value comes from the host endpoint.</small>
         </div>
+      ) : null}
+      <div className={styles.inspectorActions}>
+        <Link className={styles.primaryAction} href={item.href}>{item.hrefLabel}</Link>
+        <button className={styles.secondaryAction} type="button" onClick={captureDiagnostics} disabled={actionState === 'busy'}>{actionState === 'busy' ? 'Recording…' : 'Capture diagnostics'}</button>
+      </div>
+      {actionMessage ? <p className={styles.actionMessage} role="status">{actionMessage}</p> : null}
+      <div className={styles.inspectorNote}><span>Suggested next step</span><p>{item.suggestion}</p></div>
+    </aside>
+  );
+}
+
+function Queue({ items, selectedKey, onSelect }: { items: QueueItem[]; selectedKey?: string; onSelect: (item: QueueItem) => void }) {
+  return (
+    <section className={`${styles.panel} ${styles.queuePanel}`} aria-labelledby="queue-title">
+      <SectionHeading eyebrow="Priority" title="Needs action" copy="Ranked by confirmed impact, threshold, and operator actionability." action={<Link href="/incidents">Incidents →</Link>} />
+      {items.length ? (
+        <ol className={styles.queueList}>
+          {items.map((item) => (
+            <li key={item.key}>
+              <button type="button" className={styles.queueItem} data-selected={selectedKey === item.key} onClick={() => onSelect(item)}>
+                <span className={styles.rank}>{String(item.rank).padStart(2, '0')}</span>
+                <span className={styles.queueBody}><span><ToneBadge tone={item.tone} label={item.state} />{item.age ? <time>{item.age}</time> : null}</span><strong>{item.title}</strong><small>{item.summary}</small></span>
+                <span className={styles.inspectArrow} aria-hidden="true">→</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className={styles.emptyState}><ToneBadge tone="nominal" label="Clear" /><strong>No ranked action items</strong><p>Loaded checks, alerts, hosts, apps, deploys, and agents have not produced an actionable condition.</p></div>
       )}
     </section>
   );
 }
 
-function IntelligenceLayer({
-  health,
-  activity,
-  liveAgents,
-  totalAgents,
-  panicLatched,
-}: {
-  health: HealthData | null;
-  activity: ActivityItem[];
-  liveAgents: number;
-  totalAgents: number;
-  panicLatched: boolean;
-}) {
-  const failingChecks = Object.entries(health?.checks ?? {}).filter(([, check]) => check.status === 'error' || check.status === 'degraded');
-  const criticalActivity = activity.filter((item) => item.severity === 'critical').length;
-  const warningActivity = activity.filter((item) => item.severity === 'warning').length;
-  const posture = panicLatched || criticalActivity || failingChecks.some(([, c]) => c.status === 'error')
-    ? 'critical'
-    : warningActivity || failingChecks.length
-      ? 'warning'
-      : 'healthy';
-  const recommendation = panicLatched
-    ? 'Clear or investigate the panic latch before continuing normal operations.'
-    : failingChecks[0]
-      ? `Investigate ${failingChecks[0][0].replaceAll('_', ' ')} from the related monitor surface.`
-      : criticalActivity
-        ? 'Open Unified Activity and inspect the newest critical signal.'
-        : liveAgents > 0
-          ? 'Agents are active. Keep the activity stream visible while work continues.'
-          : 'No immediate operator action required.';
-
+function Changes({ items }: { items: ChangeItem[] }) {
   return (
-    <section className={card + ' overflow-hidden'}>
-      <div className="grid gap-0 lg:grid-cols-[1.1fr_1fr_1fr]">
-        <div className="border-b border-white/10 p-5 lg:border-b-0 lg:border-r">
-          <div className="mb-3 flex items-center gap-2">
-            <OpsStatusBadge label={posture === 'critical' ? 'Critical' : posture === 'warning' ? 'Watch' : 'Nominal'} status={posture} pulse={posture === 'critical'} />
-            <span className={sevPill('info')}>Intelligence</span>
-          </div>
-          <div className="text-[20px] font-extrabold text-slate-50">Mission posture</div>
-          <div className={muted + ' mt-2'}>{recommendation}</div>
+    <section className={`${styles.panel} ${styles.changesPanel}`} aria-labelledby="changes-title">
+      <SectionHeading eyebrow="Change log" title="What changed" copy="Most recent deploy and activity records." action={<Link href="/activity">Activity →</Link>} />
+      {items.length ? (
+        <div className={styles.changeList}>
+          {items.map((item) => (
+            <Link href={item.href} key={item.id} className={styles.changeItem}>
+              <span className={styles.changeIcon} data-tone={item.tone} aria-hidden="true">{item.source === 'deploy' ? '↥' : item.tone === 'incident' ? '!' : item.tone === 'attention' ? '↗' : '✓'}</span>
+              <span><strong>{item.title}</strong><small>{item.detail || item.source}</small></span>
+              <time dateTime={item.ts}>{relativeTime(item.ts)}</time>
+            </Link>
+          ))}
         </div>
-        <div className="border-b border-white/10 p-5 lg:border-b-0 lg:border-r">
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Attention Stack</div>
-          <div className="mt-3 space-y-2 text-[13px] text-slate-300">
-            <div className="flex justify-between gap-3"><span>Health exceptions</span><strong>{failingChecks.length}</strong></div>
-            <div className="flex justify-between gap-3"><span>Critical activity</span><strong>{criticalActivity}</strong></div>
-            <div className="flex justify-between gap-3"><span>Warning activity</span><strong>{warningActivity}</strong></div>
-          </div>
-        </div>
-        <div className="p-5">
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Operator Context</div>
-          <div className="mt-3 text-[24px] font-extrabold text-slate-50">{totalAgents ? `${liveAgents}/${totalAgents}` : '-'}</div>
-          <div className={muted + ' mt-2'}>agents currently working across the mesh</div>
-        </div>
-      </div>
+      ) : <div className={styles.emptyState}><strong>No recent changes loaded</strong><p>The activity and deployment endpoints returned no records.</p></div>}
     </section>
   );
 }
 
-function RunbookActions() {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState('Ready');
-
-  async function run(action: string) {
-    setBusy(action);
-    setMessage('Recording intent...');
-    try {
-      const res = await fetch('/api/runbook-actions', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, source: 'overview_runbook_panel' }),
-      });
-      const data = await res.json();
-      setMessage(data.next ?? (data.ok ? 'Recorded' : 'Action failed'));
-    } catch (e: any) {
-      setMessage(String(e?.message || e));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  const actions = [
-    ['open_incident', 'Open incident'],
-    ['capture_diagnostics', 'Capture diagnostics'],
-    ['notify_team', 'Notify team'],
-    ['review_audit_trail', 'Review audit'],
-    ['archive_memory', 'Archive memory'],
-  ] as const;
+function Constellation({ data, selectedKey, onSelect }: { data: BriefData; selectedKey?: string; onSelect: (item: InspectorItem) => void }) {
+  const groups = [
+    { label: 'Applications', items: data.apps.slice(0, 8).map(makeAppInspector) },
+    { label: 'Hosts', items: [makeHostInspector('bazza', data.bazza), makeHostInspector('shazza', data.shazza)] },
+    { label: 'Agent mesh', items: data.agents.map(makeAgentInspector) },
+  ];
 
   return (
-    <section className={card + ' p-5'}>
-      <SectionTitle title="Runbook Console" subtitle="Safe operator intents with audit trail capture" />
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-        {actions.map(([action, label]) => (
-          <ToolbarButton key={action} onClick={() => run(action)} disabled={!!busy} title={action}>
-            {busy === action ? 'Recording' : label}
-          </ToolbarButton>
+    <section className={`${styles.panel} ${styles.constellation}`} aria-labelledby="constellation-title">
+      <SectionHeading eyebrow="Estate" title="Service constellation" copy="Live applications, hosts, and agents. Select a node to inspect its evidence." action={<Link href="/estate">Full estate →</Link>} />
+      <div className={styles.constellationLegend} aria-label="State legend"><ToneBadge tone="nominal" /><ToneBadge tone="attention" /><ToneBadge tone="incident" /><ToneBadge tone="unknown" /></div>
+      <div className={styles.constellationMap}>
+        {groups.map((group, groupIndex) => (
+          <div className={styles.constellationColumn} key={group.label}>
+            <h3>{group.label}<span>{group.items.length}</span></h3>
+            <ul>
+              {group.items.length ? group.items.map((item) => (
+                <li key={item.key}>
+                  <button type="button" data-tone={item.tone} data-selected={selectedKey === item.key} onClick={() => onSelect(item)} aria-label={`Inspect ${item.title}, ${item.state}`}>
+                    <span className={styles.nodeMark} aria-hidden="true">{item.title.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span>
+                    <span><strong>{item.title}</strong><small>{item.state}</small></span>
+                  </button>
+                </li>
+              )) : <li className={styles.noNodes}>No live records</li>}
+            </ul>
+            {groupIndex < groups.length - 1 ? <span className={styles.connector} aria-hidden="true" /> : null}
+          </div>
         ))}
       </div>
-      <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3 text-[12px] text-slate-400">{message}</div>
     </section>
   );
 }
 
-// ─── Main page ──────────────────────────────────────────────────────────────
+async function fetchJson(path: string) {
+  const response = await fetch(path, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+  return response.json();
+}
 
 export default function Home() {
-  const [health, setHealth] = useState<HealthData | null>(null);
-  const [agents, setAgents] = useState<AgentStatusItem[]>([]);
-  const [effectx, setEffectx] = useState<EffectxApp[] | null>(null);
-  const [deploys, setDeploys] = useState<Deploy[]>([]);
-  const [shazza, setShazza] = useState<ShazzaData | null>(null);
-  const [overviewTs, setOverviewTs] = useState<string | null>(null);
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [data, setData] = useState<BriefData>(EMPTY_DATA);
+  const [selected, setSelected] = useState<InspectorItem | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [now, setNow] = useState(Date.now());
 
-  useEffect(() => {
-    const loadAll = async () => {
-      fetch('/api/health', { cache: 'no-store' }).then((r) => r.json()).then(setHealth).catch(() => {});
-      fetch('/api/agents/status', { cache: 'no-store' }).then((r) => r.json()).then((j) => setAgents(j.agents ?? [])).catch(() => {});
-      fetch('/api/effectx', { cache: 'no-store' }).then((r) => r.json()).then((j) => setEffectx(j.apps ?? [])).catch(() => {});
-      fetch('/api/deploys', { cache: 'no-store' }).then((r) => r.json()).then((j) => setDeploys((j.deploys ?? []).slice(0, 5))).catch(() => {});
-      fetch('/api/shazza', { cache: 'no-store' }).then((r) => r.json()).then(setShazza).catch(() => {});
-      fetch('/api/overview', { cache: 'no-store' }).then((r) => r.json()).then((j) => setOverviewTs(j.ts ?? null)).catch(() => {});
-      fetch('/api/activity?limit=8', { cache: 'no-store' }).then((r) => r.json()).then((j) => setActivity(j.items ?? [])).catch(() => {});
-    };
-    loadAll();
-    const t = setInterval(loadAll, 30_000);
-    return () => clearInterval(t);
+  const load = useCallback(async (background = false) => {
+    if (background) setRefreshing(true);
+    const requests = [
+      ['health', '/api/health'], ['agents', '/api/agents/status'], ['apps', '/api/effectx'],
+      ['deploys', '/api/deploys'], ['activity', '/api/activity?limit=24'], ['alerts', '/api/alerts'],
+      ['bazza', '/api/bazza'], ['shazza', '/api/shazza'],
+    ] as const;
+    const results = await Promise.allSettled(requests.map(([, path]) => fetchJson(path)));
+    const failures: string[] = [];
+    const next: Partial<BriefData> = {};
+    results.forEach((result, index) => {
+      const [key] = requests[index];
+      if (result.status === 'rejected') {
+        failures.push(`${key}: ${result.reason instanceof Error ? result.reason.message : 'request failed'}`);
+        return;
+      }
+      const value = result.value;
+      if (key === 'health') next.health = value;
+      if (key === 'agents') next.agents = value.agents ?? [];
+      if (key === 'apps') next.apps = value.apps ?? [];
+      if (key === 'deploys') next.deploys = value.deploys ?? [];
+      if (key === 'activity') next.activity = value.items ?? [];
+      if (key === 'alerts') next.alerts = value.data?.alerts ?? [];
+      if (key === 'bazza') next.bazza = value;
+      if (key === 'shazza') next.shazza = value;
+    });
+    setData((current) => ({ ...current, ...next }));
+    setErrors(failures);
+    if (results.some((result) => result.status === 'fulfilled')) setUpdatedAt(new Date());
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
-  // Derived metrics
-  const alertCount = health?.checks
-    ? Object.values(health.checks).filter((c) => c.status === 'error' || c.status === 'degraded').length
-    : 0;
-  const overallHealth = health?.overall ?? 'amber';
-  const liveAgents = agents.filter((a) => {
-    const s = (a.status ?? '').toLowerCase();
-    return s === 'working';
-  }).length;
-  const totalAgents = agents.length;
-  const panicLatched = health?.checks?.['panic_latch']?.status === 'error';
-  const appOk = health?.checks?.['app']?.status === 'ok';
-  const systemStatus = panicLatched ? 'PANIC' : overallHealth === 'green' ? 'Nominal' : overallHealth === 'amber' ? 'Degraded' : 'Critical';
-  const systemStatusMetricStatus = panicLatched ? 'critical' : overallHealth === 'green' ? 'healthy' : overallHealth === 'amber' ? 'warning' : 'critical';
+  useEffect(() => {
+    load();
+    const refreshTimer = window.setInterval(() => load(true), 30_000);
+    const clockTimer = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => { window.clearInterval(refreshTimer); window.clearInterval(clockTimer); };
+  }, [load]);
 
-  // PM2 processes from agent data
-  const pm2Processes = agents.filter((a) => a.pm_id !== undefined || a.restarts !== undefined || a.uptime !== undefined);
+  const queue = useMemo(() => buildQueue(data), [data]);
+  const changes = useMemo(() => buildChanges(data), [data]);
+  const firingAlerts = data.alerts.filter((alert) => alert.state === 'firing').length;
+  const incidentCount = queue.filter((item) => item.tone === 'incident').length;
+  const attentionCount = queue.filter((item) => item.tone === 'attention').length;
+  const unknownCount = data.apps.filter((app) => app.status === 'unknown').length + [data.bazza, data.shazza].filter((host) => hostTone(host) === 'unknown').length;
+  const postureTone: Tone = incidentCount > 0 || data.health?.overall === 'red' ? 'incident' : attentionCount > 0 || data.health?.overall === 'amber' ? 'attention' : data.health ? 'nominal' : 'unknown';
+  const healthyApps = data.apps.filter((app) => app.status === 'up').length;
+  const availableHosts = [data.bazza, data.shazza].filter((host) => hostTone(host) === 'nominal' || hostTone(host) === 'attention').length;
+  const activeAgents = data.agents.filter((agent) => ['working', 'idle'].includes((agent.status ?? '').toLowerCase())).length;
+  const stale = updatedAt ? now - updatedAt.getTime() > 90_000 : false;
+  const postureTitle = postureTone === 'incident' ? 'Incident active' : postureTone === 'attention' ? 'Needs attention' : postureTone === 'nominal' ? 'Estate stable' : 'Awaiting telemetry';
+  const postureCopy = postureTone === 'incident'
+    ? `${incidentCount} confirmed high-priority condition${incidentCount === 1 ? '' : 's'} require operator review.`
+    : postureTone === 'attention'
+      ? `${attentionCount} condition${attentionCount === 1 ? '' : 's'} should be reviewed; no confirmed incident is currently ranked.`
+      : postureTone === 'nominal'
+        ? 'Loaded checks and operational thresholds show no action required.'
+        : 'Operational posture will appear when the health endpoint responds.';
+
+  const selectedKey = selected?.key;
 
   return (
     <AppShell>
-      <div className="space-y-8">
-        <CommandBrief
-          health={health}
-          alertCount={alertCount}
-          panicLatched={panicLatched}
-          latestDeploy={deploys[0]}
-          liveAgents={liveAgents}
-          totalAgents={totalAgents}
-        />
-
-        <IntelligenceLayer
-          health={health}
-          activity={activity}
-          liveAgents={liveAgents}
-          totalAgents={totalAgents}
-          panicLatched={panicLatched}
-        />
-
-        {/* ── Metric row ─────────────────────────────────────────────────── */}
-        <section className="grid gap-4 lg:grid-cols-5">
-          <Metric
-            label="Open alerts"
-            value={health ? String(alertCount) : '—'}
-            delta={alertCount > 0 ? `${alertCount} check${alertCount !== 1 ? 's' : ''} degraded` : 'All checks passing'}
-            status={alertCount > 0 ? (alertCount >= 3 ? 'critical' : 'warning') : 'healthy'}
-          />
-          <Metric
-            label="System status"
-            value={health ? systemStatus : '—'}
-            delta={health?.checked_at ? `checked ${new Date(health.checked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : undefined}
-            status={systemStatusMetricStatus as any}
-          />
-          <Metric
-            label="Panel"
-            value={appOk ? 'Online' : health ? 'Error' : '—'}
-            delta={health?.checks?.['app']?.detail ?? undefined}
-            status={appOk ? 'healthy' : 'critical'}
-          />
-          <Metric
-            label="Agents live"
-            value={totalAgents > 0 ? `${liveAgents} / ${totalAgents}` : '—'}
-            delta={liveAgents > 0 ? `${liveAgents} working` : totalAgents > 0 ? 'All idle' : 'No agents found'}
-            status={liveAgents > 0 ? 'healthy' : 'neutral'}
-          />
-          <Metric
-            label="Panic latch"
-            value={panicLatched ? 'LATCHED' : health ? 'Clear' : '—'}
-            delta={health?.checks?.['panic_latch']?.detail ?? undefined}
-            status={panicLatched ? 'critical' : 'healthy'}
-          />
-        </section>
-
-        {/* ── App Health grid ─────────────────────────────────────────────── */}
-        <section>
-          <SectionTitle title="App Health" subtitle="Live status of EffectX sites and projects" />
-          {effectx === null ? (
-            <div className={card + ' p-6 text-center ' + 'text-slate-400 text-sm'}>Loading app health…</div>
-          ) : effectx.length === 0 ? (
-            <div className={card + ' p-6 text-center text-slate-400 text-sm'}>No apps configured</div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {effectx.map((app) => (
-                <a
-                  key={app.id}
-                  href={app.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ textDecoration: 'none' }}
-                >
-                  <div
-                    className={card}
-                    style={{
-                      padding: '14px 16px',
-                      cursor: 'pointer',
-                      transition: 'background 0.12s, border-color 0.12s',
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
-                      (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.18)';
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = '';
-                      (e.currentTarget as HTMLElement).style.borderColor = '';
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <MiniProjectLogo app={app} />
-                        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{app.name}</span>
-                      </div>
-                      <StatusBadge status={app.status} />
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {app.kind ? app.kind.toUpperCase() : 'PROJECT'} · {app.upstream ?? new URL(app.url).hostname}
-                    </div>
-                    <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-3)' }}>
-                      {app.latencyMs !== undefined && (
-                        <span>{app.latencyMs}ms</span>
-                      )}
-                      {app.ssl?.daysRemaining !== undefined && (
-                        <MiniCertMark ssl={app.ssl} />
-                      )}
-                    </div>
-                  </div>
-                </a>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* ── Server Health + Recent Deploys ──────────────────────────────── */}
-        <section className="grid gap-4 xl:grid-cols-2">
-          {/* Server Health */}
-          <div className={card + ' p-5'}>
-            <SectionTitle title="Server Health" subtitle="Memory · Disk · Uptime" />
-            <div className="grid gap-3 sm:grid-cols-2">
-              {/* bazza — this machine, always online */}
-              <ServerCard
-                label="bazza"
-                online={true}
-                uptime={undefined}
-              />
-              {/* prod */}
-              <ServerCard
-                label="prod"
-                online={health?.checks?.['app']?.status === 'ok'}
-                uptime={undefined}
-              />
-              {/* shazza */}
-              <ServerCard
-                label="shazza"
-                online={shazza?.reachable ?? false}
-                memPct={shazza?.memory ? (shazza.memory.used_pct ?? undefined) : undefined}
-                diskPct={shazza?.disk ? (shazza.disk.used_pct ?? undefined) : undefined}
-                uptime={typeof shazza?.uptime === 'string' ? shazza.uptime : (shazza?.uptime as any)?.pretty ?? undefined}
-              />
-              {/* crm8 — check health endpoint */}
-              <ServerCard
-                label="crm8"
-                online={false}
-              />
-            </div>
+      <div className={styles.dashboard} data-posture={postureTone}>
+        <header className={styles.briefHeader}>
+          <div><p className={styles.eyebrow}>Operational brief</p><h1>Mission Control</h1><p>Current posture, recent changes, and the next operator decision.</p></div>
+          <div className={styles.freshness} data-stale={stale}>
+            <span>{loading ? 'Loading live telemetry…' : stale ? 'Telemetry is stale' : updatedAt ? `Updated ${relativeTime(updatedAt.toISOString())}` : 'No telemetry loaded'}</span>
+            <button type="button" onClick={() => load(true)} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
           </div>
+        </header>
 
-          {/* Recent Deploys */}
-          <div className={card + ' p-5'}>
-            <SectionTitle title="Recent Deploys" subtitle="Last 5 deployments" />
-            {deploys.length === 0 ? (
-              <div className={'text-sm ' + muted}>No deployments recorded yet</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {deploys.map((d) => (
-                  <div
-                    key={d.id}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '10px 12px', borderRadius: 10,
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.07)',
-                    }}
-                  >
-                    <span style={{
-                      width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                      background: deployStatusColor(d.status),
-                      boxShadow: `0 0 6px ${deployStatusColor(d.status)}`,
-                    }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {d.app}
-                        {d.commitMsg && <span style={{ fontWeight: 400, color: 'var(--text-3)', marginLeft: 6 }}>— {d.commitMsg.slice(0, 40)}{d.commitMsg.length > 40 ? '…' : ''}</span>}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
-                        {d.branch} · {d.triggeredBy} · {relTime(d.startedAt)}
-                      </div>
-                    </div>
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
-                      color: deployStatusColor(d.status),
-                      background: d.status === 'success' ? 'rgba(34,197,94,0.08)' : d.status === 'failure' ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)',
-                      border: `1px solid ${deployStatusColor(d.status)}40`,
-                      textTransform: 'capitalize',
-                    }}>
-                      {d.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+        {errors.length ? <div className={styles.errorBanner} role="status"><strong>Partial data</strong><span>{errors.length} endpoint{errors.length === 1 ? '' : 's'} failed; the brief retains the last successful values.</span><details><summary>Details</summary><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></details></div> : null}
+
+        <section className={styles.postureHero} aria-labelledby="posture-title">
+          <div className={styles.postureMain}>
+            <ToneBadge tone={postureTone} />
+            <p className={styles.eyebrow}>Operational posture</p>
+            <h2 id="posture-title">{postureTitle}</h2>
+            <p>{postureCopy}</p>
+            <div className={styles.heroLinks}><Link href="/activity">Review signals</Link><Link href="/incidents">Incident console</Link></div>
           </div>
+          <dl className={styles.postureFacts}>
+            <div><dt>Action queue</dt><dd>{queue.length}</dd><span>{incidentCount} incident · {attentionCount} attention</span></div>
+            <div><dt>Applications</dt><dd>{healthyApps}/{data.apps.length || '—'}</dd><span>{unknownCount ? `${unknownCount} estate signals unknown` : 'live checks reporting'}</span></div>
+            <div><dt>Hosts</dt><dd>{availableHosts}/2</dd><span>reachable or reporting</span></div>
+            <div><dt>Agent mesh</dt><dd>{activeAgents}/{data.agents.length || '—'}</dd><span>working or idle</span></div>
+            <div><dt>Firing alerts</dt><dd>{firingAlerts}</dd><span>from Prometheus</span></div>
+          </dl>
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-[1fr_420px]">
-          <ActivityPreview items={activity} />
-          <RunbookActions />
-        </section>
+        <SignalRibbon changes={changes} currentTone={postureTone} />
 
-        {/* ── PM2 processes ───────────────────────────────────────────────── */}
-        <section className={card + ' p-5'}>
-          <SectionTitle title="PM2 Processes" subtitle="Agent process status from agent-data" />
-          {agents.length === 0 ? (
-            <div className={'text-sm ' + muted}>No process data available — agent-status.json not found</div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {agents.map((a) => {
-                const statusStr = (a.status ?? '').toLowerCase();
-                const isOnline = statusStr === 'working' || statusStr === 'idle';
-                const dotColor = statusStr === 'working' ? 'var(--sev-healthy)' : statusStr === 'idle' ? 'var(--sev-warning)' : 'var(--text-3)';
-                return (
-                  <div
-                    key={a.id}
-                    style={{
-                      padding: '10px 12px', borderRadius: 10,
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.07)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
-                      {a.emoji && <span style={{ fontSize: 15 }}>{a.emoji}</span>}
-                      <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)' }}>{a.label ?? a.id}</span>
-                      <span style={{ marginLeft: 'auto', width: 7, height: 7, borderRadius: '50%', background: dotColor, boxShadow: `0 0 5px ${dotColor}`, display: 'inline-block' }} />
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)', display: 'flex', gap: 8 }}>
-                      <span style={{ textTransform: 'capitalize' }}>{a.status}</span>
-                      {a.restarts !== undefined && <span>↺ {a.restarts}</span>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {overviewTs && <div className="mt-4 text-[12px] text-slate-500">API online · {overviewTs}</div>}
-        </section>
+        <div className={styles.workspaceGrid}>
+          <div className={styles.primaryColumn}>
+            <div className={styles.splitPanels}><Queue items={queue} selectedKey={selected?.key} onSelect={setSelected} /><Changes items={changes} /></div>
+            <Constellation data={data} selectedKey={selected?.key} onSelect={setSelected} />
+          </div>
+          <Inspector item={selected} onClose={() => setSelected(null)} />
+        </div>
       </div>
     </AppShell>
   );

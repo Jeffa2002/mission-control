@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Mission Control · Operational Brief Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-state="nominal">
+    <a class="skip-link" href="#main">Skip to operational brief</a>
+    <header class="topbar">
+      <a class="brand" href="#main" aria-label="Mission Control overview">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 28 10v12l-12 7L4 22V10z"/><path d="m11 16 3.1 3.1L21 12"/></svg>
+        <span>Mission Control</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a class="active" href="#main">Overview</a><a href="#constellation">Estate</a><a href="#changes">Activity</a><a href="#actions">Incidents</a>
+      </nav>
+      <div class="topbar-actions">
+        <span class="live-dot"><i></i>Telemetry current</span>
+        <button class="quiet-button" type="button">⌘K <span>Command</span></button>
+        <button class="avatar" type="button" aria-label="Open account menu">J</button>
+      </div>
+    </header>
+
+    <main id="main" class="shell">
+      <section class="brief-head" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">Operational brief <time datetime="2026-07-13T09:42:00+08:00">Monday, 13 July · 09:42 AWST</time></p>
+          <h1 id="page-title">A calm operating picture, with two things worth your attention.</h1>
+          <p class="lede">Core services are available. One host is nearing its memory threshold; the latest deployment is still being observed.</p>
+        </div>
+        <div class="state-control" role="group" aria-label="Preview state">
+          <span>Preview state</span>
+          <button class="state-button is-selected" data-state-button="nominal" type="button">Nominal</button>
+          <button class="state-button" data-state-button="attention" type="button">Attention</button>
+          <button class="state-button" data-state-button="incident" type="button">Incident</button>
+        </div>
+      </section>
+
+      <section class="posture-grid" aria-label="Overall operational posture">
+        <article class="posture-card" id="posture-card">
+          <div class="card-kicker"><span class="status-orb"></span><span id="posture-label">Operational posture</span><button class="icon-button" type="button" aria-label="View posture details">↗</button></div>
+          <div class="posture-value"><span id="posture-title">Stable</span><span class="posture-score" id="posture-score">86</span></div>
+          <p id="posture-copy">Service availability is steady across the estate. Watch the Bazza host trend before it becomes a constraint.</p>
+          <div class="posture-foot"><span>Last reconciled <strong>42 sec ago</strong></span><a href="#actions">Review signals <span aria-hidden="true">→</span></a></div>
+        </article>
+        <article class="metric-card"><p>Services</p><strong>12 <small>/ 12</small></strong><span class="metric-detail positive">All online</span></article>
+        <article class="metric-card"><p>Agents</p><strong>5 <small>/ 6</small></strong><span class="metric-detail">4 working · 1 idle</span></article>
+        <article class="metric-card"><p>Open incidents</p><strong id="incident-count">0</strong><span class="metric-detail muted">No active incident</span></article>
+        <article class="metric-card"><p>Deploys today</p><strong>3</strong><span class="metric-detail">1 observing</span></article>
+      </section>
+
+      <section class="signal-ribbon" aria-labelledby="signal-title">
+        <div class="ribbon-label"><p class="eyebrow" id="signal-title">24-hour signal</p><strong id="ribbon-summary">97.8% available</strong><span>1,440 checks</span></div>
+        <div class="signal-chart" aria-label="24-hour service availability chart, mostly available with a brief warning period at 06:00">
+          <span class="axis a1">12am</span><span class="axis a2">6am</span><span class="axis a3">12pm</span><span class="axis a4">Now</span>
+          <svg viewBox="0 0 800 76" preserveAspectRatio="none" aria-hidden="true">
+            <defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#4cc38a" stop-opacity=".30"/><stop offset="1" stop-color="#4cc38a" stop-opacity="0"/></linearGradient></defs>
+            <path class="chart-area" d="M0 65 L0 31 L50 30 L92 32 L133 28 L175 30 L216 29 L257 32 L297 30 L337 31 L376 31 L417 32 L457 30 L495 31 L515 52 L538 48 L561 31 L601 29 L642 30 L682 28 L723 30 L760 28 L800 29 L800 65 Z"/>
+            <path class="chart-line" d="M0 31 L50 30 L92 32 L133 28 L175 30 L216 29 L257 32 L297 30 L337 31 L376 31 L417 32 L457 30 L495 31 L515 52 L538 48 L561 31 L601 29 L642 30 L682 28 L723 30 L760 28 L800 29"/>
+            <circle class="chart-alert" cx="515" cy="52" r="4"/>
+          </svg>
+        </div>
+        <div class="ribbon-event"><span class="event-time">06:18</span><span>Bazza memory reached 82%</span><a href="#actions">Inspect</a></div>
+      </section>
+
+      <div class="content-grid">
+        <section class="action-panel panel" id="actions" aria-labelledby="actions-title">
+          <div class="section-heading"><div><p class="eyebrow">Priority queue</p><h2 id="actions-title">What needs action</h2></div><button class="text-button" type="button">View all signals <span>→</span></button></div>
+          <ol class="action-list">
+            <li class="action-item attention-item" tabindex="0" data-inspect="bazza">
+              <span class="rank">01</span><span class="severity warning">Watch</span>
+              <div><strong>Bazza memory is trending high</strong><p>82% used, rising 7% in the past hour. No process pressure yet.</p></div>
+              <div class="action-meta"><time>6m ago</time><button class="row-action" type="button">Inspect</button></div>
+            </li>
+            <li class="action-item" tabindex="0" data-inspect="deploy">
+              <span class="rank">02</span><span class="severity info">Observe</span>
+              <div><strong>Mission Control deploy is settling</strong><p><code>4f2e8a1</code> completed in 1m 18s. Continue observation until the next health window.</p></div>
+              <div class="action-meta"><time>24m ago</time><button class="row-action" type="button">Details</button></div>
+            </li>
+            <li class="action-item nominal-item" tabindex="0" data-inspect="agent">
+              <span class="rank">03</span><span class="severity neutral">Routine</span>
+              <div><strong>One agent is idle</strong><p>Nova is available. No queued work requires assignment.</p></div>
+              <div class="action-meta"><time>41m ago</time><button class="row-action" type="button">View agent</button></div>
+            </li>
+          </ol>
+        </section>
+
+        <section class="changes-panel panel" id="changes" aria-labelledby="changes-title">
+          <div class="section-heading"><div><p class="eyebrow">Change log</p><h2 id="changes-title">What changed recently</h2></div><button class="text-button" type="button">Activity <span>→</span></button></div>
+          <div class="change-list">
+            <article><span class="change-icon deploy-icon">↥</span><div><strong>mission-control deployed</strong><p><code>main</code> · <code>4f2e8a1</code> · GitHub Actions</p></div><time>24m</time></article>
+            <article><span class="change-icon agent-icon">✦</span><div><strong>Bazza completed health sweep</strong><p>18 checks collected across apps and hosts</p></div><time>37m</time></article>
+            <article><span class="change-icon security-icon">✓</span><div><strong>Firewall rule audit completed</strong><p>No unreviewed external exposure found</p></div><time>1h</time></article>
+            <article><span class="change-icon system-icon">↻</span><div><strong>Shazza process restarted</strong><p>Service recovered automatically in 14 seconds</p></div><time>3h</time></article>
+          </div>
+        </section>
+      </div>
+
+      <section class="constellation panel" id="constellation" aria-labelledby="constellation-title">
+        <div class="section-heading constellation-heading"><div><p class="eyebrow">Estate</p><h2 id="constellation-title">Service constellation</h2><p class="section-copy">A working map of applications, hosts and agents—not a decorative topology.</p></div><div class="legend"><span><i class="legend-dot healthy"></i>Healthy</span><span><i class="legend-dot watching"></i>Watching</span><span><i class="legend-dot idle"></i>Idle</span></div></div>
+        <div class="constellation-map">
+          <div class="constellation-group apps"><p>Applications <span>6</span></p><button class="service-node healthy" data-inspect="mission-control"><b>MC</b><span>Mission Control</span><em>Online</em></button><button class="service-node healthy" data-inspect="grafana"><b>G</b><span>Grafana</span><em>Online</em></button><button class="service-node healthy" data-inspect="prometheus"><b>P</b><span>Prometheus</span><em>Online</em></button></div>
+          <div class="connections" aria-hidden="true"><svg viewBox="0 0 300 150" preserveAspectRatio="none"><path d="M0 29 C100 29 100 74 300 74 M0 74 C120 74 160 75 300 75 M0 120 C120 120 150 75 300 75"/></svg></div>
+          <div class="constellation-group hosts"><p>Hosts <span>2</span></p><button class="service-node watching" data-inspect="bazza"><b>BZ</b><span>Bazza</span><em>82% memory</em></button><button class="service-node healthy" data-inspect="shazza"><b>SZ</b><span>Shazza</span><em>Online</em></button></div>
+          <div class="connections agent-lines" aria-hidden="true"><svg viewBox="0 0 300 150" preserveAspectRatio="none"><path d="M0 74 C100 74 120 29 300 29 M0 74 C100 74 120 74 300 74 M0 74 C100 74 120 120 300 120"/></svg></div>
+          <div class="constellation-group agents"><p>Agent mesh <span>6</span></p><button class="service-node healthy" data-inspect="bazza-agent"><b>BA</b><span>Bazza</span><em>Working</em></button><button class="service-node healthy" data-inspect="shazza-agent"><b>SA</b><span>Shazza</span><em>Working</em></button><button class="service-node idle" data-inspect="agent"><b>N</b><span>Nova</span><em>Idle</em></button></div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="inspector" aria-label="Contextual inspector" aria-live="polite">
+      <div class="inspector-top"><div><p class="eyebrow">Context</p><h2 id="inspector-title">Bazza host</h2></div><button class="icon-button" type="button" aria-label="Close inspector">×</button></div>
+      <div class="inspector-state"><span class="severity warning" id="inspector-state">Watch</span><span id="inspector-time">Updated 42 sec ago</span></div>
+      <p class="inspector-summary" id="inspector-summary">Memory has crossed its preferred operating range. Capacity remains available; no process is being throttled.</p>
+      <dl class="facts" id="inspector-facts"><div><dt>Memory</dt><dd>82% <span class="trend up">↑ 7% / hr</span></dd></div><div><dt>Disk</dt><dd>48%</dd></div><div><dt>Uptime</dt><dd>14d 7h</dd></div><div><dt>Active agents</dt><dd>3</dd></div></dl>
+      <div class="threshold"><div><span>Memory threshold</span><strong>82% / 90%</strong></div><div class="threshold-track"><i></i></div><small>Investigate at 90%. Page at 95%.</small></div>
+      <div class="inspector-actions"><button class="primary-action" type="button">Open host detail</button><button class="secondary-action" type="button">Capture diagnostics</button></div>
+      <div class="inspector-note"><span>Suggested next step</span><p>Check the memory trend again after the current deploy observation window.</p></div>
+    </aside>
+    <script src="script.js"></script>
+  </body>
+</html>
