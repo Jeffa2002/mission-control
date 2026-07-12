@@ -74,7 +74,7 @@ jobs:
               && printf "%s" "$dashboard_html" | grep -qi "operational brief" \
               && printf "%s" "$dashboard_html" | grep -q "Needs action" \
               && printf "%s" "$security_html" | grep -q "Security Threat Surface" \
-              && printf "%s" "$office_html" | grep -q "Active roster" \
+              && printf "%s" "$office_html" | grep -qi "active roster" \
               && curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null; then
               exit 0
             fi
