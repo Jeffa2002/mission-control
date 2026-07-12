@@ -1,226 +1,96 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { AppShell, SectionTitle, StatusBadge, ToolbarButton, card, muted } from '../../components/ops-ui';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppShell } from '../../components/ops-ui';
+import styles from './deploys.module.css';
 
-interface Deploy {
-  id: string;
-  app: string;
-  repo: string;
-  commit: string;
-  commitMsg: string;
-  branch: string;
-  status: 'success' | 'failure' | 'running';
-  triggeredBy: string;
-  startedAt: string;
-  finishedAt?: string;
-  durationS?: number;
-  runUrl?: string;
-}
+type DeployStatus = 'success' | 'failure' | 'running';
+type Tone = 'nominal' | 'attention' | 'incident' | 'unknown' | 'info';
+type InspectorTab = 'summary' | 'checks' | 'raw';
 
-interface DeployFeedMeta {
-  ok: boolean;
-  source: 'github-actions' | 'deploy-log';
-  count: number;
-  warning?: string;
-}
+type Deploy = { id:string; app:string; repo:string; commit:string; commitMsg:string; branch:string; status:DeployStatus; triggeredBy:string; startedAt:string; finishedAt?:string; durationS?:number; runUrl?:string };
+type DeployFeed = { ok:boolean; source:'github-actions'|'deploy-log'; count:number; deploys:Deploy[]; warning?:string };
+type Health = { ok:boolean; overall:'green'|'amber'|'red'; checks:Record<string,{status:string;detail?:string}>; checked_at:string };
+type EstateRepo = { name:string; fullName:string; productionBranch:string; status:string; github?:{latestRun?:{name:string;branch?:string;status:string;conclusion?:string;startedAt?:string;title?:string;url?:string}|null}; smokes?:Array<{name:string;status:string;httpStatus:number|null;latencyMs:number;warning?:string}> };
+type Estate = { ok:boolean; summary?:{status:string;checkedAt:string}; repos?:EstateRepo[] };
+type Activity = { id:string; ts:string; source:string; title:string; detail:string; severity:string; href?:string };
+type ReleaseEvidence = { deploy:Deploy; tone:Tone; state:string; summary:string; facts:Array<[string,string]>; checks:Array<[string,string]>; raw:string[]; estate:EstateRepo|null };
 
-function statusColor(s: Deploy['status']) {
-  if (s === 'success') return 'var(--sev-healthy)';
-  if (s === 'failure') return 'var(--sev-critical)';
-  return 'var(--sev-warning)';
-}
+const EMPTY_FEED: DeployFeed = { ok:false, source:'deploy-log', count:0, deploys:[] };
 
-function statusMeta(s: Deploy['status']): { label: string; status: 'healthy' | 'warning' | 'critical'; pulse?: boolean } {
-  if (s === 'success') return { label: 'Success', status: 'healthy' };
-  if (s === 'failure') return { label: 'Failed', status: 'critical' };
-  return { label: 'Running', status: 'warning', pulse: true };
-}
+function relativeTime(value?:string) { if(!value)return 'Time unavailable'; const time=Date.parse(value); if(!Number.isFinite(time))return 'Invalid timestamp'; const minutes=Math.max(0,Math.floor((Date.now()-time)/60000)); if(minutes<1)return 'Just now'; if(minutes<60)return `${minutes}m ago`; const hours=Math.floor(minutes/60); if(hours<24)return `${hours}h ago`; return `${Math.floor(hours/24)}d ago`; }
+function duration(value?:number) { if(value==null)return 'Not reported'; if(value<60)return `${value}s`; return `${Math.floor(value/60)}m ${value%60}s`; }
+function safe(value:unknown,max=300) { return String(value??'').replace(/(token|secret|password|authorization|cookie)=?\s*[^\s]+/gi,'$1=[redacted]').slice(0,max); }
+function toneFor(status:DeployStatus):Tone { return status==='failure'?'incident':status==='running'?'attention':'nominal'; }
+function statusLabel(status:DeployStatus) { return status==='success'?'Succeeded':status==='failure'?'Failed':'Running'; }
+function repoMatches(deploy:Deploy,repo:EstateRepo) { const full=deploy.repo.toLowerCase(); return full ? full===repo.fullName.toLowerCase() : deploy.app.toLowerCase().includes(repo.name.toLowerCase()); }
+function safeRunUrl(value?:string) { if(!value)return null; try { const url=new URL(value); return url.protocol==='https:'&&url.hostname==='github.com'?url.toString():null; } catch{return null;} }
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
+function Badge({tone,label}:{tone:Tone;label:string}) { return <span className={styles.badge} data-tone={tone}><span aria-hidden="true" />{label}</span>; }
+function Heading({eyebrow,title,copy,action}:{eyebrow:string;title:string;copy:string;action?:React.ReactNode}) { return <div className={styles.heading}><div><p className={styles.eyebrow}>{eyebrow}</p><h2>{title}</h2><p>{copy}</p></div>{action}</div>; }
 
-export default function DeploysPage() {
-  const [deploys, setDeploys] = useState<Deploy[]>([]);
-  const [feedMeta, setFeedMeta] = useState<DeployFeedMeta | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'all' | Deploy['status']>('all');
-  const [workflowFilter, setWorkflowFilter] = useState('all');
-
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    fetch('/api/deploys', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => {
-        setDeploys(d.deploys ?? []);
-        setFeedMeta({ ok: Boolean(d.ok), source: d.source ?? 'deploy-log', count: Number(d.count ?? 0), warning: d.warning });
-        setLoading(false);
-      })
-      .catch(e => { setError(String(e)); setLoading(false); });
+function releaseEvidence(deploy:Deploy,estate:Estate):ReleaseEvidence {
+  const matched=(estate.repos??[]).find((repo)=>repoMatches(deploy,repo))??null;
+  const smokes=matched?.smokes??[];
+  const smokeSummary=smokes.length ? smokes.map((smoke)=>`${smoke.name}: ${smoke.status}${smoke.httpStatus?` (${smoke.httpStatus})`:''}`).join(', ') : 'No configured current smoke matched';
+  const tone=toneFor(deploy.status);
+  const summary=deploy.status==='failure'
+    ? 'The workflow feed records a failed outcome. It does not identify root cause, production impact, or rollback state.'
+    : deploy.status==='running'
+      ? 'The workflow is still running. Build, deployment, verification, and approval sub-stages are not exposed by the feed.'
+      : 'The workflow feed records success. Current health and smoke checks are separate point-in-time observations, not a stored before/after comparison.';
+  return {
+    deploy,tone,state:statusLabel(deploy.status),summary,estate:matched,
+    facts:[['Workflow',deploy.app||'Not reported'],['Status',deploy.status],['Commit',deploy.commit?deploy.commit.slice(0,12):'Not reported'],['Branch',deploy.branch||'Not reported'],['Actor',deploy.triggeredBy||'Not reported'],['Duration',duration(deploy.durationS)]],
+    checks:[['Recorded workflow outcome',statusLabel(deploy.status)],['Current estate state',matched?.status??'No matching estate record'],['Current smoke',smokeSummary],['Pre-release baseline','Not captured'],['Error/latency comparison','Unavailable'],['Causation verdict','Not assessable'],['Approval metadata','Not recorded'],['Rollback target','Not recorded']],
+    raw:[`id: ${safe(deploy.id)}`,`app: ${safe(deploy.app)}`,`repo: ${safe(deploy.repo)}`,`commit: ${safe(deploy.commit)}`,`branch: ${safe(deploy.branch)}`,`status: ${deploy.status}`,`startedAt: ${safe(deploy.startedAt)}`,`finishedAt: ${safe(deploy.finishedAt||'not reported')}`,`durationS: ${deploy.durationS??'not reported'}`],
   };
+}
 
-  useEffect(() => {
-    load();
-  }, []);
+function Inspector({item,tab,setTab,open,onClose,returnFocus}:{item:ReleaseEvidence|null;tab:InspectorTab;setTab:(tab:InspectorTab)=>void;open:boolean;onClose:()=>void;returnFocus:React.RefObject<HTMLElement|null>}) {
+  const ref=useRef<HTMLElement>(null); const closeRef=useRef<HTMLButtonElement>(null);
+  useEffect(()=>{ if(!open||!window.matchMedia('(max-width: 1080px)').matches)return; closeRef.current?.focus(); const trap=(event:KeyboardEvent)=>{if(event.key!=='Tab'||!ref.current)return;const controls=Array.from(ref.current.querySelectorAll<HTMLElement>('button:not([disabled]),a[href]'));if(!controls.length)return;const first=controls[0],last=controls.at(-1)!;if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}};window.addEventListener('keydown',trap);return()=>window.removeEventListener('keydown',trap);},[open,item?.deploy.id]);
+  const close=()=>{onClose();window.setTimeout(()=>returnFocus.current?.focus(),0);};
+  if(!item)return <aside className={styles.inspector} data-open="false" aria-label="Release inspector"><p className={styles.eyebrow}>Context</p><h2>No release selected</h2><p>Select a recorded release to inspect bounded evidence.</p></aside>;
+  const runUrl=safeRunUrl(item.deploy.runUrl);
+  return <aside ref={ref} className={styles.inspector} data-open={open} aria-label="Release evidence inspector" aria-live="polite">
+    <div className={styles.inspectorHead}><div><p className={styles.eyebrow}>Release evidence</p><h2>{item.deploy.app}</h2></div><button ref={closeRef} type="button" onClick={close} aria-label="Close release inspector">×</button></div>
+    <div className={styles.inspectState}><Badge tone={item.tone} label={item.state}/><time>{relativeTime(item.deploy.finishedAt??item.deploy.startedAt)}</time></div>
+    <p className={styles.inspectSummary}>{item.summary}</p>
+    <div className={styles.tabs} role="tablist" aria-label="Release evidence views">{(['summary','checks','raw'] as InspectorTab[]).map((value)=><button key={value} type="button" role="tab" aria-selected={tab===value} onClick={()=>setTab(value)}>{value==='raw'?'Raw fields':value[0].toUpperCase()+value.slice(1)}</button>)}</div>
+    <div className={styles.tabPanel} role="tabpanel">{tab==='raw'?<pre>{item.raw.map((line)=><code key={line}>{line}</code>)}</pre>:<dl>{(tab==='summary'?item.facts:item.checks).map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}</div>
+    <div className={styles.runbook}><strong>Capability boundary</strong><p>Rollback execution and approval are unsupported. Record diagnostics or incident intent before using an external runbook.</p></div>
+    <button className={styles.disabledAction} type="button" disabled>Rollback unavailable</button>
+    {runUrl?<a className={styles.secondaryAction} href={runUrl} target="_blank" rel="noreferrer">Open GitHub workflow ↗</a>:null}
+  </aside>;
+}
 
-  const workflows = Array.from(new Set(deploys.map((deploy) => deploy.app).filter(Boolean))).sort();
-  const filteredDeploys = deploys.filter((deploy) => {
-    const statusOk = statusFilter === 'all' || deploy.status === statusFilter;
-    const workflowOk = workflowFilter === 'all' || deploy.app === workflowFilter;
-    return statusOk && workflowOk;
-  });
-  const failedCount = deploys.filter((deploy) => deploy.status === 'failure').length;
-  const runningCount = deploys.filter((deploy) => deploy.status === 'running').length;
-
-  return (
-    <AppShell>
-      <div className="space-y-6">
-        <SectionTitle
-          title="Deploys"
-          subtitle={feedMeta?.source === 'github-actions' ? 'Live GitHub Actions deployment and release state' : 'Local deploy log fallback'}
-          action={<ToolbarButton onClick={load} disabled={loading}>{loading ? 'Refreshing' : 'Refresh'}</ToolbarButton>}
-        />
-
-        {feedMeta && (
-          <div className={card + ` border px-5 py-4 ${feedMeta.source === 'github-actions' ? 'border-[rgba(34,197,94,0.22)] bg-[rgba(34,197,94,0.05)]' : 'border-[rgba(245,158,11,0.30)] bg-[rgba(245,158,11,0.07)]'}`}>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-[13px] font-semibold text-slate-100">
-                  Source: {feedMeta.source === 'github-actions' ? 'GitHub Actions API' : 'local deploy log'}
-                </div>
-                <div className="mt-1 text-[12px] text-slate-400">
-                  {feedMeta.source === 'github-actions'
-                    ? `${feedMeta.count} workflow run${feedMeta.count === 1 ? '' : 's'} loaded from GitHub.`
-                    : `GitHub read failed; showing ${feedMeta.count} local deploy log entr${feedMeta.count === 1 ? 'y' : 'ies'}.`}
-                </div>
-              </div>
-              <StatusBadge label={feedMeta.source === 'github-actions' ? 'Live' : 'Fallback'} status={feedMeta.source === 'github-actions' ? 'healthy' : 'warning'} />
-            </div>
-            {feedMeta.warning && <div className="mt-3 truncate font-mono text-[11px] text-[var(--sev-warning)]" title={feedMeta.warning}>{feedMeta.warning}</div>}
-          </div>
-        )}
-
-        {error && (
-          <div className={card + ' border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.07)] p-5'}>
-            <div className="text-sm font-semibold text-[var(--sev-critical)]">Could not load deploy data</div>
-            <div className={muted + ' mt-1'}>{error}</div>
-          </div>
-        )}
-
-        {loading && deploys.length === 0 && (
-          <div className={card + ' p-8 text-center text-sm text-slate-400'}>Loading deployment timeline...</div>
-        )}
-
-        {!loading && deploys.length === 0 && (
-          <div className={card + ' p-10 text-center'}>
-            <div className="mx-auto mb-4 h-10 w-10 rounded-xl border border-[rgba(103,213,255,0.22)] bg-[rgba(103,213,255,0.06)]" />
-            <div className="text-[15px] font-semibold text-slate-100">No deploys recorded yet</div>
-            <div className="mt-1 text-[13px] text-slate-400">Deploys appear here after GitHub Actions runs.</div>
-          </div>
-        )}
-
-        {deploys.length > 0 && (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                className="h-9 rounded-md border border-white/10 bg-[var(--bg-2)] px-3 text-[12px] font-semibold text-slate-200 outline-none"
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as 'all' | Deploy['status'])}
-                aria-label="Filter by deploy status"
-              >
-                <option value="all">All states</option>
-                <option value="success">Success</option>
-                <option value="running">Running</option>
-                <option value="failure">Failed</option>
-              </select>
-              <select
-                className="h-9 max-w-[260px] rounded-md border border-white/10 bg-[var(--bg-2)] px-3 text-[12px] font-semibold text-slate-200 outline-none"
-                value={workflowFilter}
-                onChange={(event) => setWorkflowFilter(event.target.value)}
-                aria-label="Filter by workflow"
-              >
-                <option value="all">All workflows</option>
-                {workflows.map((workflow) => (
-                  <option key={workflow} value={workflow}>{workflow}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em]">
-              {runningCount > 0 && <span className="rounded border border-[rgba(245,158,11,0.28)] bg-[rgba(245,158,11,0.08)] px-2 py-1 text-[var(--sev-warning)]">{runningCount} running</span>}
-              {failedCount > 0 && <span className="rounded border border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.08)] px-2 py-1 text-[var(--sev-critical)]">{failedCount} failed</span>}
-            </div>
-          </div>
-        )}
-
-        {deploys.length > 0 && filteredDeploys.length === 0 && (
-          <div className={card + ' p-8 text-center text-sm text-slate-400'}>No deploys match the active filters.</div>
-        )}
-
-        {filteredDeploys.length > 0 && (
-          <div className={card + ' overflow-hidden'}>
-            <div className="grid grid-cols-[1.2fr_0.8fr_0.8fr_0.6fr_0.7fr] gap-3 border-b border-white/10 bg-[var(--bg-2)] px-4 py-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
-              <div>App</div>
-              <div>Commit</div>
-              <div>Operator</div>
-              <div>Runtime</div>
-              <div className="text-right">State</div>
-            </div>
-
-            <div className="divide-y divide-white/10">
-              {filteredDeploys.map(d => {
-                const meta = statusMeta(d.status);
-                const Row = d.runUrl ? 'a' : 'div';
-                return (
-                  <Row
-                    key={d.id}
-                    href={d.runUrl}
-                    target={d.runUrl ? '_blank' : undefined}
-                    rel={d.runUrl ? 'noreferrer' : undefined}
-                    className="grid grid-cols-[1.2fr_0.8fr_0.8fr_0.6fr_0.7fr] gap-3 px-4 py-3 text-[13px] transition-colors hover:bg-white/[0.025]"
-                    style={{ borderLeft: `3px solid ${statusColor(d.status)}` }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div className="flex min-w-0 items-center gap-2">
-                        <div className="truncate font-semibold text-slate-100">{d.app}</div>
-                        {d.status === 'failure' && <span className="shrink-0 rounded border border-[rgba(239,68,68,0.32)] bg-[rgba(239,68,68,0.09)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sev-critical)]">fail</span>}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                        <span className="rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-slate-400">{d.branch}</span>
-                        <span>{timeAgo(d.startedAt)}</span>
-                        {d.runUrl && <span className="text-[var(--accent)]">GitHub run</span>}
-                      </div>
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="font-mono text-[12px] text-[var(--accent)]">{d.commit ? d.commit.slice(0, 7) : 'unknown'}</div>
-                      <div className="mt-1 truncate text-[11px] text-slate-500" title={d.commitMsg}>{d.commitMsg || 'No commit message'}</div>
-                    </div>
-                    <div className="truncate text-slate-300">{d.triggeredBy}</div>
-                    <div className="font-mono text-[12px] text-slate-400">{d.durationS ? `${d.durationS}s` : '—'}</div>
-                    <div className="text-right">
-                      <StatusBadge label={meta.label} status={meta.status} pulse={meta.pulse} />
-                    </div>
-                  </Row>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {deploys.length > 0 && (
-          <div className="text-right text-[11px] text-slate-500">
-            Showing {filteredDeploys.length} of {deploys.length} deployment{deploys.length === 1 ? '' : 's'}
-          </div>
-        )}
-      </div>
-    </AppShell>
-  );
+export default function DeploysPage(){
+  const[feed,setFeed]=useState<DeployFeed>(EMPTY_FEED); const[health,setHealth]=useState<Health|null>(null); const[estate,setEstate]=useState<Estate>({ok:false}); const[activity,setActivity]=useState<Activity[]>([]); const[selectedId,setSelectedId]=useState<string|null>(null); const[drawerOpen,setDrawerOpen]=useState(false); const[tab,setTab]=useState<InspectorTab>('summary'); const[loading,setLoading]=useState(true); const[refreshing,setRefreshing]=useState(false); const[errors,setErrors]=useState<string[]>([]); const[action,setAction]=useState(''); const[actionBusy,setActionBusy]=useState(false); const returnFocus=useRef<HTMLElement|null>(null);
+  const load=useCallback(async(background=false)=>{if(background)setRefreshing(true);const requests=[['deploys','/api/deploys'],['health','/api/health'],['estate','/api/estate'],['activity','/api/activity?limit=40']] as const;const results=await Promise.allSettled(requests.map(async([,path])=>{const response=await fetch(path,{cache:'no-store'});if(!response.ok)throw new Error(`${path} returned ${response.status}`);return response.json();}));const failed:string[]=[];results.forEach((result,index)=>{const[key]=requests[index];if(result.status==='rejected'){failed.push(`${key}: ${result.reason instanceof Error?result.reason.message:'request failed'}`);return;}if(key==='deploys')setFeed(result.value);if(key==='health')setHealth(result.value);if(key==='estate')setEstate(result.value);if(key==='activity')setActivity(result.value.items??[]);});setErrors(failed);setLoading(false);setRefreshing(false);},[]);
+  useEffect(()=>{load();const timer=window.setInterval(()=>load(true),30000);return()=>window.clearInterval(timer);},[load]);
+  useEffect(()=>{const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'&&drawerOpen){setDrawerOpen(false);window.setTimeout(()=>returnFocus.current?.focus(),0);}};window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[drawerOpen]);
+  const deploys=useMemo(()=>[...feed.deploys].sort((a,b)=>Date.parse(b.startedAt)-Date.parse(a.startedAt)),[feed.deploys]);
+  const selected=deploys.find((deploy)=>deploy.id===selectedId)??deploys[0]??null; const evidence=selected?releaseEvidence(selected,estate):null;
+  const latest=deploys[0]??null; const failures=deploys.filter((deploy)=>deploy.status==='failure').length; const running=deploys.filter((deploy)=>deploy.status==='running').length; const healthIssues=health?Object.values(health.checks).filter((check)=>check.status==='error'||check.status==='degraded').length:0;
+  const posture:Tone=!feed.ok||feed.source==='deploy-log'?'attention':latest?.status==='failure'?'incident':running||healthIssues?'attention':latest?'nominal':'unknown';
+  const postureTitle=posture==='incident'?'Release failure recorded':posture==='attention'?'Release evidence needs review':posture==='nominal'?'Observing normally':'No release evidence loaded';
+  const postureCopy=posture==='incident'?'The newest workflow record failed. Production impact and root cause remain unconfirmed.':posture==='attention'?feed.source==='deploy-log'?'GitHub feed is unavailable; the local deploy log is partial evidence.':running?'A workflow is running; stage-level progress is not exposed.':'Current health has a review signal. Its relationship to recent releases is unknown.':posture==='nominal'?'The newest workflow succeeded and current point-in-time checks have no actionable signal. This is not a causal before/after verdict.':'No deploy record is available from the current feed.';
+  const inspect=(deploy:Deploy,event:React.MouseEvent<HTMLElement>)=>{returnFocus.current=event.currentTarget;setSelectedId(deploy.id);setTab('summary');if(window.matchMedia('(max-width: 1080px)').matches)setDrawerOpen(true);};
+  const runIntent=async(kind:'capture_diagnostics'|'open_incident')=>{setActionBusy(true);setAction('Recording audited intent…');try{const response=await fetch('/api/runbook-actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:kind,source:`release_impact_console:${selected?.id??'none'}`})});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'Action failed');setAction(result.next||'Intent recorded.');}catch(error){setAction(error instanceof Error?error.message:'Action failed');}finally{setActionBusy(false);}};
+  const matchedEstate=evidence?.estate; const currentSmoke=matchedEstate?.smokes?.[0];
+  const timeline=useMemo(()=>{if(!selected)return[];const start=Date.parse(selected.startedAt);return activity.filter((item)=>{const time=Date.parse(item.ts);return Number.isFinite(time)&&Math.abs(time-start)<=6*60*60*1000;}).slice(0,5);},[activity,selected]);
+  return <AppShell><div className={styles.console} data-posture={posture}>
+    <header className={styles.header}><div><p className={styles.eyebrow}>Adaptive Operations Prism</p><h1>Release Impact Console</h1><p>Workflow outcomes, current observations, and explicit evidence boundaries.</p></div><div className={styles.freshness} data-partial={!feed.ok||feed.source==='deploy-log'}><span>{loading?'Loading release evidence…':`${feed.source==='github-actions'?'GitHub Actions feed':'Partial local fallback'} · ${feed.count} records`}</span><button type="button" onClick={()=>load(true)} disabled={refreshing}>{refreshing?'Refreshing…':'Refresh'}</button></div></header>
+    {errors.length||feed.warning?<div className={styles.warning} role="status"><strong>Partial evidence.</strong><span>{feed.warning?safe(feed.warning,180):`${errors.length} supporting endpoint${errors.length===1?'':'s'} failed.`}</span></div>:null}
+    <section className={styles.posture} aria-labelledby="release-posture"><div className={styles.verdict}><Badge tone={posture} label={postureTitle}/><p className={styles.eyebrow}>Release posture</p><h2 id="release-posture">{postureTitle}</h2><p>{postureCopy}</p><div className={styles.heroActions}><button type="button" disabled={actionBusy||!selected} onClick={()=>runIntent('capture_diagnostics')}>Capture diagnostics intent</button><button type="button" disabled={actionBusy||!selected} onClick={()=>runIntent('open_incident')}>Record incident intent</button></div>{action?<p className={styles.actionMessage} role="status">{action}</p>:null}</div><dl className={styles.metrics}><div><dt>Running</dt><dd>{running}</dd><span>workflow status only</span></div><div><dt>Failures</dt><dd>{failures}</dd><span>within loaded feed</span></div><div><dt>Current checks</dt><dd>{healthIssues}</dd><span>not release-scoped</span></div><div><dt>Feed quality</dt><dd>{feed.source==='github-actions'?'Live':'Partial'}</dd><span>{feed.source}</span></div></dl></section>
+    <section className={styles.conveyor} aria-labelledby="conveyor-title"><div><p className={styles.eyebrow}>Selected workflow</p><h2 id="conveyor-title">{selected?.app??'No release selected'}</h2><p>{selected?`${selected.branch||'branch unknown'} · ${selected.commit?selected.commit.slice(0,10):'commit unknown'}`:'Awaiting feed data'}</p></div><ol><li data-state="unknown"><span>01</span><strong>Build</strong><small>Per-stage event unavailable</small></li><li data-state={selected?.status==='running'?'current':selected?'observed':'unknown'}><span>02</span><strong>Deploy record</strong><small>{selected?statusLabel(selected.status):'Unknown'}</small></li><li data-state={currentSmoke?'observed':'unknown'}><span>03</span><strong>Verify</strong><small>{currentSmoke?`Current smoke ${currentSmoke.status}`:'No scoped verification'}</small></li><li data-state={health?'observed':'unknown'}><span>04</span><strong>Observe</strong><small>{health?`Current health ${health.overall}`:'No health point'}</small></li></ol></section>
+    <div className={styles.workspace}><main className={styles.mainColumn}>
+      <div className={styles.topGrid}><section className={styles.panel}><Heading eyebrow="Release queue" title="Recorded workflows" copy="Newest first. Status is the workflow outcome supplied by the deploy feed."/><div className={styles.releaseList}>{deploys.length?deploys.slice(0,12).map((deploy,index)=><button type="button" key={deploy.id} data-selected={selected?.id===deploy.id} onClick={(event)=>inspect(deploy,event)}><span className={styles.rank}>{String(index+1).padStart(2,'0')}</span><Badge tone={toneFor(deploy.status)} label={statusLabel(deploy.status)}/><span className={styles.releaseBody}><strong>{deploy.app}</strong><small>{deploy.commitMsg||deploy.commit||'No commit detail'}</small></span><span className={styles.releaseMeta}>{relativeTime(deploy.startedAt)}<small>{duration(deploy.durationS)}</small></span></button>):<p className={styles.empty}>No workflow records returned.</p>}</div></section>
+      <section className={styles.panel}><Heading eyebrow="Impact verdict" title="Evidence, not causation" copy="Current checks can be adjacent to a release without being caused by it."/><div className={styles.impact}><Badge tone={health?.overall==='red'?'incident':health?.overall==='amber'?'attention':health?'nominal':'unknown'} label={health?`Current health ${health.overall}`:'Health unavailable'}/><h3>{matchedEstate?`${matchedEstate.name} current estate state: ${matchedEstate.status}`:'No matching estate record'}</h3><p>{currentSmoke?`A current smoke returned ${currentSmoke.status}${currentSmoke.httpStatus?` (${currentSmoke.httpStatus})`:''} in ${currentSmoke.latencyMs}ms. It is not a stored post-release verification event.`:'No configured current smoke could be matched to the selected deploy.'}</p><dl><div><dt>Before baseline</dt><dd>Unavailable</dd></div><div><dt>After series</dt><dd>Unavailable</dd></div><div><dt>Correlation</dt><dd>Not established</dd></div></dl></div></section></div>
+      <section className={styles.panel}><Heading eyebrow="Environments" title="Release lanes" copy="Only recorded production/workflow information is shown; promotion and rollback states are unsupported."/><div className={styles.lanes}><article><header><strong>Production record</strong><Badge tone={evidence?.tone??'unknown'} label={evidence?.state??'Unknown'}/></header><p>{selected?`${selected.app} · ${selected.branch||'branch unknown'} · ${selected.commit?selected.commit.slice(0,10):'commit unknown'}`:'No selected release'}</p><small>Environment is inferred from this production console context; the feed has no environment field.</small></article><article><header><strong>Staging / promotion</strong><Badge tone="unknown" label="Unknown"/></header><p>No environment or promotion metadata is provided.</p><small>Do not infer approval or staging completion.</small></article><article><header><strong>Rollback</strong><Badge tone="unknown" label="Unsupported"/></header><p>No rollback target, plan, approval, or execution state is recorded.</p><small>External runbook review is required.</small></article></div></section>
+      <section className={styles.panel}><Heading eyebrow="Evidence timeline" title="Selected release window" copy="Release start/finish are confirmed feed fields. Other events are only time-adjacent."/><div className={styles.timeline}>{selected?<><article><time>{new Date(selected.startedAt).toLocaleTimeString()}</time><span data-tone="info"/><div><strong>Workflow started</strong><p>{selected.app} on {selected.branch||'unknown branch'}</p></div><em>Confirmed</em></article>{selected.finishedAt?<article><time>{new Date(selected.finishedAt).toLocaleTimeString()}</time><span data-tone={selected.status==='failure'?'incident':'nominal'}/><div><strong>Workflow {selected.status}</strong><p>Recorded duration {duration(selected.durationS)}</p></div><em>Confirmed</em></article>:null}{health?<article><time>{new Date(health.checked_at).toLocaleTimeString()}</time><span data-tone={health.overall==='red'?'incident':health.overall==='amber'?'attention':'nominal'}/><div><strong>Current health snapshot</strong><p>{health.overall}; not release-scoped</p></div><em>Observed by time</em></article>:null}{timeline.map((item)=><article key={item.id}><time>{new Date(item.ts).toLocaleTimeString()}</time><span data-tone="unknown"/><div><strong>{item.title}</strong><p>{item.detail}</p></div><em>Time-adjacent</em></article>)}</>:<p className={styles.empty}>Select a release to inspect its evidence window.</p>}</div></section>
+    </main><Inspector item={evidence} tab={tab} setTab={setTab} open={drawerOpen} onClose={()=>setDrawerOpen(false)} returnFocus={returnFocus}/></div>
+  </div></AppShell>;
 }

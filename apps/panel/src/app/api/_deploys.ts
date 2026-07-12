@@ -103,14 +103,26 @@ export async function readDeployFeed(): Promise<DeployFeed> {
     const deploys = [
       ...githubDeploys,
       ...localDeploys.filter((deploy) => !seen.has(deploy.id)),
-    ].slice(0, MAX_DEPLOY_ENTRIES);
+    ]
+      .sort((left, right) => {
+        const leftTime = new Date(left.startedAt).getTime();
+        const rightTime = new Date(right.startedAt).getTime();
+        return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+      })
+      .slice(0, MAX_DEPLOY_ENTRIES);
     return { ok: true, source: 'github-actions', count: deploys.length, deploys };
   } catch (err: any) {
     return {
       ok: localDeploys.length > 0,
       source: 'deploy-log',
       count: localDeploys.length,
-      deploys: localDeploys,
+      deploys: [...localDeploys]
+        .sort((left, right) => {
+          const leftTime = new Date(left.startedAt).getTime();
+          const rightTime = new Date(right.startedAt).getTime();
+          return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+        })
+        .slice(0, MAX_DEPLOY_ENTRIES),
       warning: String(err?.message || err),
     };
   }
