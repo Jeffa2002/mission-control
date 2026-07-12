@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sync-agent-data.sh - runs on bazza, syncs agent status + sessions to prod
-# Called every 15s via cron
+# Called once per minute by the installed cron schedule.
 
 set -euo pipefail
 
@@ -17,6 +17,7 @@ MISSION_SECURITY="/root/.openclaw/workspace/mission-control/security-data.json"
 # ── 1. Build agent-status.json from local agents dir ──────────────────────────
 python3 - <<'PYEOF'
 import os, json, time, glob
+from datetime import datetime, timezone
 
 AGENTS_DIR = "/root/.openclaw/agents"
 AGENT_META = {
@@ -55,7 +56,7 @@ for agent_id in sorted(os.listdir(AGENTS_DIR)):
         latest = max(session_files, key=os.path.getmtime)
         mtime = os.path.getmtime(latest)
         age = now - mtime
-        last_seen = __import__("datetime").datetime.fromtimestamp(mtime).isoformat() + "Z"
+        last_seen = datetime.fromtimestamp(mtime, timezone.utc).isoformat().replace("+00:00", "Z")
 
         # Read last few lines to get current task
         last_task = None
@@ -82,9 +83,9 @@ for agent_id in sorted(os.listdir(AGENTS_DIR)):
         except Exception:
             pass
 
-        if age < 45:
+        if age <= 120:
             status = "Working"
-        elif age < 1200:
+        elif age <= 1200:
             status = "Idle"
         else:
             status = "Offline"
@@ -101,7 +102,7 @@ for agent_id in sorted(os.listdir(AGENTS_DIR)):
         "sessionId": None,
     })
 
-output = {"ok": True, "ts": __import__("datetime").datetime.utcnow().isoformat() + "Z", "agents": agents}
+output = {"ok": True, "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "agents": agents}
 with open("/tmp/agent-status.json", "w") as f:
     json.dump(output, f)
 print(f"Generated status for {len(agents)} agents")

@@ -1,1158 +1,405 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import type React from 'react';
-import { AppShell, Metric, SectionTitle, StatusBadge, ToolbarButton, card, muted } from '../../components/ops-ui';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppShell } from '../../components/ops-ui';
+import styles from './security.module.css';
 
-interface SecurityData {
+type Tone = 'nominal' | 'attention' | 'incident' | 'unknown' | 'info';
+type Confidence = 'confirmed' | 'inferred' | 'unobserved';
+type EvidenceTab = 'parsed' | 'raw' | 'context';
+
+type Rollup = { key: string; label?: string; count: number; sampled?: boolean };
+type HostCoverage = { id: string; label: string; reporting: boolean; checkedAt: string; sources: Record<string, boolean>; error?: string };
+type RegisteredHost = { id: string; label: string; reporting: boolean; securityChannel: string };
+
+type SecurityData = {
   ok: boolean;
   checkedAt: string;
   source?: string;
   hasThreats: boolean;
   stale?: boolean;
-  hosts?: Array<{
-    id: string;
-    label: string;
-    reporting: boolean;
-    checkedAt: string;
-    sources: Record<string, boolean>;
-    error?: string;
-  }>;
-  registeredHosts?: Array<{
-    id: string;
-    label: string;
-    reporting: boolean;
-    securityChannel: string;
-  }>;
-  fail2ban: {
-    available: boolean;
-    banned: number;
-    totalFailed: number;
-    bannedIPs: string[];
-  };
-  nginx: {
-    errorCount: number;
-    errorLogCount?: number;
-    recentErrors: string[];
-    recentErrorLogs?: string[];
-    byHost?: Array<{ key: string; label?: string; count: number; sampled?: boolean }>;
-    topSources?: Array<{ key: string; count: number }>;
-    topPaths?: Array<{ key: string; count: number }>;
-    topStatuses?: Array<{ key: string; count: number }>;
-  };
-  auth: {
-    failCount: number;
-    sshAcceptCount?: number;
-    sudoCount?: number;
-    recent: string[];
-    recentAccepts?: string[];
-    recentSudo?: string[];
-    byHost?: Array<{ key: string; label?: string; count: number; sampled?: boolean }>;
-    topUsers?: Array<{ key: string; count: number }>;
-  };
-  firewall?: {
-    blockCount: number;
-    sampleCount?: number;
-    sampleLimitPerHost?: number;
-    byHost?: Array<{ key: string; label: string; count: number; sampled: boolean }>;
-    topSources?: Array<{ key: string; count: number }>;
-    topPorts?: Array<{ key: string; count: number }>;
-    recent: string[];
-  };
-  kernel?: {
-    issueCount: number;
-    criticalCount?: number;
-    byHost?: Array<{ key: string; label?: string; count: number; sampled?: boolean }>;
-    recent: string[];
-  };
-  system?: {
-    issueCount: number;
-    criticalCount?: number;
-    byHost?: Array<{ key: string; label?: string; count: number; sampled?: boolean }>;
-    recent: string[];
-  };
-  timeline?: {
-    recent: string[];
-  };
-}
+  hosts?: HostCoverage[];
+  registeredHosts?: RegisteredHost[];
+  fail2ban: { available: boolean; banned: number; totalFailed: number; bannedIPs: string[] };
+  nginx: { errorCount: number; errorLogCount?: number; recentErrors: string[]; recentErrorLogs?: string[]; byHost?: Rollup[]; topSources?: Rollup[]; topPaths?: Rollup[]; topStatuses?: Rollup[] };
+  auth: { failCount: number; sshAcceptCount?: number; sudoCount?: number; recent: string[]; recentAccepts?: string[]; recentSudo?: string[]; byHost?: Rollup[]; topUsers?: Rollup[] };
+  firewall?: { blockCount: number; sampleCount?: number; sampleLimitPerHost?: number; byHost?: Array<Rollup & { label: string }>; topSources?: Rollup[]; topPorts?: Rollup[]; recent: string[] };
+  kernel?: { issueCount: number; criticalCount?: number; byHost?: Rollup[]; recent: string[] };
+  system?: { issueCount: number; criticalCount?: number; byHost?: Rollup[]; recent: string[] };
+  timeline?: { recent: string[] };
+};
 
-type ThreatSeverity = 'healthy' | 'warning' | 'critical' | 'info';
+type SecurityAlert = { time: string; type: string; detail: string; severity: 'low' | 'medium' | 'high' };
+type AuthEvent = { ts: string; type: 'sudo' | 'ssh-accept' | 'auth-fail' | 'su'; user: string; detail: string; host: string };
+type FirewallEvent = { ts: string; src: string; dst: string; dpt: string; proto: string; host: string };
+type WebEvent = { ts: string; ip: string; method: string; path: string; status: number; bytes: number; host: string };
+type SshAttack = { ts: string; ip: string; user: string; host: string };
 
-interface ThreatItem {
+type TargetedEvidence = {
+  alerts: SecurityAlert[];
+  auth: AuthEvent[];
+  firewall: FirewallEvent[];
+  web: WebEvent[];
+  ssh: SshAttack[];
+};
+
+type EvidenceItem = {
   id: string;
   title: string;
-  source: string;
-  severity: ThreatSeverity;
-  status: string;
-  signal: string;
-  evidence: string[];
+  category: string;
+  tone: Tone;
+  state: string;
+  confidence: Confidence;
+  confidenceCopy: string;
+  summary: string;
+  priority: number;
+  time?: string;
+  parsed: Array<[string, string]>;
+  raw: string[];
+  context: Array<[string, string]>;
   action: string;
-}
+  href: string;
+};
 
-type PentestStatus = 'passed' | 'watch' | 'blocked' | 'queued';
-
-interface PentestCheck {
+type KillStage = {
   id: string;
-  area: string;
-  target: string;
-  status: PentestStatus;
-  result: string;
-  evidence: string;
-  next: string;
-}
-
-interface PentestGate {
   label: string;
-  status: 'approved' | 'needs-approval' | 'deferred';
-  detail: string;
+  status: Confidence;
+  state: string;
+  copy: string;
+  item: EvidenceItem;
+};
+
+const EMPTY_SECURITY: SecurityData = {
+  ok: false,
+  checkedAt: '',
+  hasThreats: false,
+  stale: true,
+  hosts: [],
+  registeredHosts: [],
+  fail2ban: { available: false, banned: 0, totalFailed: 0, bannedIPs: [] },
+  nginx: { errorCount: 0, errorLogCount: 0, recentErrors: [], recentErrorLogs: [] },
+  auth: { failCount: 0, sshAcceptCount: 0, sudoCount: 0, recent: [], recentAccepts: [], recentSudo: [] },
+  firewall: { blockCount: 0, sampleCount: 0, recent: [] },
+  kernel: { issueCount: 0, criticalCount: 0, recent: [] },
+  system: { issueCount: 0, criticalCount: 0, recent: [] },
+  timeline: { recent: [] },
+};
+
+const EMPTY_EVIDENCE: TargetedEvidence = { alerts: [], auth: [], firewall: [], web: [], ssh: [] };
+
+function relativeTime(value?: string) {
+  if (!value) return 'Time unavailable';
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return 'Time unavailable';
+  const minutes = Math.max(0, Math.floor((Date.now() - time) / 60_000));
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
-interface PentestFlow {
-  step: string;
-  owner: string;
-  status: 'live' | 'queued' | 'approval';
-  detail: string;
+function toneLabel(tone: Tone) {
+  if (tone === 'nominal') return 'Nominal';
+  if (tone === 'attention') return 'Attention';
+  if (tone === 'incident') return 'Incident';
+  if (tone === 'info') return 'Observe';
+  return 'Unknown';
 }
 
-interface PentestProgramItem {
-  title: string;
-  status: 'live' | 'queued' | 'approval';
-  cadence: string;
-  detail: string;
-}
-
-const PENTEST_CHECKS: PentestCheck[] = [
-  {
-    id: 'sec1-ssh-tailnet',
-    area: 'Exposure',
-    target: 'sec1 SSH',
-    status: 'passed',
-    result: 'Password SSH kept, public 2222 removed',
-    evidence: 'UFW allows 2222/tcp only on tailscale0; public 22/2222 closed or filtered from spot check.',
-    next: 'Document as accepted tailnet risk while password auth remains enabled.',
-  },
-  {
-    id: 'queuem8-forged-cookie',
-    area: 'Auth',
-    target: 'QueueM8 site-admin',
-    status: 'passed',
-    result: 'Forged static cookie rejected',
-    evidence: 'Forged site-admin cookie check remains in the active low-noise suite; prior run redirected to login and API returned 401.',
-    next: 'Re-run from a stable resolver path, then run rate-limit checks after approval for louder auth testing.',
-  },
-  {
-    id: 'venconx-upload-direct',
-    area: 'Tenant boundary',
-    target: 'VenConX uploads',
-    status: 'watch',
-    result: 'Unauthenticated direct reads blocked',
-    evidence: 'Direct upload path redirects to auth; source checks Document ownership through vendor or contract org.',
-    next: 'Create controlled tenants and files before cross-org retrieval testing.',
-  },
-  {
-    id: 'app-audits',
-    area: 'Dependencies',
-    target: 'Prod web apps',
-    status: 'watch',
-    result: 'Moderate+ advisories cleared except Crossbench Prisma residuals',
-    evidence: '14 of 15 local package roots audit clean after npm update; Crossbench keeps 3 moderate Prisma 7 nested @hono advisories.',
-    next: 'Leave Crossbench Prisma as-is per Jeff; track upstream Prisma fix or deliberate downgrade decision.',
-  },
-  {
-    id: 'mission-control-api',
-    area: 'Access control',
-    target: 'Mission Control security API',
-    status: 'passed',
-    result: 'Unauthenticated security API access rejected',
-    evidence: 'GET /api/security without Mission Control session returns 401; /security redirects to /login.',
-    next: 'Keep this in the regression set for every security dashboard change.',
-  },
-  {
-    id: 'env-permissions',
-    area: 'Secrets hygiene',
-    target: 'Prod env files',
-    status: 'passed',
-    result: 'Runtime env files remain locked down',
-    evidence: 'Checked app runtime env files under /var/www and /etc/infisical/generated; sensitive files are 600.',
-    next: 'Keep .env.example files public-readable only if they contain placeholders.',
-  },
-  {
-    id: 'sec1-phase2b-bench',
-    area: 'Test bench',
-    target: 'sec1 controlled checks',
-    status: 'passed',
-    result: 'sec1 ready for isolated fixture evidence',
-    evidence: 'sec1 has 37GB free; first harmless HTTP sweep saved under /root/secspy-phase2b-20260605-051024.',
-    next: 'Use sec1 for evidence bundles and fixture scripts; keep prod data creation behind explicit scope.',
-  },
-  {
-    id: 'projenta-support-attachments',
-    area: 'Tenant boundary',
-    target: 'Projenta support attachments',
-    status: 'watch',
-    result: 'Needs fixture-backed ownership test',
-    evidence: 'Source review shows support attachment upload ownership checks; attachment serving should be tested with two real users/tickets.',
-    next: 'Create two disposable users/tickets and verify cross-user attachment URLs return 403 or 404.',
-  },
-  {
-    id: 'yielddock-headers',
-    area: 'Headers',
-    target: 'YieldDock',
-    status: 'passed',
-    result: 'Header hardening added',
-    evidence: 'X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and Permissions-Policy now present.',
-    next: 'Consider CSP once app asset/connect requirements are mapped.',
-  },
-  {
-    id: 'active-upload-abuse',
-    area: 'Upload abuse',
-    target: 'File upload parsers',
-    status: 'blocked',
-    result: 'Not started',
-    evidence: 'Crafted files, oversized payloads, zip edge cases, and parser stress tests intentionally held.',
-    next: 'Needs explicit approval before noisy payload testing.',
-  },
-];
-
-const PENTEST_FLOWS: PentestFlow[] = [
-  {
-    step: 'Scope',
-    owner: 'Archie',
-    status: 'live',
-    detail: 'Name target app, exact routes, expected risk, and allowed noise level before any run starts.',
-  },
-  {
-    step: 'Approval',
-    owner: 'Jeff',
-    status: 'approval',
-    detail: 'Human checkpoint for fixture creation, repeated auth attempts, upload abuse, or recovery drills.',
-  },
-  {
-    step: 'Run',
-    owner: 'Archie + SecSpy',
-    status: 'live',
-    detail: 'Execute low-noise checks, keep timestamps and evidence, stop if a test becomes operationally risky.',
-  },
-  {
-    step: 'Record',
-    owner: 'Mission Control',
-    status: 'live',
-    detail: 'Capture result, evidence, next action, and residual risk in Security -> Pen Testing.',
-  },
-  {
-    step: 'Fix',
-    owner: 'Repo owner',
-    status: 'queued',
-    detail: 'Patch in repo, test locally, deploy through the normal GitHub path, then verify in prod.',
-  },
-  {
-    step: 'Retest',
-    owner: 'Archie + SecSpy',
-    status: 'queued',
-    detail: 'Repeat the exact finding path and add the result to the security history before closing.',
-  },
-];
-
-const PENTEST_PROGRAM: PentestProgramItem[] = [
-  {
-    title: 'Gate 0',
-    status: 'live',
-    cadence: 'Always allowed',
-    detail: 'Passive inventory, repo and config review, DNS/TLS/header checks, and normal HTTP GET/HEAD validation.',
-  },
-  {
-    title: 'Gate 1',
-    status: 'approval',
-    cadence: 'Per fixture set',
-    detail: 'Safe authenticated testing with disposable accounts, canary records, upload samples, and a cleanup plan.',
-  },
-  {
-    title: 'Gate 2',
-    status: 'approval',
-    cadence: 'Quiet window',
-    detail: 'Targeted low-noise production validation with monitoring, stop conditions, and one app in scope at a time.',
-  },
-  {
-    title: 'Gate 3',
-    status: 'queued',
-    cadence: 'Explicit approval',
-    detail: 'Higher-risk simulation such as stress-adjacent checks, exploit proof validation, or aggressive scanners.',
-  },
-];
-
-const PENTEST_CADENCE: PentestProgramItem[] = [
-  {
-    title: 'Weekly',
-    status: 'live',
-    cadence: 'One target',
-    detail: 'Run one focused app test or retest, then record evidence and owner in Mission Control.',
-  },
-  {
-    title: 'Fortnightly',
-    status: 'live',
-    cadence: 'sec1',
-    detail: 'Review public exposure, nginx routes, expected ports, and stale app aliases from the isolated bench.',
-  },
-  {
-    title: 'Monthly',
-    status: 'queued',
-    cadence: 'Dashboard',
-    detail: 'Review Security -> Pen Testing, open findings, fixture health, and overdue retests.',
-  },
-  {
-    title: 'Quarterly',
-    status: 'queued',
-    cadence: 'Deep review',
-    detail: 'Review auth, tenant isolation, secrets, backups, host hardening, and deploy pipelines.',
-  },
-];
-
-const PENTEST_GATES: PentestGate[] = [
-  {
-    label: 'Low-noise validation',
-    status: 'approved',
-    detail: 'HTTP checks, config verification, dependency audits, and small named-port checks.',
-  },
-  {
-    label: 'Controlled fixtures',
-    status: 'needs-approval',
-    detail: 'Create test tenants, users, documents, and reversible records for IDOR and workflow testing.',
-  },
-  {
-    label: 'Louder auth tests',
-    status: 'needs-approval',
-    detail: 'Rate-limit checks, repeated login attempts, session invalidation, and CSRF-sensitive workflows.',
-  },
-  {
-    label: 'Upload abuse',
-    status: 'needs-approval',
-    detail: 'Crafted PDFs, zips, MIME mismatch, size limits, parser behavior, and OCR/PDF safety.',
-  },
-  {
-    label: 'Recovery drills',
-    status: 'deferred',
-    detail: 'Backup restore drill and incident tabletop that can affect operational state.',
-  },
-];
-
-function severityLabel(severity: ThreatSeverity) {
-  if (severity === 'critical') return 'Critical';
-  if (severity === 'warning') return 'Watch';
-  if (severity === 'healthy') return 'Clear';
-  return 'Info';
-}
-
-function buildThreats(data: SecurityData): ThreatItem[] {
-  const threats: ThreatItem[] = [];
-  const hosts = data.hosts ?? [];
-  const missingHosts = hosts.filter((host) => !host.reporting);
-  const unconfiguredRegisteredHosts = (data.registeredHosts ?? []).filter((host) => !host.reporting);
-
-  if (missingHosts.length > 0 || unconfiguredRegisteredHosts.length > 0) {
-    threats.push({
-      id: 'host-reporting',
-      title: `${missingHosts.length + unconfiguredRegisteredHosts.length} server${missingHosts.length + unconfiguredRegisteredHosts.length === 1 ? '' : 's'} not reporting security telemetry`,
-      source: 'coverage',
-      severity: 'warning',
-      status: 'Needs wiring',
-      signal: 'Every registered server should have an auth/firewall/web signal path back to Bazza.',
-      evidence: [
-        ...missingHosts.map((host) => `${host.label}: ${host.error || 'security command returned no usable data'}`),
-        ...unconfiguredRegisteredHosts.map((host) => `${host.label}: security channel not configured`),
-      ].slice(0, 8),
-      action: 'Add or fix the host security channel so auth failures and firewall activity are visible here.',
-    });
-  }
-
-  if (!data.fail2ban.available) {
-    threats.push({
-      id: 'fail2ban-unavailable',
-      title: 'SSH jail telemetry unavailable',
-      source: 'fail2ban',
-      severity: 'warning',
-      status: 'Needs validation',
-      signal: 'fail2ban did not report current jail state.',
-      evidence: ['No active jail readout available from the security API.'],
-      action: 'Confirm fail2ban service state on prod before trusting SSH posture.',
-    });
-  } else if (data.fail2ban.banned > 0) {
-    threats.push({
-      id: 'fail2ban-active',
-      title: `${data.fail2ban.banned} active SSH ban${data.fail2ban.banned === 1 ? '' : 's'}`,
-      source: 'ssh',
-      severity: data.fail2ban.banned > 5 ? 'critical' : 'warning',
-      status: 'Contained',
-      signal: `${data.fail2ban.totalFailed} total failed attempts recorded.`,
-      evidence: data.fail2ban.bannedIPs.slice(0, 8),
-      action: 'Review banned sources, confirm no trusted IP was caught, and keep monitoring auth failures.',
-    });
-  }
-
-  if (data.auth.failCount > 0) {
-    threats.push({
-      id: 'auth-failures',
-      title: `${data.auth.failCount} auth failure${data.auth.failCount === 1 ? '' : 's'}`,
-      source: 'auth',
-      severity: data.auth.failCount > 50 ? 'critical' : data.auth.failCount > 10 ? 'warning' : 'info',
-      status: data.auth.failCount > 10 ? 'Investigate' : 'Observe',
-      signal: 'Failed password events were seen in recent auth logs.',
-      evidence: data.auth.recent.slice(0, 5),
-      action: data.auth.failCount > 10 ? 'Correlate source IPs with fail2ban and check for repeated usernames.' : 'No immediate action unless the rate increases.',
-    });
-  }
-
-  if (data.nginx.errorCount > 0) {
-    threats.push({
-      id: 'nginx-errors',
-      title: `${data.nginx.errorCount} nginx 4xx/5xx response${data.nginx.errorCount === 1 ? '' : 's'}`,
-      source: 'nginx',
-      severity: data.nginx.errorCount > 5000 ? 'critical' : data.nginx.errorCount > 1000 ? 'warning' : 'info',
-      status: data.nginx.errorCount > 1000 ? 'Investigate' : 'Observe',
-      signal: 'Recent web requests are producing error responses.',
-      evidence: data.nginx.recentErrors.slice(0, 5),
-      action: data.nginx.errorCount > 1000 ? 'Check top paths and source IPs for scan patterns or app regressions.' : 'Sample recent errors and verify they are expected noise.',
-    });
-  }
-
-  if ((data.nginx.errorLogCount ?? 0) > 0) {
-    const errorLogCount = data.nginx.errorLogCount ?? 0;
-    threats.push({
-      id: 'nginx-error-log',
-      title: `${errorLogCount} nginx error-log signal${errorLogCount === 1 ? '' : 's'}`,
-      source: 'nginx',
-      severity: errorLogCount > 100 ? 'warning' : 'info',
-      status: errorLogCount > 100 ? 'Investigate' : 'Observe',
-      signal: 'Nginx error logs include proxy, TLS, upstream, or request handling errors.',
-      evidence: (data.nginx.recentErrorLogs ?? []).slice(0, 5),
-      action: errorLogCount > 100 ? 'Check the affected upstream and source pattern before treating web errors as normal scan noise.' : 'Sample the latest error-log entries and confirm they are expected.',
-    });
-  }
-
-  if ((data.firewall?.blockCount ?? 0) > 0) {
-    const blockCount = data.firewall?.blockCount ?? 0;
-    const sampleCount = data.firewall?.sampleCount ?? data.firewall?.recent.length ?? 0;
-    const sampled = sampleCount < blockCount;
-    const topHost = data.firewall?.byHost?.[0];
-    threats.push({
-      id: 'firewall-blocks',
-      title: `${blockCount} firewall block${blockCount === 1 ? '' : 's'}`,
-      source: 'firewall',
-      severity: blockCount > 100 ? 'warning' : 'info',
-      status: 'Contained',
-      signal: sampled
-        ? `UFW/kernel block events were counted across hosts; ${sampleCount} sampled events are loaded for evidence.`
-        : 'UFW/kernel block events were counted from the available host logs.',
-      evidence: [
-        ...(topHost ? [`Top host: ${topHost.label} (${topHost.count})`] : []),
-        ...((data.firewall?.topPorts ?? []).slice(0, 2).map((port) => `Port ${port.key}: ${port.count}`)),
-        ...((data.firewall?.topSources ?? []).slice(0, 2).map((source) => `Source ${source.key}: ${source.count}`)),
-      ],
-      action: sampled ? 'Use the breakdown to spot hot hosts, ports, and repeat sources before drilling into raw log evidence.' : 'Check top sources if block volume keeps rising or targets unusual ports.',
-    });
-  }
-
-  if ((data.kernel?.issueCount ?? 0) > 0) {
-    const issueCount = data.kernel?.issueCount ?? 0;
-    const criticalCount = data.kernel?.criticalCount ?? 0;
-    threats.push({
-      id: 'kernel-issues',
-      title: `${issueCount} kernel issue signal${issueCount === 1 ? '' : 's'}`,
-      source: 'kernel',
-      severity: criticalCount > 0 ? 'critical' : issueCount > 20 ? 'warning' : 'info',
-      status: criticalCount > 0 ? 'Investigate now' : 'Review',
-      signal: 'Kernel logs include warning-or-higher entries outside normal firewall blocks.',
-      evidence: (data.kernel?.recent ?? []).slice(0, 5),
-      action: criticalCount > 0 ? 'Check affected host dmesg/journal and confirm no disk, memory, driver, or container fault is active.' : 'Review repeated kernel warnings for hardware or networking drift.',
-    });
-  }
-
-  if ((data.system?.issueCount ?? 0) > 0) {
-    const issueCount = data.system?.issueCount ?? 0;
-    const criticalCount = data.system?.criticalCount ?? 0;
-    threats.push({
-      id: 'system-issues',
-      title: `${issueCount} system issue signal${issueCount === 1 ? '' : 's'}`,
-      source: 'system',
-      severity: criticalCount > 0 ? 'critical' : issueCount > 20 ? 'warning' : 'info',
-      status: criticalCount > 0 ? 'Investigate now' : 'Review',
-      signal: 'System journal or failed-unit checks found warning-or-higher operational events.',
-      evidence: (data.system?.recent ?? []).slice(0, 5),
-      action: criticalCount > 0 ? 'Inspect failed units and recent journal entries on the affected host.' : 'Check whether the entries are one-off service noise or repeated failures.',
-    });
-  }
-
-  if (threats.length === 0) {
-    threats.push({
-      id: 'clear',
-      title: 'No active threats detected',
-      source: 'security',
-      severity: 'healthy',
-      status: 'Clear',
-      signal: 'fail2ban, auth, firewall, and nginx signals are within normal bounds.',
-      evidence: [`Checked ${new Date(data.checkedAt).toLocaleTimeString()}`],
-      action: 'No operator action required.',
-    });
-  }
-
-  const rank: Record<ThreatSeverity, number> = { critical: 0, warning: 1, info: 2, healthy: 3 };
-  return threats.sort((a, b) => rank[a.severity] - rank[b.severity]);
-}
-
-function pentestStatusLabel(status: PentestStatus) {
-  if (status === 'passed') return 'Passed';
-  if (status === 'watch') return 'Watch';
-  if (status === 'blocked') return 'Blocked';
-  return 'Queued';
-}
-
-function pentestStatusTone(status: PentestStatus): 'healthy' | 'warning' | 'critical' | 'info' | 'neutral' {
-  if (status === 'passed') return 'healthy';
-  if (status === 'blocked') return 'warning';
-  if (status === 'watch') return 'info';
-  return 'neutral';
-}
-
-function gateTone(status: PentestGate['status']): 'healthy' | 'warning' | 'info' {
-  if (status === 'approved') return 'healthy';
-  if (status === 'needs-approval') return 'warning';
-  return 'info';
-}
-
-function flowTone(status: PentestFlow['status']): 'healthy' | 'warning' | 'info' {
-  if (status === 'live') return 'healthy';
-  if (status === 'approval') return 'warning';
-  return 'info';
-}
-
-function EvidencePanel({ title, lines, tone = 'neutral' }: { title: string; lines: string[]; tone?: 'neutral' | 'warning' | 'critical' }) {
-  const color = tone === 'critical' ? 'var(--sev-critical)' : tone === 'warning' ? 'var(--sev-warning)' : 'var(--text-3)';
-
-  return (
-    <div className={card + ' p-5'}>
-      <SectionTitle title={title} subtitle={`${lines.length} recent evidence item${lines.length === 1 ? '' : 's'}`} />
-      {lines.length === 0 ? (
-        <div className={muted}>No evidence lines available.</div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {lines.map((line, i) => (
-            <div
-              key={`${line}-${i}`}
-              className="overflow-hidden text-ellipsis whitespace-nowrap rounded-md border border-white/10 bg-white/[0.025] px-3 py-2 font-mono text-[11px]"
-              style={{ color }}
-              title={redactSecurityText(line)}
-            >
-              {redactSecurityText(line)}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PentestProgram() {
-  const passed = PENTEST_CHECKS.filter((check) => check.status === 'passed').length;
-  const blocked = PENTEST_CHECKS.filter((check) => check.status === 'blocked').length;
-  const watch = PENTEST_CHECKS.filter((check) => check.status === 'watch').length;
-
-  return (
-    <section className="space-y-4">
-      <SectionTitle title="Pen Testing" subtitle="Controlled validation runs, evidence, and approval gates" />
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <Metric label="Current run" value="Phase 2" delta="Low-noise checks active" status="neutral" />
-        <Metric label="Checks passed" value={String(passed)} delta="Validated controls" status="healthy" />
-        <Metric label="Watch items" value={String(watch)} delta="Residual or partial coverage" status={watch ? 'neutral' : 'healthy'} />
-        <Metric label="Approval gates" value={String(blocked)} delta="Held before louder testing" status={blocked ? 'warning' : 'healthy'} />
-      </div>
-
-      <div className={card + ' overflow-hidden'}>
-        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
-          <SectionTitle title="Testing Program" subtitle="SecSpy operating gates and cadence" />
-        </div>
-        <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
-          {PENTEST_PROGRAM.map((item) => (
-            <div key={item.title} className="p-5">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <StatusBadge label={item.status} status={flowTone(item.status)} />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{item.cadence}</span>
-              </div>
-              <div className="text-[14px] font-semibold text-slate-100">{item.title}</div>
-              <div className="mt-2 text-[12px] leading-5 text-slate-400">{item.detail}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className={card + ' overflow-hidden'}>
-        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
-          <SectionTitle title="Cadence" subtitle="Repeatable rhythm for defensive testing" />
-        </div>
-        <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
-          {PENTEST_CADENCE.map((item) => (
-            <div key={item.title} className="p-5">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <StatusBadge label={item.status} status={flowTone(item.status)} />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{item.cadence}</span>
-              </div>
-              <div className="text-[14px] font-semibold text-slate-100">{item.title}</div>
-              <div className="mt-2 text-[12px] leading-5 text-slate-400">{item.detail}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className={card + ' overflow-hidden'}>
-        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
-          <SectionTitle title="Test Runs" subtitle="Scope to result to next action" />
-        </div>
-        <div className="divide-y divide-white/10">
-          {PENTEST_CHECKS.map((check) => (
-            <div key={check.id} className="grid gap-4 px-5 py-4 xl:grid-cols-[0.7fr_1fr_1.4fr_1fr]">
-              <div>
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <StatusBadge label={pentestStatusLabel(check.status)} status={pentestStatusTone(check.status)} />
-                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300">{check.area}</span>
-                </div>
-                <div className="text-[14px] font-semibold text-slate-100">{check.target}</div>
-              </div>
-              <div className="text-[13px] leading-5 text-slate-300">{check.result}</div>
-              <div className="min-w-0 rounded-md border border-white/10 bg-white/[0.025] px-3 py-2 font-mono text-[11px] leading-5 text-slate-400">
-                {check.evidence}
-              </div>
-              <div className="text-[13px] leading-5 text-slate-300">{check.next}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className={card + ' overflow-hidden'}>
-        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
-          <SectionTitle title="Process Flow" subtitle="How security testing moves from approval to retest" />
-        </div>
-        <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-6 lg:divide-x lg:divide-y-0">
-          {PENTEST_FLOWS.map((flow) => (
-            <div key={flow.step} className="p-5">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <StatusBadge label={flow.status} status={flowTone(flow.status)} />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{flow.owner}</span>
-              </div>
-              <div className="text-[14px] font-semibold text-slate-100">{flow.step}</div>
-              <div className="mt-2 text-[12px] leading-5 text-slate-400">{flow.detail}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className={card + ' overflow-hidden'}>
-        <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
-          <SectionTitle title="Approval Gates" subtitle="What can run now and what needs a human checkpoint" />
-        </div>
-        <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-5 lg:divide-x lg:divide-y-0">
-          {PENTEST_GATES.map((gate) => (
-            <div key={gate.label} className="p-5">
-              <div className="mb-3">
-                <StatusBadge label={gate.status.replace('-', ' ')} status={gateTone(gate.status)} />
-              </div>
-              <div className="text-[14px] font-semibold text-slate-100">{gate.label}</div>
-              <div className="mt-2 text-[12px] leading-5 text-slate-400">{gate.detail}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function RollupList({ title, items, empty = 'No rollup data available.' }: { title: string; items: Array<{ key: string; label?: string; count: number; sampled?: boolean }>; empty?: string }) {
-  return (
-    <div className={card + ' p-5'}>
-      <SectionTitle title={title} subtitle={`${items.length} grouped item${items.length === 1 ? '' : 's'}`} />
-      {items.length === 0 ? (
-        <div className={muted}>{empty}</div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {items.map((item) => (
-            <div key={item.key} className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 py-2">
-              <div className="min-w-0">
-                <div className="truncate text-[13px] font-semibold text-slate-200">{redactSecurityText(item.label ?? item.key)}</div>
-                <div className="truncate font-mono text-[11px] text-slate-500">{redactSecurityText(item.key)}{item.sampled ? ' · sampled evidence' : ''}</div>
-              </div>
-              <div className="shrink-0 font-mono text-[13px] font-semibold text-slate-100">{item.count}</div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function redactSecurityText(value: string) {
+function redact(value: string) {
   return value
-    .replace(/\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b/g, '$1.x.x')
-    .replace(/([?&](?:token|key|secret|password|session|auth)=)[^&\s]+/gi, '$1[redacted]')
-    .replace(/\b[A-Za-z0-9_-]{36,}\b/g, '[redacted]');
+    .replace(/(password|passwd|token|secret|authorization|cookie)=?\s*[^\s]+/gi, '$1=[redacted]')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
+    .slice(0, 1000);
 }
 
-function securityTone(threats: ThreatItem[], data: SecurityData): 'healthy' | 'warning' | 'critical' | 'info' {
-  if (threats.some((threat) => threat.severity === 'critical')) return 'critical';
-  if (threats.some((threat) => threat.severity === 'warning')) return 'warning';
-  if (data.stale) return 'info';
-  return 'healthy';
+function ToneBadge({ tone, label }: { tone: Tone; label?: string }) {
+  return <span className={styles.toneBadge} data-tone={tone}><span aria-hidden="true" />{label ?? toneLabel(tone)}</span>;
 }
 
-function SecurityStatTile({ label, value, hint, tone = 'info' }: { label: string; value: string; hint: string; tone?: 'healthy' | 'warning' | 'critical' | 'info' }) {
-  const color = tone === 'healthy' ? '#22C55E' : tone === 'warning' ? '#F59E0B' : tone === 'critical' ? '#EF4444' : '#67D5FF';
-  return (
-    <div className="mc-security-stat" style={{
-      position: 'relative',
-      overflow: 'hidden',
-      minHeight: 98,
-      padding: '14px 16px',
-      borderRadius: 14,
-      border: `1px solid ${color}33`,
-      background: `linear-gradient(145deg, ${color}13, rgba(10,16,31,0.88) 52%, rgba(255,255,255,0.035))`,
-      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 42px rgba(0,0,0,0.24)',
-    }}>
-      <div style={{ position: 'absolute', inset: '0 0 auto 0', height: 1, background: `linear-gradient(90deg, transparent, ${color}, transparent)`, opacity: 0.62 }} />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <div style={{ fontSize: 10, color: '#8B96AA', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 900 }}>{label}</div>
-        <div style={{ width: 8, height: 8, borderRadius: 99, background: color, boxShadow: `0 0 18px ${color}` }} />
-      </div>
-      <div style={{ marginTop: 10, fontSize: 25, lineHeight: 1, fontWeight: 900, color: '#F3F7FF', letterSpacing: 0 }}>{value}</div>
-      <div style={{ marginTop: 7, fontSize: 11, lineHeight: 1.35, color: '#8B96AA' }}>{hint}</div>
-    </div>
-  );
+function ConfidenceBadge({ value }: { value: Confidence }) {
+  return <span className={styles.confidence} data-confidence={value}>{value === 'confirmed' ? 'Observed' : value === 'inferred' ? 'Inferred' : 'Unobserved'}</span>;
 }
 
-function SecurityGlassPanel({ children, className = '', style = {} }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
-  return (
-    <div className={className} style={{
-      borderRadius: 14,
-      border: '1px solid rgba(103,213,255,0.15)',
-      background: 'linear-gradient(145deg, rgba(15,23,42,0.82), rgba(7,12,24,0.94))',
-      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.055), 0 18px 46px rgba(0,0,0,0.26)',
-      ...style,
-    }}>
-      {children}
-    </div>
-  );
+function SectionHeading({ eyebrow, title, copy, action }: { eyebrow: string; title: string; copy?: string; action?: React.ReactNode }) {
+  return <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>{eyebrow}</p><h2>{title}</h2>{copy ? <p>{copy}</p> : null}</div>{action}</div>;
 }
 
-function MiniPanelTitle({ eyebrow, title, action }: { eyebrow: string; title: string; action?: React.ReactNode }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-      <div>
-        <div style={{ fontSize: 10, color: '#67D5FF', textTransform: 'uppercase', letterSpacing: '0.16em', fontWeight: 900 }}>{eyebrow}</div>
-        <div style={{ marginTop: 3, fontSize: 15, color: '#F3F7FF', fontWeight: 900, letterSpacing: 0 }}>{title}</div>
-      </div>
-      {action}
-    </div>
-  );
+function buildThreats(data: SecurityData, evidence: TargetedEvidence): EvidenceItem[] {
+  const items: EvidenceItem[] = [];
+  const criticalHostIssues = (data.kernel?.criticalCount ?? 0) + (data.system?.criticalCount ?? 0);
+  const missingHosts = (data.registeredHosts ?? []).filter((host) => !host.reporting);
+
+  if (data.source === 'empty-fallback' || data.stale) {
+    items.push({
+      id: 'coverage:stale', title: 'Security telemetry is stale or unavailable', category: 'Coverage', tone: 'attention', state: 'Verify coverage', confidence: 'confirmed',
+      confidenceCopy: 'The collector reports stale or fallback data. Zero counts cannot be treated as a nominal security state.', summary: `Collector source: ${data.source || 'unknown'}.`, priority: 98, time: data.checkedAt,
+      parsed: [['Collector source', data.source || 'Not reported'], ['Stale', data.stale ? 'Yes' : 'No'], ['Reporting hosts', `${(data.hosts ?? []).filter((host) => host.reporting).length}/${data.registeredHosts?.length ?? data.hosts?.length ?? 0}`]],
+      raw: [], context: [['Security channel', 'Aggregate collector'], ['Data quality', 'Do not infer healthy zeroes'], ['Required response', 'Restore or verify collection']], action: 'Verify host channels and collector freshness before triage.', href: '/systems',
+    });
+  }
+
+  missingHosts.forEach((host) => items.push({
+    id: `coverage:${host.id}`, title: `${host.label} is not reporting security telemetry`, category: 'Coverage', tone: 'attention', state: 'Coverage gap', confidence: 'confirmed',
+    confidenceCopy: 'The registered host coverage record explicitly reports this channel unavailable. This is a monitoring gap, not evidence of attack.', summary: `Expected channel: ${host.securityChannel || 'not described'}.`, priority: 94,
+    parsed: [['Host', host.label], ['Reporting', 'No'], ['Security channel', host.securityChannel || 'Not reported']], raw: [],
+    context: [['Claim', 'Coverage unavailable'], ['Attack evidence', 'None from this gap'], ['Certainty', 'Confirmed channel state']], action: 'Restore the registered security channel, then reassess posture.', href: '/estate',
+  }));
+
+  if (criticalHostIssues > 0) items.push({
+    id: 'host:critical', title: `${criticalHostIssues} critical host signal${criticalHostIssues === 1 ? '' : 's'}`, category: 'Host integrity', tone: 'incident', state: 'Investigate now', confidence: 'confirmed',
+    confidenceCopy: 'Kernel or system collectors labelled these records critical. Attribution and progression remain unconfirmed.', summary: 'Critical kernel or system evidence needs host-level review.', priority: 100, time: data.checkedAt,
+    parsed: [['Kernel critical', String(data.kernel?.criticalCount ?? 0)], ['System critical', String(data.system?.criticalCount ?? 0)], ['Collector window', 'Current bounded sample']],
+    raw: [...(data.kernel?.recent ?? []), ...(data.system?.recent ?? [])].slice(0, 20).map(redact), context: [['Source', 'Host kernel/system collectors'], ['Impact', 'Potential host integrity issue'], ['Attribution', 'Unconfirmed']], action: 'Preserve the bounded evidence and inspect the affected host.', href: '/systems',
+  });
+
+  evidence.alerts.forEach((alert, index) => {
+    const tone: Tone = alert.severity === 'high' ? 'incident' : alert.severity === 'medium' ? 'attention' : 'info';
+    items.push({
+      id: `alert:${index}:${alert.time}`, title: `${alert.type} security alert`, category: 'Alert', tone, state: alert.severity === 'high' ? 'Escalate' : 'Review', confidence: 'confirmed',
+      confidenceCopy: 'This is a parsed record from the security-alert log. Its relationship to other events is not assumed.', summary: alert.detail, priority: alert.severity === 'high' ? 96 : alert.severity === 'medium' ? 78 : 48, time: alert.time,
+      parsed: [['Type', alert.type], ['Severity', alert.severity], ['Time', alert.time]], raw: [redact(alert.detail)], context: [['Source', 'security-alert.log'], ['Window', 'Last 24 hours'], ['Correlation', 'Not automatically joined']], action: 'Compare the alert with host, authentication, and firewall evidence.', href: '/incidents',
+    });
+  });
+
+  if (data.auth.failCount > 0) items.push({
+    id: 'auth:failures', title: `${data.auth.failCount} authentication failure${data.auth.failCount === 1 ? '' : 's'}`, category: 'Access', tone: data.auth.failCount >= 20 ? 'attention' : 'info', state: 'Review source pattern', confidence: 'confirmed',
+    confidenceCopy: 'Failed authentication events are observed. They do not confirm successful access.', summary: `${data.auth.topUsers?.length ?? 0} user rollups and ${data.auth.byHost?.length ?? 0} host rollups are available.`, priority: data.auth.failCount >= 20 ? 82 : 58, time: evidence.ssh[0]?.ts,
+    parsed: [['Failures', String(data.auth.failCount)], ['Accepted SSH', String(data.auth.sshAcceptCount ?? 0)], ['Top user', data.auth.topUsers?.[0]?.key || 'Not reported']],
+    raw: evidence.ssh.slice(0, 20).map((event) => redact(`${event.ts} ${event.host} failed SSH for ${event.user} from ${event.ip}`)), context: [['Hosts', (data.auth.byHost ?? []).map((row) => `${row.label || row.key}: ${row.count}`).join(', ') || 'Not reported'], ['Fail2ban available', data.fail2ban.available ? 'Yes' : 'No'], ['Successful compromise', 'Not established']], action: 'Correlate sources against accepted login and privilege events before escalating.', href: '/security',
+  });
+
+  if (data.fail2ban.banned > 0) items.push({
+    id: 'control:fail2ban', title: `Fail2ban is containing ${data.fail2ban.banned} source${data.fail2ban.banned === 1 ? '' : 's'}`, category: 'Containment', tone: 'attention', state: 'Control active', confidence: 'confirmed',
+    confidenceCopy: 'Ban state is confirmed by the control. It is containment evidence, not attacker attribution.', summary: `${data.fail2ban.totalFailed} failures reported by Fail2ban.`, priority: 76, time: data.checkedAt,
+    parsed: [['Active bans', String(data.fail2ban.banned)], ['Total failed', String(data.fail2ban.totalFailed)], ['Control available', data.fail2ban.available ? 'Yes' : 'No']], raw: data.fail2ban.bannedIPs.slice(0, 20).map((ip) => `Banned source ${ip}`), context: [['Control', 'Fail2ban'], ['Attribution', 'Not asserted'], ['Containment', 'Active ban list']], action: 'Review whether the source pattern changes; avoid extending blocks without corroboration.', href: '/security',
+  });
+
+  if ((data.firewall?.blockCount ?? 0) > 0) items.push({
+    id: 'edge:firewall', title: `${data.firewall?.blockCount} firewall block${data.firewall?.blockCount === 1 ? '' : 's'}`, category: 'Edge', tone: (data.firewall?.blockCount ?? 0) >= 100 ? 'attention' : 'info', state: 'Control holding', confidence: 'confirmed',
+    confidenceCopy: 'Firewall deny events are observed. Repeated blocks do not prove a successful intrusion attempt.', summary: `${data.firewall?.sampleCount ?? 0} bounded records are available for inspection.`, priority: (data.firewall?.blockCount ?? 0) >= 100 ? 72 : 46, time: evidence.firewall[0]?.ts,
+    parsed: [['Blocks', String(data.firewall?.blockCount ?? 0)], ['Sample records', String(data.firewall?.sampleCount ?? 0)], ['Top port', data.firewall?.topPorts?.[0]?.key || 'Not reported']],
+    raw: evidence.firewall.slice(0, 20).map((event) => redact(`${event.ts} ${event.host} ${event.proto} ${event.src} -> ${event.dst}:${event.dpt}`)), context: [['Source', 'UFW/kernel log'], ['Sample limit per host', String(data.firewall?.sampleLimitPerHost ?? 'Not reported')], ['Relationship', 'Edge control only']], action: 'Review concentration by source and port; correlate before changing policy.', href: '/network',
+  });
+
+  const webErrors = data.nginx.errorCount + (data.nginx.errorLogCount ?? 0);
+  if (webErrors > 0) items.push({
+    id: 'web:errors', title: `${webErrors} web error signal${webErrors === 1 ? '' : 's'}`, category: 'Web edge', tone: webErrors >= 50 ? 'attention' : 'info', state: 'Inspect pattern', confidence: 'confirmed',
+    confidenceCopy: 'HTTP error and nginx error-log records are observed. They may be routine client or application failures.', summary: `Top path: ${data.nginx.topPaths?.[0]?.key || 'not reported'}.`, priority: webErrors >= 50 ? 70 : 44, time: evidence.web.find((event) => event.status >= 400)?.ts,
+    parsed: [['Access errors', String(data.nginx.errorCount)], ['Error-log signals', String(data.nginx.errorLogCount ?? 0)], ['Top status', data.nginx.topStatuses?.[0]?.key || 'Not reported']],
+    raw: evidence.web.filter((event) => event.status >= 400).slice(0, 20).map((event) => redact(`${event.ts} ${event.host} ${event.status} ${event.method} ${event.path} from ${event.ip}`)), context: [['Source', 'Nginx access/error logs'], ['Attribution', 'Not established'], ['Data quality', 'Bounded sample']], action: 'Check whether source, path, and authentication signals overlap.', href: '/apps',
+  });
+
+  if ((data.auth.sshAcceptCount ?? 0) > 0 || (data.auth.sudoCount ?? 0) > 0) items.push({
+    id: 'access:review', title: 'Accepted access or privilege activity recorded', category: 'Host access', tone: 'info', state: 'Verify expected activity', confidence: 'confirmed',
+    confidenceCopy: 'Accepted SSH and sudo events are observed, but the collector cannot classify operator intent.', summary: `${data.auth.sshAcceptCount ?? 0} accepted SSH and ${data.auth.sudoCount ?? 0} sudo events in the collector window.`, priority: 52, time: evidence.auth[0]?.ts,
+    parsed: [['Accepted SSH', String(data.auth.sshAcceptCount ?? 0)], ['Sudo events', String(data.auth.sudoCount ?? 0)], ['Classification', 'Intent unknown']],
+    raw: evidence.auth.filter((event) => event.type === 'ssh-accept' || event.type === 'sudo').slice(0, 20).map((event) => redact(`${event.ts} ${event.host} ${event.type} ${event.user} ${event.detail}`)), context: [['Source', 'Auth journal/log'], ['Expected activity', 'Requires operator context'], ['Compromise claim', 'Not made']], action: 'Verify the activity against expected operator or automation work.', href: '/actions',
+  });
+
+  return items.sort((left, right) => right.priority - left.priority).slice(0, 8);
 }
 
-function KillChainStrip({ threats, authFailCount, firewallBlocks, nginxErrors, kernelIssues, systemIssues, sudoCount }: { threats: ThreatItem[]; authFailCount: number; firewallBlocks: number; nginxErrors: number; kernelIssues: number; systemIssues: number; sudoCount: number }) {
-  const stages = [
-    { label: 'Recon', value: firewallBlocks + nginxErrors, tone: firewallBlocks + nginxErrors > 1000 ? 'warning' : 'info', hint: 'scan and web pressure' },
-    { label: 'Exposure', value: threats.filter(t => t.id === 'host-reporting' || t.source === 'coverage').length, tone: threats.some(t => t.source === 'coverage') ? 'warning' : 'healthy', hint: 'telemetry and surface gaps' },
-    { label: 'Access', value: authFailCount, tone: authFailCount > 50 ? 'critical' : authFailCount > 10 ? 'warning' : 'healthy', hint: 'auth failure pressure' },
-    { label: 'Privilege', value: sudoCount, tone: sudoCount > 20 ? 'warning' : 'healthy', hint: 'sudo activity surfaced' },
-    { label: 'Stability', value: kernelIssues + systemIssues, tone: kernelIssues + systemIssues > 20 ? 'warning' : kernelIssues + systemIssues > 0 ? 'info' : 'healthy', hint: 'kernel and system signals' },
-    { label: 'Exfil', value: 0, tone: 'healthy', hint: 'no signal surfaced' },
+function fallbackItem(data: SecurityData): EvidenceItem {
+  return {
+    id: 'posture:clear', title: 'No ranked review signal', category: 'Posture', tone: data.source === 'empty-fallback' ? 'unknown' : 'nominal', state: data.source === 'empty-fallback' ? 'Telemetry unavailable' : 'No action queued', confidence: data.source === 'empty-fallback' ? 'unobserved' : 'confirmed',
+    confidenceCopy: data.source === 'empty-fallback' ? 'The collector has no usable data.' : 'Loaded collectors produced no item meeting the review queue rules.', summary: data.source === 'empty-fallback' ? 'Restore collection before assessing posture.' : 'This does not assert that unmonitored activity is safe.', priority: 0, time: data.checkedAt,
+    parsed: [['Collector source', data.source || 'Unknown'], ['Has threats', String(data.hasThreats)], ['Stale', String(Boolean(data.stale))]], raw: [], context: [['Scope', 'Current bounded collector window'], ['Unknowns', 'Remain unknown'], ['Action', 'Continue routine observation']], action: 'No immediate containment action is recommended.', href: '/security',
+  };
+}
+
+function buildKillChain(data: SecurityData, evidence: TargetedEvidence): KillStage[] {
+  const make = (id: string, label: string, status: Confidence, state: string, copy: string, item: EvidenceItem): KillStage => ({ id, label, status, state, copy, item });
+  const edgeObserved = (data.firewall?.blockCount ?? 0) > 0 || data.nginx.errorCount > 0;
+  const authObserved = data.auth.failCount > 0;
+  const acceptedObserved = (data.auth.sshAcceptCount ?? 0) > 0;
+  const privilegeObserved = (data.auth.sudoCount ?? 0) > 0;
+  const hostObserved = (data.kernel?.issueCount ?? 0) > 0 || (data.system?.issueCount ?? 0) > 0;
+
+  const item = (id: string, title: string, confidence: Confidence, summary: string, raw: string[], parsed: Array<[string, string]>, context: Array<[string, string]>): EvidenceItem => ({
+    id, title, category: 'Attack progression', tone: confidence === 'unobserved' ? 'unknown' : confidence === 'inferred' ? 'attention' : 'info', state: confidence === 'confirmed' ? 'Evidence observed' : confidence === 'inferred' ? 'Relationship inferred' : 'No supporting feed', confidence,
+    confidenceCopy: confidence === 'confirmed' ? 'The stage has direct collector evidence, not proof of malicious progression.' : confidence === 'inferred' ? 'Multiple event classes exist, but no identity-safe join confirms they belong to one path.' : 'The current collector cannot assess this stage.', summary, priority: 0,
+    parsed, raw: raw.slice(0, 20).map(redact), context, action: confidence === 'inferred' ? 'Correlate timestamps, hosts, and sources before escalating.' : confidence === 'unobserved' ? 'Do not infer safety from missing telemetry.' : 'Inspect the bounded evidence in context.', href: '/security',
+  });
+
+  const edgeItem = item('chain:edge', 'Reconnaissance and edge pressure', edgeObserved ? 'confirmed' : 'unobserved', edgeObserved ? 'Firewall or web-edge records exist in the current collector window.' : 'No edge event is present in the bounded sample.', [...(data.firewall?.recent ?? []), ...data.nginx.recentErrors], [['Firewall blocks', String(data.firewall?.blockCount ?? 0)], ['Web errors', String(data.nginx.errorCount)]], [['Collectors', 'Firewall and nginx'], ['Claim', 'Observed events only']]);
+  const authItem = item('chain:auth', 'Authentication attempts', authObserved ? 'confirmed' : 'unobserved', authObserved ? 'Authentication failures are directly observed.' : 'No authentication failure is present in the bounded sample.', data.auth.recent, [['Failures', String(data.auth.failCount)], ['Top user', data.auth.topUsers?.[0]?.key || 'Not reported']], [['Collector', 'Auth log/journal'], ['Successful access', 'Not implied']]);
+  const accessConfidence: Confidence = acceptedObserved && authObserved ? 'inferred' : acceptedObserved ? 'confirmed' : 'unobserved';
+  const accessItem = item('chain:access', 'Initial access', accessConfidence, acceptedObserved ? 'Accepted SSH exists; its relationship to failures is not confirmed.' : 'No accepted-access evidence is present.', data.auth.recentAccepts ?? [], [['Accepted SSH', String(data.auth.sshAcceptCount ?? 0)], ['Failures', String(data.auth.failCount)]], [['Identity join', 'Unavailable'], ['Correlation', accessConfidence === 'inferred' ? 'Possible, unconfirmed' : 'None']]);
+  const privilegeConfidence: Confidence = privilegeObserved && acceptedObserved ? 'inferred' : privilegeObserved ? 'confirmed' : 'unobserved';
+  const privilegeItem = item('chain:privilege', 'Privilege activity', privilegeConfidence, privilegeObserved ? 'Sudo activity is observed; malicious intent is not classified.' : 'No privilege event is present.', data.auth.recentSudo ?? [], [['Sudo events', String(data.auth.sudoCount ?? 0)], ['Accepted SSH', String(data.auth.sshAcceptCount ?? 0)]], [['Intent', 'Unknown'], ['Progression join', privilegeConfidence === 'inferred' ? 'Possible, unconfirmed' : 'None']]);
+  const hostItem = item('chain:host', 'Execution and persistence', hostObserved ? 'confirmed' : 'unobserved', hostObserved ? 'Kernel or system events exist; they are not attributed to access activity.' : 'No dedicated execution or persistence signal is observed.', [...(data.kernel?.recent ?? []), ...(data.system?.recent ?? [])], [['Kernel issues', String(data.kernel?.issueCount ?? 0)], ['System issues', String(data.system?.issueCount ?? 0)]], [['Attribution', 'Not established'], ['Dedicated EDR', 'Not reported']]);
+  const exfilItem = item('chain:exfil', 'Exfiltration', 'unobserved', 'Mission Control has no dedicated egress or exfiltration collector.', [], [['Detection feed', 'Not available'], ['Conclusion', 'Unobserved']], [['Claim', 'Not assessed'], ['Future input', 'Bounded egress telemetry']]);
+
+  return [
+    make('edge', 'Edge pressure', edgeObserved ? 'confirmed' : 'unobserved', edgeObserved ? 'Observed' : 'No signal', edgeItem.summary, edgeItem),
+    make('auth', 'Credential attempt', authObserved ? 'confirmed' : 'unobserved', authObserved ? 'Observed' : 'No signal', authItem.summary, authItem),
+    make('access', 'Initial access', accessConfidence, accessConfidence === 'inferred' ? 'Inferred only' : acceptedObserved ? 'Observed activity' : 'Unobserved', accessItem.summary, accessItem),
+    make('privilege', 'Privilege', privilegeConfidence, privilegeConfidence === 'inferred' ? 'Inferred only' : privilegeObserved ? 'Observed activity' : 'Unobserved', privilegeItem.summary, privilegeItem),
+    make('host', 'Execution / persistence', hostObserved ? 'confirmed' : 'unobserved', hostObserved ? 'Observed signal' : 'Unobserved', hostItem.summary, hostItem),
+    make('exfil', 'Exfiltration', 'unobserved', 'Unobserved', exfilItem.summary, exfilItem),
   ];
-
-  const colorFor = (tone: string) => tone === 'critical' ? '#EF4444' : tone === 'warning' ? '#F59E0B' : tone === 'healthy' ? '#22C55E' : '#67D5FF';
-
-  return (
-    <SecurityGlassPanel style={{ padding: 16 }}>
-      <MiniPanelTitle eyebrow="Attack Path" title="Current signal mapping" />
-      <div className="mc-security-killchain" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 8 }}>
-        {stages.map((stage) => {
-          const color = colorFor(stage.tone);
-          return (
-            <div key={stage.label} style={{ position: 'relative', padding: '11px 10px', borderRadius: 12, border: `1px solid ${color}28`, background: `${color}10` }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                <div style={{ fontSize: 11, color: '#F3F7FF', fontWeight: 900 }}>{stage.label}</div>
-                <div style={{ color, fontSize: 11, fontWeight: 900 }}>{stage.value}</div>
-              </div>
-              <div style={{ marginTop: 5, fontSize: 10, color: '#8B96AA', lineHeight: 1.35 }}>{stage.hint}</div>
-            </div>
-          );
-        })}
-      </div>
-    </SecurityGlassPanel>
-  );
 }
 
-function SecurityCockpit({ data, threats, loading, onRefresh }: { data: SecurityData; threats: ThreatItem[]; loading: boolean; onRefresh: () => void }) {
-  const tone = securityTone(threats, data);
-  const activeThreats = threats.filter((t) => t.severity === 'critical' || t.severity === 'warning').length;
-  const reportingHosts = (data.hosts ?? []).filter((host) => host.reporting).length;
-  const totalHosts = Math.max((data.hosts ?? []).length, 1);
-  const missingChannels = (data.hosts ?? []).flatMap((host) => Object.entries(host.sources).filter(([, ok]) => !ok).map(([source]) => `${host.label}:${source}`));
-  const topThreat = threats[0];
-  const firewallBlocks = data.firewall?.blockCount ?? 0;
-  const sampled = (data.firewall?.sampleCount ?? 0) < firewallBlocks;
-  const posture = tone === 'critical' ? 'Incident signal' : tone === 'warning' ? 'Needs review' : tone === 'info' ? 'Telemetry stale' : 'No active high-risk signal';
+async function fetchJson(path: string) {
+  const response = await fetch(path, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+  return response.json();
+}
 
-  return (
-    <section className="space-y-4">
-      <div style={{
-        position: 'relative',
-        overflow: 'hidden',
-        padding: 18,
-        borderRadius: 18,
-        border: '1px solid rgba(103,213,255,0.18)',
-        background: 'linear-gradient(145deg, rgba(13,20,36,0.96), rgba(5,9,18,0.98))',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 22px 60px rgba(0,0,0,0.28)',
-      }}>
-        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.17, backgroundImage: 'linear-gradient(rgba(103,213,255,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(103,213,255,0.12) 1px, transparent 1px)', backgroundSize: '34px 34px' }} />
-        <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 14, alignItems: 'start' }}>
-          <div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 9 }}>
-              <div style={{ fontSize: 22, fontWeight: 950, color: '#F3F7FF', letterSpacing: 0 }}>Security Operations Centre</div>
-              <StatusBadge label={posture} status={tone as any} pulse={loading || tone === 'critical'} />
-            </div>
-            <div style={{ marginTop: 5, fontSize: 12, color: '#8B96AA' }}>
-              Live host collector · evidence-first triage · refresh 60s
-              <span style={{ color: '#64748B', marginLeft: 12 }}>verified {new Date(data.checkedAt).toLocaleTimeString()}</span>
-              {data.stale && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 11 }}>stale source</span>}
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
-            {['Overview', 'Exposure', 'Identity', 'Findings', 'Timeline'].map((label, i) => (
-              <span key={label} style={{
-                minHeight: 30,
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '6px 11px',
-                borderRadius: 999,
-                border: i === 0 ? '1px solid rgba(103,213,255,0.46)' : '1px solid rgba(255,255,255,0.10)',
-                background: i === 0 ? 'rgba(103,213,255,0.12)' : 'rgba(255,255,255,0.035)',
-                color: i === 0 ? '#67D5FF' : '#94A3B8',
-                fontSize: 11,
-                fontWeight: 850,
-              }}>{label}</span>
-            ))}
-            <ToolbarButton onClick={onRefresh} disabled={loading}>{loading ? 'Refreshing' : 'Refresh'}</ToolbarButton>
-          </div>
-        </div>
-      </div>
+function EvidenceInspector({ item, tab, setTab, onClose, returnFocus, open }: { item: EvidenceItem; tab: EvidenceTab; setTab: (tab: EvidenceTab) => void; onClose: () => void; returnFocus: React.RefObject<HTMLElement | null>; open: boolean }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const inspectorRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const isDrawer = window.matchMedia('(max-width: 980px)').matches;
+    if (!isDrawer || !open) return;
+    closeRef.current?.focus();
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || !inspectorRef.current) return;
+      const controls = Array.from(inspectorRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'));
+      if (!controls.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', trapFocus);
+    return () => window.removeEventListener('keydown', trapFocus);
+  }, [item.id, open]);
 
-      <div className="mc-security-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
-        <SecurityStatTile label="Risk queue" value={String(activeThreats)} hint={activeThreats ? topThreat?.title ?? 'Needs review' : 'No operator action queued'} tone={activeThreats ? tone : 'healthy'} />
-        <SecurityStatTile label="Telemetry coverage" value={`${reportingHosts}/${totalHosts}`} hint={missingChannels.length ? `${missingChannels.length} missing channels` : 'all configured channels online'} tone={missingChannels.length ? 'warning' : 'healthy'} />
-        <SecurityStatTile label="Auth pressure" value={String(data.auth.failCount)} hint={`${data.auth.sshAcceptCount ?? 0} SSH accepts · ${data.auth.sudoCount ?? 0} sudo events`} tone={data.auth.failCount > 50 ? 'critical' : data.auth.failCount > 10 ? 'warning' : 'healthy'} />
-        <SecurityStatTile label="Blocked activity" value={String(firewallBlocks)} hint={sampled ? `${data.firewall?.sampleCount ?? 0} sampled evidence rows` : 'contained by firewall logs'} tone={firewallBlocks > 100 ? 'warning' : 'info'} />
-      </div>
+  function close() {
+    onClose();
+    window.setTimeout(() => returnFocus.current?.focus(), 0);
+  }
 
-      <div className="mc-security-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-          <SecurityGlassPanel style={{ padding: 16, overflow: 'hidden', position: 'relative' }}>
-            <MiniPanelTitle eyebrow="Threat Surface" title="Exposure and telemetry map" action={<StatusBadge label={data.source || 'security api'} status="info" />} />
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.13, backgroundImage: 'linear-gradient(rgba(103,213,255,0.16) 1px, transparent 1px), linear-gradient(90deg, rgba(103,213,255,0.12) 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
-            <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
-              {[
-                ['Internet edge', 'Cloudflare + nginx', 'public HTTPS and WAF boundary', firewallBlocks > 100 ? 'warning' : 'info'],
-                ['Identity', 'SSH / sudo / sessions', `${data.auth.failCount} failed auth events`, data.auth.failCount > 10 ? 'warning' : 'healthy'],
-                ['Hosts', `${reportingHosts}/${totalHosts} reporting`, missingChannels.length ? 'coverage needs review' : 'auth/nginx/firewall/fail2ban online', missingChannels.length ? 'warning' : 'healthy'],
-                ['Host health', 'Kernel + systemd', `${(data.kernel?.issueCount ?? 0) + (data.system?.issueCount ?? 0)} issue signals`, (data.kernel?.criticalCount ?? 0) + (data.system?.criticalCount ?? 0) > 0 ? 'critical' : (data.kernel?.issueCount ?? 0) + (data.system?.issueCount ?? 0) > 20 ? 'warning' : 'healthy'],
-              ].map(([title, value, hint, itemTone]) => {
-                const color = itemTone === 'critical' ? '#EF4444' : itemTone === 'warning' ? '#F59E0B' : itemTone === 'healthy' ? '#22C55E' : '#67D5FF';
-                return (
-                  <div key={title} style={{ minHeight: 128, padding: 13, borderRadius: 13, border: `1px solid ${color}28`, background: `linear-gradient(145deg, ${color}10, rgba(255,255,255,0.025))` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <div style={{ fontSize: 11, color: '#F3F7FF', fontWeight: 900 }}>{title}</div>
-                      <div style={{ width: 9, height: 9, borderRadius: 99, background: color, boxShadow: `0 0 18px ${color}` }} />
-                    </div>
-                    <div style={{ marginTop: 10, fontSize: 18, color, fontWeight: 900, letterSpacing: 0 }}>{value}</div>
-                    <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.4, color: '#8B96AA' }}>{hint}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </SecurityGlassPanel>
-
-          <KillChainStrip
-            threats={threats}
-            authFailCount={data.auth.failCount}
-            firewallBlocks={firewallBlocks}
-            nginxErrors={data.nginx.errorCount}
-            kernelIssues={data.kernel?.issueCount ?? 0}
-            systemIssues={data.system?.issueCount ?? 0}
-            sudoCount={data.auth.sudoCount ?? 0}
-          />
-        </div>
-
-        <SecurityGlassPanel style={{ padding: 16 }}>
-          <MiniPanelTitle eyebrow="Security Brief" title={topThreat?.title ?? 'No active signal'} action={<StatusBadge label={severityLabel(topThreat?.severity ?? 'info')} status={(topThreat?.severity ?? 'info') as any} pulse={topThreat?.severity === 'critical'} />} />
-          <div style={{ fontSize: 12, lineHeight: 1.6, color: '#94A3B8' }}>
-            {topThreat?.signal ?? 'Security telemetry has not produced a ranked finding yet.'}
-          </div>
-          <div style={{ marginTop: 12, padding: 12, borderRadius: 11, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
-            <div style={{ fontSize: 10, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 900 }}>Next action</div>
-            <div style={{ marginTop: 6, fontSize: 12, color: '#CBD5E1', lineHeight: 1.45 }}>{topThreat?.action ?? 'Keep monitoring collector output.'}</div>
-          </div>
-          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {(topThreat?.evidence ?? []).slice(0, 4).map((line, i) => (
-              <div key={`${line}-${i}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '7px 8px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(0,0,0,0.18)', color: '#8B96AA', fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 10 }}>
-                {redactSecurityText(line)}
-              </div>
-            ))}
-          </div>
-        </SecurityGlassPanel>
-      </div>
-    </section>
-  );
+  const rows = tab === 'parsed' ? item.parsed : item.context;
+  return <aside ref={inspectorRef} className={styles.inspector} data-open={open} aria-label="Security evidence inspector" aria-live="polite">
+    <div className={styles.inspectorTop}><div><p className={styles.eyebrow}>{item.category}</p><h2>{item.title}</h2></div><button ref={closeRef} type="button" onClick={close} aria-label="Close evidence inspector">×</button></div>
+    <div className={styles.inspectorState}><ToneBadge tone={item.tone} label={item.state} /><ConfidenceBadge value={item.confidence} />{item.time ? <time>{relativeTime(item.time)}</time> : null}</div>
+    <p className={styles.inspectorSummary}>{item.summary}</p>
+    <div className={styles.confidenceNote}><strong>{item.confidence === 'confirmed' ? 'Evidence status' : 'Confidence boundary'}</strong><p>{item.confidenceCopy}</p></div>
+    <div className={styles.tabs} role="tablist" aria-label="Evidence views">
+      {(['parsed', 'raw', 'context'] as EvidenceTab[]).map((value) => <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)}>{value === 'context' ? 'Host Context' : value[0].toUpperCase() + value.slice(1)}</button>)}
+    </div>
+    <div className={styles.evidencePane} role="tabpanel">
+      {tab === 'raw' ? (item.raw.length ? <pre>{item.raw.map((line, index) => <code key={`${line}:${index}`}>{line}</code>)}</pre> : <p className={styles.missingEvidence}>No bounded raw evidence is available for this item.</p>) : <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
+    </div>
+    <div className={styles.recommendation}><span>Recommended action</span><p>{item.action}</p></div>
+    <Link className={styles.inspectorLink} href={item.href}>Open related surface →</Link>
+  </aside>;
 }
 
 export default function SecurityPage() {
-  const [data, setData] = useState<SecurityData | null>(null);
+  const [data, setData] = useState<SecurityData>(EMPTY_SECURITY);
+  const [evidence, setEvidence] = useState<TargetedEvidence>(EMPTY_EVIDENCE);
+  const [selected, setSelected] = useState<EvidenceItem | null>(null);
+  const [tab, setTab] = useState<EvidenceTab>('parsed');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [actionMessage, setActionMessage] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+  const returnFocus = useRef<HTMLElement | null>(null);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const r = await fetch('/api/security', { cache: 'no-store' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setData(await r.json());
-      setError(null);
-    } catch (e: any) {
-      setError(String(e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 60_000);
-    return () => clearInterval(t);
+  const load = useCallback(async (background = false) => {
+    if (background) setRefreshing(true);
+    const requests = [
+      ['summary', '/api/security'], ['alerts', '/api/security/alerts'], ['auth', '/api/security/auth-log'],
+      ['firewall', '/api/security/firewall'], ['web', '/api/security/nginx-logs'], ['ssh', '/api/security/ssh-attacks'],
+    ] as const;
+    const results = await Promise.allSettled(requests.map(([, path]) => fetchJson(path)));
+    const failures: string[] = [];
+    const nextEvidence: Partial<TargetedEvidence> = {};
+    results.forEach((result, index) => {
+      const [key] = requests[index];
+      if (result.status === 'rejected') { failures.push(`${key}: ${result.reason instanceof Error ? result.reason.message : 'request failed'}`); return; }
+      if (key === 'summary') setData(result.value);
+      if (key === 'alerts') nextEvidence.alerts = result.value.alerts ?? [];
+      if (key === 'auth') nextEvidence.auth = result.value.recent ?? [];
+      if (key === 'firewall') nextEvidence.firewall = result.value.recent ?? [];
+      if (key === 'web') nextEvidence.web = result.value.recent ?? [];
+      if (key === 'ssh') nextEvidence.ssh = result.value.recent ?? [];
+    });
+    setEvidence((current) => ({ ...current, ...nextEvidence }));
+    setErrors(failures);
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
-  const threats = useMemo(() => (data ? buildThreats(data) : []), [data]);
-  const topThreat = threats[0];
-  const activeThreats = threats.filter((t) => t.severity === 'critical' || t.severity === 'warning').length;
+  useEffect(() => { load(); const timer = window.setInterval(() => load(true), 45_000); return () => window.clearInterval(timer); }, [load]);
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) { if (event.key === 'Escape' && selected) { setSelected(null); window.setTimeout(() => returnFocus.current?.focus(), 0); } }
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+  }, [selected]);
 
-  return (
-    <AppShell>
-      <div className="space-y-8">
-        <SectionTitle
-          title="Security Triage"
-          subtitle="Ranked operational signals across the server fleet"
-          action={<ToolbarButton onClick={load} disabled={loading}>{loading ? 'Refreshing' : 'Refresh'}</ToolbarButton>}
-        />
+  const threats = useMemo(() => buildThreats(data, evidence), [data, evidence]);
+  const killChain = useMemo(() => buildKillChain(data, evidence), [data, evidence]);
+  const coverageTotal = data.registeredHosts?.length || data.hosts?.length || 0;
+  const reportingHosts = (data.hosts ?? []).filter((host) => host.reporting).length;
+  const criticalCount = threats.filter((item) => item.tone === 'incident').length;
+  const attentionCount = threats.filter((item) => item.tone === 'attention').length;
+  const sourceUnavailable = data.source === 'empty-fallback' || !data.checkedAt;
+  const posture: Tone = sourceUnavailable ? 'unknown' : criticalCount ? 'incident' : attentionCount || data.stale ? 'attention' : 'nominal';
+  const postureTitle = posture === 'incident' ? 'Containment review required' : posture === 'attention' ? 'Security needs review' : posture === 'nominal' ? 'Controls are holding' : 'Security posture unknown';
+  const postureCopy = posture === 'incident' ? `${criticalCount} evidence-backed high-priority signal${criticalCount === 1 ? '' : 's'} require operator review.` : posture === 'attention' ? `${attentionCount} review signal${attentionCount === 1 ? '' : 's'} or coverage condition needs attention.` : posture === 'nominal' ? 'Loaded collectors show no ranked incident or attention condition. Unobserved stages remain unknown.' : 'The active collector cannot support a security assessment.';
+  const currentSelection = selected ?? threats[0] ?? fallbackItem(data);
 
-        {loading && !data && (
-          <div className={card + ' p-8 text-center text-sm text-slate-400'}>
-            Loading security signals...
-          </div>
-        )}
+  function inspect(item: EvidenceItem, event: React.MouseEvent<HTMLElement>) {
+    returnFocus.current = event.currentTarget;
+    setSelected(item);
+    setTab('parsed');
+  }
 
-        {error && (
-          <div className={card + ' border-[rgba(245,158,11,0.30)] bg-[rgba(245,158,11,0.07)] p-5'}>
-            <div className="mb-1 font-semibold text-[var(--sev-warning)]">Could not load security data</div>
-            <div className={muted}>{error}</div>
-          </div>
-        )}
+  async function runIntent(action: 'capture_diagnostics' | 'open_incident') {
+    setActionBusy(true); setActionMessage('Recording audited intent…');
+    try {
+      const response = await fetch('/api/runbook-actions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, source: 'security_threat_surface' }) });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Action failed');
+      setActionMessage(result.next || 'Intent recorded.');
+    } catch (error) { setActionMessage(error instanceof Error ? error.message : 'Action failed'); }
+    finally { setActionBusy(false); }
+  }
 
-        {data && (
-          <>
-            <SecurityCockpit data={data} threats={threats} loading={loading} onRefresh={load} />
+  return <AppShell>
+    <a className={styles.skipLink} href="#security-workspace">Skip to security workspace</a>
+    <div className={styles.security} data-posture={posture}>
+      <header className={styles.header}>
+        <div><p className={styles.eyebrow}>Adaptive Operations Prism</p><h1>Security Threat Surface</h1><p>Evidence first. Relationships only where the current collectors support them.</p></div>
+        <div className={styles.freshness} data-stale={Boolean(data.stale)}><span>{loading ? 'Loading security telemetry…' : data.checkedAt ? `${data.stale ? 'Stale' : 'Collected'} ${relativeTime(data.checkedAt)} · ${data.source || 'unknown source'}` : 'No successful collection'}</span><button type="button" onClick={() => load(true)} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button></div>
+      </header>
 
-            <section className="grid gap-4 md:grid-cols-4">
-              <Metric
-                label="Triage state"
-                value={topThreat?.severity === 'healthy' ? 'Clear' : severityLabel(topThreat?.severity ?? 'info')}
-                delta={topThreat?.title}
-                status={topThreat?.severity === 'critical' ? 'critical' : topThreat?.severity === 'warning' ? 'warning' : 'healthy'}
-              />
-              <Metric
-                label="Active items"
-                value={String(activeThreats)}
-                delta={activeThreats ? 'Needs operator review' : 'No action queue'}
-                status={activeThreats ? 'warning' : 'healthy'}
-              />
-              <Metric
-                label="Auth failures"
-                value={String(data.auth.failCount)}
-                delta={data.auth.failCount > 0 ? 'Recent failed password events' : 'None detected'}
-                status={data.auth.failCount > 50 ? 'critical' : data.auth.failCount > 10 ? 'warning' : 'healthy'}
-              />
-              <Metric
-                label="Web errors"
-                value={String(data.nginx.errorCount)}
-                delta={data.nginx.errorCount > 0 ? 'Recent 4xx/5xx responses' : 'No web error pressure'}
-                status={data.nginx.errorCount > 5000 ? 'critical' : data.nginx.errorCount > 1000 ? 'warning' : 'healthy'}
-              />
-              <Metric
-                label="Nginx error log"
-                value={String(data.nginx.errorLogCount ?? 0)}
-                delta={(data.nginx.errorLogCount ?? 0) > 0 ? 'Proxy/TLS/upstream signals' : 'No error-log pressure'}
-                status={(data.nginx.errorLogCount ?? 0) > 100 ? 'warning' : 'healthy'}
-              />
-              <Metric
-                label="Firewall blocks"
-                value={String(data.firewall?.blockCount ?? 0)}
-                delta={(data.firewall?.sampleCount ?? 0) < (data.firewall?.blockCount ?? 0) ? `${data.firewall?.sampleCount ?? 0} sampled evidence rows` : 'All counted rows loaded'}
-                status={(data.firewall?.blockCount ?? 0) > 100 ? 'warning' : 'healthy'}
-              />
-              <Metric
-                label="Reporting hosts"
-                value={`${(data.hosts ?? []).filter((host) => host.reporting).length}/${Math.max((data.hosts ?? []).length, 1)}`}
-                delta={(data.hosts ?? []).every((host) => host.reporting) ? 'All configured channels online' : 'One or more channels need attention'}
-                status={(data.hosts ?? []).every((host) => host.reporting) ? 'healthy' : 'warning'}
-              />
-              <Metric
-                label="Kernel issues"
-                value={String(data.kernel?.issueCount ?? 0)}
-                delta={(data.kernel?.criticalCount ?? 0) > 0 ? `${data.kernel?.criticalCount} critical` : 'Warnings and criticals'}
-                status={(data.kernel?.criticalCount ?? 0) > 0 ? 'critical' : (data.kernel?.issueCount ?? 0) > 20 ? 'warning' : 'healthy'}
-              />
-              <Metric
-                label="System issues"
-                value={String(data.system?.issueCount ?? 0)}
-                delta={(data.system?.criticalCount ?? 0) > 0 ? `${data.system?.criticalCount} critical` : 'Journal and failed units'}
-                status={(data.system?.criticalCount ?? 0) > 0 ? 'critical' : (data.system?.issueCount ?? 0) > 20 ? 'warning' : 'healthy'}
-              />
-            </section>
+      {errors.length ? <div className={styles.errorBanner} role="status"><strong>Partial evidence</strong><span>{errors.length} targeted collector{errors.length === 1 ? '' : 's'} failed. Aggregate and last successful values remain visible.</span><details><summary>Details</summary><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></details></div> : null}
 
-            <PentestProgram />
+      <section className={styles.postureHero} aria-labelledby="security-posture-title">
+        <div className={styles.postureMain}><ToneBadge tone={posture} /><p className={styles.eyebrow}>Overall security posture</p><h2 id="security-posture-title">{postureTitle}</h2><p>{postureCopy}</p><div className={styles.heroActions}><button type="button" disabled={actionBusy} onClick={() => runIntent('capture_diagnostics')}>Capture diagnostics</button><button type="button" disabled={actionBusy} onClick={() => runIntent('open_incident')}>Open incident intent</button><a href="/api/incident/bundle?minutes=30">Download evidence bundle</a></div>{actionMessage ? <p className={styles.actionMessage} role="status">{actionMessage}</p> : null}</div>
+        <dl className={styles.postureFacts}><div><dt>Review queue</dt><dd>{threats.length}</dd><span>{criticalCount} incident · {attentionCount} attention</span></div><div><dt>Host coverage</dt><dd>{reportingHosts}/{coverageTotal || '—'}</dd><span>registered channels reporting</span></div><div><dt>Active bans</dt><dd>{data.fail2ban.banned}</dd><span>{data.fail2ban.available ? 'Fail2ban available' : 'control unavailable or unreported'}</span></div><div><dt>Firewall blocks</dt><dd>{data.firewall?.blockCount ?? 0}</dd><span>{data.firewall?.sampleCount ?? 0} sampled records</span></div></dl>
+      </section>
 
-            <section className={card + ' overflow-hidden'}>
-              <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
-                <SectionTitle title="Server Reporting" subtitle={`Source: ${data.source || 'security api'}`} />
-              </div>
-              <div className="grid gap-0 divide-y divide-white/10 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-                {(data.hosts ?? []).map((host) => (
-                  <div key={host.id} className="p-5">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-[14px] font-semibold text-slate-100">{host.label}</div>
-                        <div className="text-[11px] text-slate-500">{host.id}</div>
-                      </div>
-                      <StatusBadge label={host.reporting ? 'Reporting' : 'Offline'} status={host.reporting ? 'healthy' : 'warning'} />
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(host.sources).map(([source, ok]) => (
-                        <span key={source} className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${ok ? 'border-[rgba(34,197,94,0.28)] bg-[rgba(34,197,94,0.08)] text-[var(--sev-healthy)]' : 'border-white/10 bg-white/[0.03] text-slate-500'}`}>
-                          {source}
-                        </span>
-                      ))}
-                    </div>
-                    {host.error && <div className="mt-3 truncate font-mono text-[11px] text-[var(--sev-warning)]" title={host.error}>{host.error}</div>}
-                  </div>
-                ))}
-              </div>
-              {(data.registeredHosts ?? []).some((host) => !host.reporting) && (
-                <div className="border-t border-white/10 px-5 py-4 text-[12px] text-slate-400">
-                  Not yet wired for security telemetry: {(data.registeredHosts ?? []).filter((host) => !host.reporting).map((host) => host.label).join(', ')}
-                </div>
-              )}
-            </section>
+      <div className={styles.workspace} id="security-workspace">
+        <div className={styles.mainColumn}>
+          <section className={`${styles.panel} ${styles.threatPanel}`} aria-labelledby="threat-title"><SectionHeading eyebrow="Triage" title="Active threats and review signals" copy="Ranked by impact, collector confidence, coverage risk, and operator actionability." action={<Link href="/incidents">Incident console →</Link>} />
+            {threats.length ? <ol className={styles.threatList}>{threats.map((item, index) => <li key={item.id}><button type="button" data-selected={currentSelection.id === item.id} onClick={(event) => inspect(item, event)}><span className={styles.rank}>{String(index + 1).padStart(2, '0')}</span><span className={styles.threatBody}><span><ToneBadge tone={item.tone} label={item.state} /><ConfidenceBadge value={item.confidence} />{item.time ? <time>{relativeTime(item.time)}</time> : null}</span><strong>{item.title}</strong><small>{item.summary}</small></span><span aria-hidden="true">→</span></button></li>)}</ol> : <div className={styles.emptyState}><ToneBadge tone={posture === 'nominal' ? 'nominal' : 'unknown'} label={posture === 'nominal' ? 'No ranked signal' : 'Assessment unavailable'} /><strong>{posture === 'nominal' ? 'No action item meets the queue rules' : 'Collector coverage is insufficient'}</strong><p>{posture === 'nominal' ? 'Unobserved activity remains unknown and is not presented as safe.' : 'Restore collection before interpreting zero counts.'}</p></div>}
+          </section>
 
-            <section className={card + ' overflow-hidden'}>
-              <div className="border-b border-white/10 bg-[var(--bg-2)] px-5 py-4">
-                <SectionTitle title="Triage Queue" subtitle="Summary to evidence to next action" />
-              </div>
-              <div className="divide-y divide-white/10">
-                {threats.map((threat) => (
-                  <div key={threat.id} className="grid gap-4 px-5 py-4 xl:grid-cols-[1fr_1.2fr_1fr]">
-                    <div>
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <StatusBadge label={severityLabel(threat.severity)} status={threat.severity} pulse={threat.severity === 'critical'} />
-                        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300">{threat.source}</span>
-                      </div>
-                      <div className="text-[15px] font-semibold text-slate-100">{threat.title}</div>
-                      <div className="mt-1 text-[12px] text-slate-500">{threat.status}</div>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Signal</div>
-                      <div className="mt-2 text-[13px] leading-5 text-slate-300">{threat.signal}</div>
-                      {threat.evidence.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {threat.evidence.slice(0, 3).map((line, i) => (
-                            <span key={`${threat.id}-${i}`} className="max-w-full truncate rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 font-mono text-[10px] text-slate-500" title={line}>
-                              {line}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Next action</div>
-                      <div className="mt-2 text-[13px] leading-5 text-slate-300">{threat.action}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
+          <section className={`${styles.panel} ${styles.topology}`} aria-labelledby="topology-title"><SectionHeading eyebrow="Supported relationships" title="Host and exposure topology" copy="External signals flow to registered host channels and their actual reporting sources; no application dependency is inferred." action={<Link href="/estate">Estate →</Link>} />
+            <div className={styles.topologyGrid}><div className={styles.topologyColumn}><h3>Observed edge</h3><button type="button" onClick={(event) => inspect(threats.find((item) => item.id === 'edge:firewall') ?? buildKillChain(data, evidence)[0].item, event)}><span>FW</span><strong>Firewall</strong><small>{data.firewall?.blockCount ?? 0} blocks</small></button><button type="button" onClick={(event) => inspect(threats.find((item) => item.id === 'web:errors') ?? buildKillChain(data, evidence)[0].item, event)}><span>WEB</span><strong>Nginx edge</strong><small>{data.nginx.errorCount + (data.nginx.errorLogCount ?? 0)} errors</small></button><button type="button" onClick={(event) => inspect(threats.find((item) => item.id === 'auth:failures') ?? buildKillChain(data, evidence)[1].item, event)}><span>SSH</span><strong>Authentication</strong><small>{data.auth.failCount} failures</small></button></div><div className={styles.topologyArrow} aria-hidden="true">→</div><div className={styles.topologyColumn}><h3>Registered hosts</h3>{(data.registeredHosts ?? []).length ? (data.registeredHosts ?? []).map((host) => <button type="button" key={host.id} data-reporting={host.reporting} onClick={(event) => inspect({ id: `host:${host.id}`, title: host.label, category: 'Host coverage', tone: host.reporting ? 'nominal' : 'attention', state: host.reporting ? 'Reporting' : 'Coverage gap', confidence: 'confirmed', confidenceCopy: 'This state comes from the registered security channel coverage.', summary: host.reporting ? 'The registered host security channel is reporting.' : 'The registered host security channel is not reporting.', priority: 0, parsed: [['Host', host.label], ['Reporting', host.reporting ? 'Yes' : 'No'], ['Channel', host.securityChannel]], raw: [], context: [['Supported relationship', 'Host to declared security channel'], ['Attack evidence', host.reporting ? 'Not implied' : 'Unavailable from this gap']], action: host.reporting ? 'Continue routine collection.' : 'Restore the registered channel before assessing this host.', href: '/estate' }, event)}><span>{host.label.split(/\s+/).map((part) => part[0]).join('').slice(0, 3)}</span><strong>{host.label}</strong><small>{host.reporting ? 'Reporting' : 'Not reporting'}</small></button>) : <p className={styles.noNodes}>No registered host coverage returned.</p>}</div><div className={styles.topologyArrow} aria-hidden="true">→</div><div className={styles.topologyColumn}><h3>Declared sources</h3>{(data.hosts ?? []).length ? (data.hosts ?? []).map((host) => <div className={styles.sourceGroup} key={host.id}><strong>{host.label}</strong><span>{Object.entries(host.sources).filter(([, available]) => available).map(([source]) => source).join(' · ') || 'No sources available'}</span></div>) : <p className={styles.noNodes}>No host source metadata returned.</p>}</div></div>
+          </section>
 
-            <section className="grid gap-4 xl:grid-cols-2">
-              <EvidencePanel title="Auth Evidence" lines={data.auth.recent} tone={data.auth.failCount > 10 ? 'warning' : 'neutral'} />
-              <EvidencePanel title="Nginx Evidence" lines={data.nginx.recentErrors} tone={data.nginx.errorCount > 1000 ? 'warning' : 'neutral'} />
-            </section>
+          <section className={`${styles.panel} ${styles.killChain}`} aria-labelledby="killchain-title"><SectionHeading eyebrow="Evidence boundaries" title="Attack progression" copy="Observed events are not automatically treated as one attacker path. Inferred joins and unobserved stages stay explicit." />
+            <ol>{killChain.map((stage, index) => <li key={stage.id}><button type="button" data-confidence={stage.status} onClick={(event) => inspect(stage.item, event)}><span className={styles.stageNumber}>{index + 1}</span><ConfidenceBadge value={stage.status} /><strong>{stage.label}</strong><small>{stage.state}</small><p>{stage.copy}</p></button></li>)}</ol>
+          </section>
 
-            <section className="grid gap-4 xl:grid-cols-3">
-              <RollupList title="Auth By Host" items={data.auth.byHost ?? []} />
-              <RollupList title="Auth Top Users" items={data.auth.topUsers ?? []} />
-              <RollupList title="Web Error Status" items={data.nginx.topStatuses ?? []} />
-            </section>
-
-            <section className="grid gap-4 xl:grid-cols-3">
-              <RollupList title="Web Errors By Host" items={data.nginx.byHost ?? []} />
-              <RollupList title="Web Top Sources" items={data.nginx.topSources ?? []} />
-              <RollupList title="Web Top Paths" items={data.nginx.topPaths ?? []} />
-            </section>
-
-            <section className="grid gap-4 xl:grid-cols-2">
-              <EvidencePanel title="Nginx Error Log" lines={data.nginx.recentErrorLogs ?? []} tone={(data.nginx.errorLogCount ?? 0) > 100 ? 'warning' : 'neutral'} />
-              <EvidencePanel title="SSH Accepts" lines={data.auth.recentAccepts ?? []} />
-            </section>
-
-            <section className="grid gap-4 xl:grid-cols-2">
-              <EvidencePanel title="Sudo Evidence" lines={data.auth.recentSudo ?? []} />
-              <EvidencePanel title="SOC Timeline" lines={data.timeline?.recent ?? []} tone={activeThreats ? 'warning' : 'neutral'} />
-            </section>
-
-            <section className="grid gap-4 xl:grid-cols-3">
-              <RollupList title="Firewall By Host" items={(data.firewall?.byHost ?? []).map((host) => ({ key: host.key, label: host.label, count: host.count, sampled: host.sampled }))} />
-              <RollupList title="Firewall Top Ports" items={data.firewall?.topPorts ?? []} />
-              <RollupList title="Firewall Top Sources" items={data.firewall?.topSources ?? []} />
-            </section>
-
-            <EvidencePanel title="Firewall Evidence" lines={data.firewall?.recent ?? []} tone={(data.firewall?.blockCount ?? 0) > 100 ? 'warning' : 'neutral'} />
-
-            <section className="grid gap-4 xl:grid-cols-2">
-              <EvidencePanel title="Kernel Issues" lines={data.kernel?.recent ?? []} tone={(data.kernel?.criticalCount ?? 0) > 0 ? 'critical' : (data.kernel?.issueCount ?? 0) > 20 ? 'warning' : 'neutral'} />
-              <EvidencePanel title="System Issues" lines={data.system?.recent ?? []} tone={(data.system?.criticalCount ?? 0) > 0 ? 'critical' : (data.system?.issueCount ?? 0) > 20 ? 'warning' : 'neutral'} />
-            </section>
-
-            <section className="grid gap-4 xl:grid-cols-2">
-              <RollupList title="Kernel Issues By Host" items={data.kernel?.byHost ?? []} />
-              <RollupList title="System Issues By Host" items={data.system?.byHost ?? []} />
-            </section>
-
-            {data.fail2ban.available && data.fail2ban.bannedIPs.length > 0 && (
-              <div className={card + ' p-5'}>
-                <SectionTitle title="Contained SSH Sources" subtitle={`${data.fail2ban.banned} active fail2ban ban${data.fail2ban.banned === 1 ? '' : 's'}`} />
-                <div className="flex flex-wrap gap-2">
-                  {data.fail2ban.bannedIPs.map((ip) => (
-                    <span key={ip} className="rounded-full border border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.08)] px-3 py-1 font-mono text-[12px] font-semibold text-[var(--sev-critical)]">
-                      {ip}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="text-right text-[11px] text-slate-500">
-              Last checked: {new Date(data.checkedAt).toLocaleTimeString()} · refreshes every 60s
-            </div>
-          </>
-        )}
+          <section className={`${styles.panel} ${styles.containment}`} aria-labelledby="containment-title"><SectionHeading eyebrow="Controls" title="Containment and next actions" copy="Current controls are evidence, not attribution. Changes remain deliberate and audited." />
+            <div className={styles.containmentGrid}><article data-state={data.fail2ban.available ? 'active' : 'unknown'}><span>01</span><div><strong>Fail2ban</strong><p>{data.fail2ban.available ? `${data.fail2ban.banned} active bans; ${data.fail2ban.totalFailed} failures recorded.` : 'Control state is unavailable or not reported.'}</p></div></article><article data-state={(data.firewall?.blockCount ?? 0) > 0 ? 'active' : 'nominal'}><span>02</span><div><strong>Firewall policy</strong><p>{(data.firewall?.blockCount ?? 0) > 0 ? `${data.firewall?.blockCount} deny events show the control is active.` : 'No deny event appears in the current bounded sample.'}</p></div></article><article data-state={reportingHosts === coverageTotal && coverageTotal > 0 ? 'nominal' : 'unknown'}><span>03</span><div><strong>Collection coverage</strong><p>{reportingHosts}/{coverageTotal || '—'} registered host channels are reporting.</p></div></article></div>
+            <div className={styles.nextAction}><div><p className={styles.eyebrow}>Recommended next action</p><strong>{currentSelection.action}</strong></div><button type="button" disabled={actionBusy} onClick={() => runIntent(criticalCount ? 'open_incident' : 'capture_diagnostics')}>{criticalCount ? 'Record incident intent' : 'Capture diagnostics intent'}</button></div>
+          </section>
+        </div>
+        <EvidenceInspector item={currentSelection} tab={tab} setTab={setTab} onClose={() => setSelected(null)} returnFocus={returnFocus} open={selected !== null} />
       </div>
-    </AppShell>
-  );
+    </div>
+  </AppShell>;
 }

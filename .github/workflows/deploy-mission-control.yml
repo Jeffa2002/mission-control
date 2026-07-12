@@ -68,9 +68,13 @@ jobs:
           . /etc/infisical/generated/mission-control.runtime.env
           set +a
           for attempt in $(seq 1 20); do
-            if html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)" \
-              && printf "%s" "$html" | grep -qi "operational brief" \
-              && printf "%s" "$html" | grep -q "Needs action" \
+            if dashboard_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)" \
+              && security_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/security)" \
+              && office_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/office)" \
+              && printf "%s" "$dashboard_html" | grep -qi "operational brief" \
+              && printf "%s" "$dashboard_html" | grep -q "Needs action" \
+              && printf "%s" "$security_html" | grep -q "Security Threat Surface" \
+              && printf "%s" "$office_html" | grep -q "Active roster" \
               && curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null; then
               exit 0
             fi

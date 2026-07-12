@@ -12,11 +12,16 @@
 import { useEffect, useState } from 'react';
 import { AppShell, SectionTitle, StatusBadge, card, card2, muted } from '../../components/ops-ui';
 import { AgentActivityDrawer } from '../../components/AgentActivityDrawer';
+import { buildActiveRoster, type RawAgentStatus, type RosterHealth } from './roster';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AgentStatus {
   id: string;
+  canonicalId: string;
+  sourceId: string;
+  sourceIds: string[];
+  suppressedSourceIds: string[];
   label: string;
   emoji: string;
   busy: boolean;
@@ -364,7 +369,6 @@ function DeskCard({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: Agent
 function FloorSummary({ agents }: { agents: AgentStatus[] }) {
   const working = agents.filter((a) => a.status === 'Working').length;
   const idle    = agents.filter((a) => a.status === 'Idle').length;
-  const offline = agents.filter((a) => a.status === 'Offline').length;
   const lastActive = agents
     .map((a) => a.lastSeen)
     .filter(Boolean)
@@ -376,7 +380,7 @@ function FloorSummary({ agents }: { agents: AgentStatus[] }) {
       <div className={card2 + ' p-4'}>
         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Floor Load</div>
         <div className="mt-2 text-2xl font-bold text-slate-100">{agents.length}</div>
-        <div className={muted}>Registered operators</div>
+        <div className={muted}>Active roster</div>
       </div>
       <div className={card2 + ' p-4'}>
         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Active</div>
@@ -392,7 +396,7 @@ function FloorSummary({ agents }: { agents: AgentStatus[] }) {
           <div className="text-2xl font-bold text-slate-100">{idle}</div>
           <StatusBadge label="idle" status="warning" />
         </div>
-        <div className={muted}>{offline} offline</div>
+        <div className={muted}>Seen within 20 minutes</div>
       </div>
       <div className={card2 + ' p-4'}>
         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Last Signal</div>
@@ -426,6 +430,8 @@ const KEYFRAMES = `
 export default function OfficePage() {
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [lastFetch, setLastFetch] = useState<string>('');
+  const [rosterHealth, setRosterHealth] = useState<RosterHealth | null>(null);
+  const [suppressedCount, setSuppressedCount] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState<AgentStatus | null>(null);
@@ -435,18 +441,11 @@ export default function OfficePage() {
       const res = await fetch('/api/agents/status', { cache: 'no-store' });
       if (!res.ok) throw new Error(await res.text());
       const j = await res.json();
-      const rawAgents: AgentStatus[] = j.agents ?? [];
-      // H4: Override status if last_seen is stale (> 1 hour)
-      const now = Date.now();
-      const corrected = rawAgents.map((agent) => {
-        if (agent.status === 'Working' && agent.lastSeen) {
-          const diffH = (now - new Date(agent.lastSeen).getTime()) / 3_600_000;
-          if (diffH > 1) return { ...agent, status: 'Offline' as const };
-        }
-        return agent;
-      });
-      setAgents(corrected);
-      setLastFetch(j.ts ?? new Date().toISOString());
+      const roster = buildActiveRoster((j.agents ?? []) as RawAgentStatus[], j.ts);
+      setAgents(roster.agents);
+      setRosterHealth(roster.health);
+      setSuppressedCount(roster.suppressedCount);
+      setLastFetch(typeof j.ts === 'string' ? j.ts : '');
       setErr(null);
     } catch (e: any) {
       setErr(String(e?.message || e));
@@ -470,13 +469,24 @@ export default function OfficePage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <SectionTitle
             title="Digital Office"
-            subtitle="Agent desks with live work state, activity drill-in, and stale-session correction."
+            subtitle="Canonical active roster with live work state and activity drill-in."
           />
           <div className="flex flex-col items-end gap-2 text-xs text-slate-400">
-            <StatusBadge label={loading ? 'syncing' : 'live 10s'} status={loading ? 'info' : 'healthy'} pulse={!loading} />
+            <StatusBadge
+              label={loading ? 'syncing' : rosterHealth?.state === 'fresh' ? 'live 10s' : rosterHealth?.state ?? 'unknown'}
+              status={loading ? 'info' : rosterHealth?.state === 'fresh' ? 'healthy' : rosterHealth?.state === 'clock-skew' ? 'critical' : 'warning'}
+              pulse={!loading && rosterHealth?.state === 'fresh'}
+            />
             {lastFetch ? <span>{new Date(lastFetch).toLocaleTimeString()}</span> : null}
           </div>
         </div>
+
+        {!loading && rosterHealth && rosterHealth.state !== 'fresh' && (
+          <div className="rounded-[12px] border border-[rgba(245,158,11,0.30)] bg-[rgba(245,158,11,0.08)] p-4 text-sm text-[var(--sev-warning)]" role="status">
+            <strong>Roster telemetry {rosterHealth.state}:</strong> {rosterHealth.detail}
+            {rosterHealth.futureLastSeenIds.length > 0 && <div className="mt-2 text-xs opacity-80">Excluded future timestamps: {rosterHealth.futureLastSeenIds.join(', ')}</div>}
+          </div>
+        )}
 
         {/* Floor summary */}
         {agents.length > 0 && <FloorSummary agents={agents} />}
@@ -499,22 +509,22 @@ export default function OfficePage() {
           {/* Empty state */}
           {!loading && agents.length === 0 && !err && (
             <div className={card + ' col-span-full p-10 text-center text-sm text-slate-400'}>
-              No agents found. Check the <code>/agent-data</code> mount.
+              {rosterHealth?.state === 'fresh' ? 'No active agents in the last 20 minutes.' : 'Active roster unavailable until the collector snapshot is fresh.'}
             </div>
           )}
         </div>
 
         <AgentActivityDrawer
-          agent={selectedAgent}
+          agent={selectedAgent ? { ...selectedAgent, id: selectedAgent.sourceId } : null}
           open={!!selectedAgent}
           onClose={() => setSelectedAgent(null)}
         />
 
         <div className={card2 + ' flex flex-wrap gap-4 p-3 text-xs text-slate-400'}>
-          <span><span style={{ color: '#33ffcc' }}>Working</span>: active tool call in last 45s</span>
-          <span><span style={{ color: '#ffd060' }}>Idle</span>: last activity 45s-20m ago</span>
-          <span><span style={{ color: '#667799' }}>Offline</span>: no activity in 20m+</span>
-          <span className="ml-auto">Source: session data</span>
+          <span><span style={{ color: '#33ffcc' }}>Working</span>: upstream working and seen within 2m</span>
+          <span><span style={{ color: '#ffd060' }}>Idle</span>: upstream active and seen within 20m</span>
+          {suppressedCount > 0 && <span>{suppressedCount} older alias representation{suppressedCount === 1 ? '' : 's'} suppressed</span>}
+          <span className="ml-auto">Source: one-minute collector snapshot</span>
         </div>
       </div>
     </AppShell>
