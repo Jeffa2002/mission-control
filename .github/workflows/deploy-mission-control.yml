@@ -71,10 +71,12 @@ jobs:
             if dashboard_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)" \
               && security_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/security)" \
               && office_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/office)" \
+              && teams_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/teams)" \
               && printf "%s" "$dashboard_html" | grep -qi "operational brief" \
               && printf "%s" "$dashboard_html" | grep -q "Needs action" \
               && printf "%s" "$security_html" | grep -q "Security Threat Surface" \
               && printf "%s" "$office_html" | grep -qi "active roster" \
+              && printf "%s" "$teams_html" | grep -q "Team Directory" \
               && curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null; then
               exit 0
             fi
