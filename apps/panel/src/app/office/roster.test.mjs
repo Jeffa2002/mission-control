@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildActiveRoster } from './roster.ts';
+import { buildActiveRoster, buildTeamDirectory } from './roster.ts';
 
 const now = Date.parse('2026-07-13T08:00:00.000Z');
 const snapshot = '2026-07-13T07:59:30.000Z';
@@ -73,4 +73,61 @@ test('ordering is working, newest, busy, task, then canonical id', () => {
     agent('zulu', { status: 'Working', lastSeen: '2026-07-13T07:59:00.000Z' }),
   ], snapshot, now);
   assert.deepEqual(result.agents.map((item) => item.canonicalId), ['newer', 'busy', 'task', 'alpha', 'zulu', 'idle']);
+});
+
+test('team role directory is stable and overlays inactive canonical identities', () => {
+  const result = buildTeamDirectory([
+    agent('main', { status: 'Working', lastSeen: '2026-07-13T07:59:00.000Z' }),
+    agent('designer', { status: 'Offline', lastSeen: '2026-07-13T07:59:00.000Z' }),
+    agent('writer', { status: 'Idle', lastSeen: '2026-07-13T07:20:00.000Z' }),
+  ], snapshot, now);
+  assert.deepEqual(result.roles.map((entry) => entry.canonicalId), ['archie', 'nova', 'scout', 'secspy', 'dev', 'writer', 'travel']);
+  assert.equal(result.roles.find((entry) => entry.canonicalId === 'archie')?.availability, 'Working');
+  assert.equal(result.roles.find((entry) => entry.canonicalId === 'nova')?.availability, 'Inactive');
+  assert.equal(result.roles.find((entry) => entry.canonicalId === 'writer')?.availability, 'Inactive');
+  assert.equal(result.roles.find((entry) => entry.canonicalId === 'scout')?.identity, null);
+  assert.equal(result.roles.find((entry) => entry.canonicalId === 'scout')?.availability, 'Inactive');
+});
+
+test('active unassigned identities remain distinct and aliases stay in history', () => {
+  const result = buildTeamDirectory([
+    agent('main', { lastSeen: '2026-07-13T07:58:00.000Z' }),
+    agent('archie', { lastSeen: '2026-07-13T07:59:00.000Z' }),
+    agent('archie-pro', { status: 'Working', lastSeen: '2026-07-13T07:59:30.000Z' }),
+    agent('quin', { status: 'Idle', lastSeen: '2026-07-13T07:58:30.000Z' }),
+    agent('unknown-agent', { status: 'Idle', lastSeen: '2026-07-13T07:58:00.000Z' }),
+    agent('writer', { status: 'Idle', lastSeen: '2026-07-13T07:57:00.000Z' }),
+  ], snapshot, now);
+  assert.deepEqual(result.unassignedActive.map((item) => item.canonicalId), ['archie-pro', 'quin', 'unknown-agent']);
+  assert.ok(!result.unassignedActive.some((item) => item.canonicalId === 'writer'));
+  assert.deepEqual(result.aliasHistory.map(({ sourceId, canonicalId }) => [sourceId, canonicalId]), [['main', 'archie']]);
+});
+
+test('stale snapshots keep roles visible with unconfirmed availability', () => {
+  const result = buildTeamDirectory([agent('dev', { status: 'Working', lastSeen: '2026-07-13T07:59:00.000Z' })], '2026-07-13T07:57:00.000Z', now);
+  assert.equal(result.health.state, 'stale');
+  assert.equal(result.active.length, 0);
+  assert.equal(result.roles.length, 7);
+  assert.ok(result.roles.every((entry) => entry.availability === 'Unconfirmed'));
+});
+
+test('team clock skew excludes future winners while retaining valid aliases', () => {
+  const result = buildTeamDirectory([
+    agent('designer', { status: 'Working', lastSeen: '2026-07-13T08:06:00.000Z' }),
+    agent('nova', { status: 'Idle', lastSeen: '2026-07-13T07:58:00.000Z' }),
+  ], snapshot, now);
+  assert.equal(result.health.state, 'clock-skew');
+  assert.equal(result.roles.find((entry) => entry.canonicalId === 'nova')?.identity?.sourceId, 'nova');
+  assert.equal(result.roles.find((entry) => entry.canonicalId === 'nova')?.availability, 'Available');
+});
+
+test('team active now orders working, available, newest, then canonical id', () => {
+  const result = buildTeamDirectory([
+    agent('available-new', { status: 'Idle', lastSeen: '2026-07-13T07:59:50.000Z' }),
+    agent('working-new', { status: 'Working', lastSeen: '2026-07-13T07:59:30.000Z' }),
+    agent('working-alpha', { status: 'Working', lastSeen: '2026-07-13T07:59:00.000Z', busy: false }),
+    agent('working-zulu', { status: 'Working', lastSeen: '2026-07-13T07:59:00.000Z', busy: true, currentTask: 'busy must not change Teams order' }),
+    agent('available-old', { status: 'Idle', lastSeen: '2026-07-13T07:58:00.000Z' }),
+  ], snapshot, now);
+  assert.deepEqual(result.active.map((item) => item.canonicalId), ['working-new', 'working-alpha', 'working-zulu', 'available-new', 'available-old']);
 });

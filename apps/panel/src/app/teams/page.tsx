@@ -1,237 +1,96 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AppShell, SectionTitle, StatusBadge as OpsStatusBadge, card, card2, muted } from '../../components/ops-ui';
+import { useCallback, useEffect, useState } from 'react';
+import { AppShell } from '../../components/ops-ui';
+import { buildTeamDirectory, type CanonicalAgentIdentity, type CanonicalAvailability, type RawAgentStatus, type TeamDirectoryProjection } from '../office/roster';
+import styles from './teams.module.css';
 
-interface Agent {
-  id: string;
-  label?: string;
-  emoji?: string;
-  role?: string;
-  model?: string;
-  status: string;
-  busy?: boolean;
-  lastSeen?: string | null;
-  currentTask?: string | null;
+function relativeTime(value?: string | null) {
+  if (!value) return 'No valid signal';
+  const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 60_000));
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
-export const dynamic = 'force-dynamic';
-
-function relTime(iso: string | null | undefined): string {
-  if (!iso) return 'never';
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+function AvailabilityBadge({ availability }: { availability: CanonicalAvailability }) {
+  return <span className={styles.badge} data-availability={availability.toLowerCase()}><span aria-hidden="true" />{availability}</span>;
 }
 
-// Stale = last seen more than 7 days ago (168 hours)
-function isStale(iso: string | null | undefined): boolean {
-  if (!iso) return false;
-  const diffH = (Date.now() - new Date(iso).getTime()) / 3_600_000;
-  return diffH > 168;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const s = (status ?? '').toLowerCase();
-  const cfg = s === 'working'
-    ? { label: 'Working', color: 'var(--sev-healthy)', bg: 'rgba(34,197,94,0.10)', border: 'rgba(34,197,94,0.25)' }
-    : s === 'idle'
-      ? { label: 'Idle', color: 'var(--sev-warning)', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.20)' }
-      : { label: 'Offline', color: 'var(--text-3)', bg: 'rgba(255,255,255,0.04)', border: 'rgba(255,255,255,0.10)' };
-
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      padding: '3px 10px', borderRadius: 999,
-      fontSize: 11, fontWeight: 700, letterSpacing: 0.2,
-      color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}`,
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.color, display: 'inline-block' }} />
-      {cfg.label}
-    </span>
-  );
+function PersonLink({ identity, children }: { identity: CanonicalAgentIdentity; children: React.ReactNode }) {
+  return <Link href={`/agents/${encodeURIComponent(identity.canonicalId)}`}>{children}</Link>;
 }
 
 export default function TeamsPage() {
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [directory, setDirectory] = useState<TeamDirectoryProjection>(() => buildTeamDirectory([], null));
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      const r = await fetch('/api/agents/status', { cache: 'no-store' });
-      const j = await r.json();
-      setAgents(j.agents ?? []);
-    } catch {
-      setAgents([]);
+      const response = await fetch('/api/agents/status', { cache: 'no-store' });
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      setDirectory(buildTeamDirectory((data.agents ?? []) as RawAgentStatus[], data.ts));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to load collector snapshot.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 15_000);
-    return () => clearInterval(t);
-  }, []);
+    const timer = window.setInterval(load, 15_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
-  const working = agents.filter((a) => (a.status ?? '').toLowerCase() === 'working');
-  const idle = agents.filter((a) => (a.status ?? '').toLowerCase() === 'idle');
-  const offline = agents.filter((a) => (a.status ?? '').toLowerCase() === 'offline');
-  const stale = agents.filter((a) => isStale(a.lastSeen));
-  const liveRatio = agents.length ? Math.round((working.length / agents.length) * 100) : 0;
-  const priority = working[0]?.currentTask
-    ? `${working[0].label ?? working[0].id}: ${working[0].currentTask}`
-    : stale.length
-      ? `${stale.length} inactive agent${stale.length === 1 ? '' : 's'} need review`
-      : idle.length
-        ? `${idle.length} idle agent${idle.length === 1 ? '' : 's'} available`
-        : 'No active operators';
+  const working = directory.active.filter((identity) => identity.availability === 'Working').length;
+  const available = directory.active.filter((identity) => identity.availability === 'Available').length;
+  const freshnessLabel = loading ? 'Loading collector…' : error ? 'Collector request failed' : directory.health.state === 'fresh' ? `Fresh · ${relativeTime(directory.health.snapshotAt)}` : `${directory.health.state} · ${directory.health.detail}`;
 
-  return (
-    <AppShell>
-      <div className="space-y-8">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <SectionTitle
-            title="Team Command"
-            subtitle="Live operator roster, current work, and stale-session review queue."
-          />
-          <Link href="/office" className="rounded-[10px] border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-[var(--accent)] transition hover:border-[rgba(103,213,255,0.35)] hover:bg-[rgba(103,213,255,0.08)]">
-            Live Office
-          </Link>
-        </div>
+  return <AppShell>
+    <div className={styles.directory}>
+      <header className={styles.header}>
+        <div><p className={styles.eyebrow}>Canonical people and roles</p><h1>Team Directory</h1><p>Stable role ownership with current availability overlaid from the shared roster model.</p></div>
+        <div className={styles.freshness} data-state={error ? 'error' : directory.health.state}><span>{freshnessLabel}</span><button type="button" onClick={load}>Refresh</button></div>
+      </header>
 
-        {loading ? (
-          <div className={card + ' p-8 text-center text-slate-400 text-sm'}>Loading agent data…</div>
-        ) : agents.length === 0 ? (
-          <div className={card + ' p-8 text-center'}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>🤖</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-2)' }}>No agents found</div>
-            <div className={'mt-2 text-sm ' + muted}>
-              agent-status.json not found or empty. Agents appear here when running.
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="grid gap-3 lg:grid-cols-[1.2fr_0.9fr_0.9fr]">
-              <div className={card2 + ' p-4'}>
-                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Current Focus</div>
-                <div className="mt-2 line-clamp-2 text-[15px] font-semibold leading-6 text-slate-100">{priority}</div>
-                <div className={muted + ' mt-2'}>Refresh cadence: 15 seconds</div>
-              </div>
-              <div className={card2 + ' p-4'}>
-                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Live Load</div>
-                <div className="mt-2 flex items-end gap-2">
-                  <div className="text-3xl font-bold text-slate-100">{liveRatio}%</div>
-                  <div className="pb-1 text-xs text-slate-400">{working.length}/{agents.length} working</div>
-                </div>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                  <div className="h-full rounded-full bg-[var(--sev-healthy)]" style={{ width: `${liveRatio}%` }} />
-                </div>
-              </div>
-              <div className={card2 + ' p-4'}>
-                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Roster State</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <OpsStatusBadge label={`${working.length} working`} status="healthy" pulse={working.length > 0} />
-                  <OpsStatusBadge label={`${idle.length} idle`} status="warning" />
-                  <OpsStatusBadge label={`${offline.length} offline`} status="neutral" />
-                </div>
-                {stale.length > 0 ? <div className="mt-3 text-xs text-[var(--sev-warning)]">{stale.length} inactive beyond 7 days</div> : null}
-              </div>
-            </div>
+      {error ? <div className={styles.error} role="status"><strong>Collector unavailable.</strong> The configured role directory remains visible; availability reflects the last successful snapshot, if any.</div> : null}
 
-            {/* Agent grid */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {agents.map((agent) => {
-                const stale = isStale(agent.lastSeen);
-                return (
-                <Link key={agent.id} href={`/agents/${agent.id}`} style={{ textDecoration: 'none' }}>
-                  <div
-                    className={card}
-                    style={{
-                      padding: '16px', cursor: 'pointer',
-                      transition: 'background 0.12s, border-color 0.12s',
-                      opacity: stale ? 0.6 : 1,
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
-                      (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.18)';
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = '';
-                      (e.currentTarget as HTMLElement).style.borderColor = '';
-                    }}
-                  >
-                    {/* Header */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                      <div style={{
-                        width: 44, height: 44, borderRadius: 12,
-                        background: 'rgba(103,213,255,0.08)', border: '1px solid rgba(103,213,255,0.18)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0,
-                        filter: stale ? 'grayscale(0.7)' : undefined,
-                      }}>
-                        {agent.emoji ?? '🤖'}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
-                          {agent.label ?? agent.id}
-                          {stale && (
-                            <span style={{
-                              fontSize: 10, padding: '1px 6px', borderRadius: 4,
-                              background: 'rgba(100,116,139,0.25)', color: '#94a3b8',
-                              fontWeight: 600, flexShrink: 0,
-                            }}>
-                              Inactive
-                            </span>
-                          )}
-                        </div>
-                        {agent.role && (
-                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{agent.role}</div>
-                        )}
-                      </div>
-                    </div>
+      <section className={styles.summary} aria-label="Team availability summary">
+        <div><span>Active roles</span><strong>{directory.active.filter((identity) => directory.roles.some((role) => role.canonicalId === identity.canonicalId)).length}</strong><small>{working} working · {available} available</small></div>
+        <div><span>Configured roles</span><strong>{directory.roles.length}</strong><small>Always visible</small></div>
+        <div><span>Needs assignment</span><strong>{directory.unassignedActive.length}</strong><small>Active canonical identities</small></div>
+      </section>
 
-                    {/* Status badge */}
-                    <StatusBadge status={agent.status} />
+      <section className={styles.panel} aria-labelledby="active-now-title">
+        <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>Availability</p><h2 id="active-now-title">Active now</h2><p>Working first, then available; only fresh canonical signals within 20 minutes.</p></div><Link href="/office">Open Digital Office →</Link></div>
+        {loading ? <p className={styles.empty}>Loading current availability…</p> : directory.active.length ? <ul className={styles.activeList}>{directory.active.map((identity) => <li key={identity.canonicalId}><PersonLink identity={identity}><span className={styles.avatar}>{identity.emoji}</span><span><strong>{identity.label}</strong><small>{identity.currentTask || `Last signal ${relativeTime(identity.lastSeen)}`}</small></span><AvailabilityBadge availability={identity.availability} /></PersonLink></li>)}</ul> : <p className={styles.empty}>{directory.health.state === 'fresh' ? 'No canonical identity is active in the current 20-minute window.' : 'Availability is unconfirmed until a fresh collector snapshot arrives.'}</p>}
+      </section>
 
-                    {/* Model */}
-                    {agent.model && (
-                      <div style={{
-                        marginTop: 10, fontSize: 11,
-                        color: 'var(--accent)', opacity: 0.8,
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>
-                        {agent.model}
-                      </div>
-                    )}
+      <section className={styles.panel} aria-labelledby="role-directory-title">
+        <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>Ownership</p><h2 id="role-directory-title">Role directory</h2><p>Configured roles stay visible through inactive, stale, empty, and error states.</p></div></div>
+        <div className={styles.roleGrid}>{directory.roles.map((entry) => {
+          const identity = entry.identity;
+          const content = <><div className={styles.roleTop}><span className={styles.avatar}>{identity?.emoji || entry.emoji}</span><AvailabilityBadge availability={entry.availability} /></div><h3>{entry.role}</h3><strong>{entry.name}</strong><p>{identity?.currentTask || identity?.inactiveReason || (entry.availability === 'Unconfirmed' ? 'Availability is unconfirmed.' : 'No current task reported.')}</p><small>{identity?.lastSeen ? `Last seen ${relativeTime(identity.lastSeen)}` : `Canonical ID: ${entry.canonicalId}`}</small></>;
+          return identity ? <PersonLink key={entry.canonicalId} identity={identity}><article>{content}</article></PersonLink> : <article key={entry.canonicalId}>{content}</article>;
+        })}</div>
+      </section>
 
-                    {/* Current task */}
-                    {agent.currentTask && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4 }}>
-                        <span style={{ color: 'var(--text-2)', fontWeight: 600 }}>Now: </span>
-                        {agent.currentTask.length > 60
-                          ? agent.currentTask.slice(0, 60) + '…'
-                          : agent.currentTask}
-                      </div>
-                    )}
+      <details className={styles.details}>
+        <summary>Needs role assignment <span>{directory.unassignedActive.length}</span></summary>
+        {directory.unassignedActive.length ? <ul>{directory.unassignedActive.map((identity) => <li key={identity.canonicalId}><PersonLink identity={identity}><strong>{identity.label}</strong><span>{identity.canonicalId}</span><AvailabilityBadge availability={identity.availability} /></PersonLink></li>)}</ul> : <p>No active unassigned canonical identities.</p>}
+      </details>
 
-                    {/* Last seen */}
-                    <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
-                      Last seen: {relTime(agent.lastSeen)}
-                    </div>
-                  </div>
-                </Link>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
-    </AppShell>
-  );
+      <details className={styles.details}>
+        <summary>History / aliases <span>{directory.aliasHistory.length}</span></summary>
+        {directory.aliasHistory.length ? <ul>{directory.aliasHistory.map((item) => <li key={`${item.canonicalId}:${item.sourceId}`}><div><strong>{item.sourceId} → {item.canonicalId}</strong><span>{item.reason}</span></div><small>Kept: {item.keptSourceId}</small></li>)}</ul> : <p>No suppressed aliases in the current snapshot.</p>}
+      </details>
+    </div>
+  </AppShell>;
 }

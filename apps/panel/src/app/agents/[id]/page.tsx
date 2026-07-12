@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react';
 import { AppShell, card, muted } from '../../../components/ops-ui';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { buildCanonicalRoster, canonicalAgentId, TEAM_ROLE_DIRECTORY, type CanonicalAvailability, type RawAgentStatus } from '../../office/roster';
 
 interface AgentStatus {
   id: string;
   label: string;
   emoji: string;
   busy: boolean;
-  status: 'Working' | 'Idle' | 'Offline';
+  status: CanonicalAvailability;
   lastSeen: string | null;
   currentTask: string | null;
   sessionId: string | null;
@@ -19,8 +21,9 @@ interface AgentStatus {
 
 const STATUS_COLORS: Record<string, string> = {
   Working: '#33ffcc',
-  Idle:    '#ffd060',
-  Offline: '#667799',
+  Available: '#ffd060',
+  Inactive: '#667799',
+  Unconfirmed: '#8eb9ec',
 };
 
 function fmtRelative(iso: string | null): string {
@@ -37,6 +40,7 @@ function fmtRelative(iso: string | null): string {
 }
 
 export default function AgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const router = useRouter();
   const [agentId, setAgentId] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,21 +57,27 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         const res = await fetch('/api/agents/status', { cache: 'no-store' });
         if (!res.ok) throw new Error(await res.text());
         const j = await res.json();
-        const agents: AgentStatus[] = j.agents ?? [];
-        // H4: Override status if last_seen is stale (> 1 hour)
-        const now = Date.now();
-        const found = agents.find((a) => a.id === agentId);
+        const canonicalId = canonicalAgentId(agentId);
+        if (canonicalId !== agentId) router.replace(`/agents/${encodeURIComponent(canonicalId)}`);
+        const projection = buildCanonicalRoster((j.agents ?? []) as RawAgentStatus[], j.ts);
+        const found = projection.identities.find((identity) => identity.canonicalId === canonicalId);
         if (found) {
-          if (found.status === 'Working' && found.lastSeen) {
-            const diffH = (now - new Date(found.lastSeen).getTime()) / 3_600_000;
-            if (diffH > 1) {
-              setAgent({ ...found, status: 'Offline' });
-              return;
-            }
-          }
-          setAgent(found);
+          const configuredRole = TEAM_ROLE_DIRECTORY.find((entry) => entry.canonicalId === canonicalId)?.role;
+          setAgent({
+            id: found.canonicalId,
+            label: TEAM_ROLE_DIRECTORY.find((entry) => entry.canonicalId === canonicalId)?.name || found.label,
+            emoji: found.emoji,
+            busy: found.busy,
+            status: found.availability,
+            lastSeen: found.lastSeen,
+            currentTask: found.currentTask,
+            sessionId: found.sessionId,
+            role: configuredRole || 'Unassigned',
+            model: found.model || undefined,
+          });
+          setErr(null);
         } else {
-          setErr(`Agent "${agentId}" not found.`);
+          setErr(`Agent "${canonicalId}" not found.`);
         }
       } catch (e: any) {
         setErr(String(e?.message || e));
@@ -78,7 +88,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
     load();
     const t = setInterval(load, 15_000);
     return () => clearInterval(t);
-  }, [agentId]);
+  }, [agentId, router]);
 
   const color = agent ? (STATUS_COLORS[agent.status] ?? '#667799') : '#667799';
 

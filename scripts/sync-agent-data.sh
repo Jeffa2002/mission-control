@@ -43,9 +43,13 @@ for agent_id in sorted(os.listdir(AGENTS_DIR)):
     session_files = []
     if os.path.isdir(sessions_dir):
         session_files = [
-            f for f in glob.glob(os.path.join(sessions_dir, "*.jsonl"))
+            f for pattern in ("*.jsonl", "*.json")
+            for f in glob.glob(os.path.join(sessions_dir, pattern))
             if ".reset." not in f and ".deleted." not in f
         ]
+    root_session = os.path.join(agent_dir, "sessions.json")
+    if os.path.isfile(root_session):
+        session_files.append(root_session)
 
     if not session_files:
         last_seen = None
@@ -99,7 +103,7 @@ for agent_id in sorted(os.listdir(AGENTS_DIR)):
         "status": status,
         "lastSeen": last_seen,
         "currentTask": last_task,
-        "sessionId": None,
+        "sessionId": os.path.basename(latest),
     })
 
 output = {"ok": True, "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "agents": agents}
