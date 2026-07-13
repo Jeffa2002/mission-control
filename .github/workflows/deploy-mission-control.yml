@@ -59,7 +59,13 @@ jobs:
 
       - name: Rebuild and restart prod
         working-directory: /var/www/mission-control/apps
-        run: docker-compose build panel && docker-compose up -d panel
+        run: |
+          set -euo pipefail
+          if current_image="$(docker image inspect --format '{{.Id}}' apps-panel:latest 2>/dev/null)"; then
+            docker image tag "$current_image" apps-panel:rollback
+          fi
+          docker-compose build panel
+          docker-compose up -d panel
 
       - name: Verify prod
         run: |
@@ -87,3 +93,12 @@ jobs:
             sleep 3
           done
           exit 1
+
+      - name: Prune stale Docker artifacts
+        if: success()
+        run: |
+          set -euo pipefail
+          docker container prune --force --filter 'until=168h'
+          docker image prune --force
+          docker builder prune --all --force --keep-storage 4GB
+          docker system df
