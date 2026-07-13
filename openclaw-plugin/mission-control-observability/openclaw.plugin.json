@@ -1,0 +1,1 @@
+{"id":"mission-control-observability","activation":{"onStartup":true},"configSchema":{"type":"object","additionalProperties":false,"properties":{"outputFile":{"type":"string"},"retentionHours":{"type":"integer","minimum":1,"maximum":168},"maxEvents":{"type":"integer","minimum":100,"maximum":10000}}}}

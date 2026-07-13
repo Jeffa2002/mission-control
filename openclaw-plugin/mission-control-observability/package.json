@@ -1,0 +1,1 @@
+{"name":"@mission-control/openclaw-observability","version":"0.1.0","private":true,"type":"module","description":"Privacy-safe OpenClaw operational event collector","peerDependencies":{"openclaw":">=2026.6.11"},"peerDependenciesMeta":{"openclaw":{"optional":true}},"openclaw":{"extensions":["./index.js"]},"scripts":{"test":"node --test collector-core.test.mjs"}}

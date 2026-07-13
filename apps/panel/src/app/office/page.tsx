@@ -6,7 +6,7 @@
  * Shows a grid of agent "desks" — avatar, name, status badge, and a
  * small work-area panel showing what the agent is doing.
  *
- * Refreshes every 10 seconds from /api/agents/status (server-side cached 5 s).
+ * Refreshes from authenticated SSE, with the one-minute snapshot poll retained.
  */
 
 import { useEffect, useState } from 'react';
@@ -387,6 +387,8 @@ export default function OfficePage() {
   const [suppressedCount, setSuppressedCount] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [collectorState, setCollectorState] = useState<'healthy' | 'stale' | 'unknown'>('unknown');
+  const [streamConnected, setStreamConnected] = useState(false);
 
   async function fetchStatus() {
     try {
@@ -398,6 +400,7 @@ export default function OfficePage() {
       setRosterHealth(roster.health);
       setSuppressedCount(roster.suppressedCount);
       setLastFetch(typeof j.ts === 'string' ? j.ts : '');
+      setCollectorState(['healthy', 'stale'].includes(j.telemetry?.status) ? j.telemetry.status : 'unknown');
       setErr(null);
     } catch (e: any) {
       setErr(String(e?.message || e));
@@ -407,9 +410,13 @@ export default function OfficePage() {
   }
 
   useEffect(() => {
-    fetchStatus();
-    const t = setInterval(fetchStatus, 10_000);
-    return () => clearInterval(t);
+    void fetchStatus();
+    const fallback = setInterval(() => void fetchStatus(), 60_000);
+    const stream = new EventSource('/api/agents/live/stream');
+    stream.addEventListener('telemetry', () => { setStreamConnected(true); void fetchStatus(); });
+    stream.onopen = () => setStreamConnected(true);
+    stream.onerror = () => setStreamConnected(false);
+    return () => { clearInterval(fallback); stream.close(); };
   }, []);
 
   return (
@@ -425,9 +432,9 @@ export default function OfficePage() {
           />
           <div className="flex flex-col items-end gap-2 text-xs text-slate-400">
             <StatusBadge
-              label={loading ? 'syncing' : rosterHealth?.state === 'fresh' ? 'live 10s' : rosterHealth?.state ?? 'unknown'}
-              status={loading ? 'info' : rosterHealth?.state === 'fresh' ? 'healthy' : rosterHealth?.state === 'clock-skew' ? 'critical' : 'warning'}
-              pulse={!loading && rosterHealth?.state === 'fresh'}
+              label={loading ? 'syncing' : collectorState === 'healthy' && streamConnected ? 'live ≤5s' : collectorState === 'stale' ? 'telemetry stale' : 'telemetry unknown'}
+              status={loading ? 'info' : collectorState === 'healthy' && streamConnected ? 'healthy' : 'warning'}
+              pulse={!loading && collectorState === 'healthy' && streamConnected}
             />
             {lastFetch ? <span>{new Date(lastFetch).toLocaleTimeString()}</span> : null}
           </div>
@@ -437,6 +444,12 @@ export default function OfficePage() {
           <div className="rounded-[12px] border border-[rgba(245,158,11,0.30)] bg-[rgba(245,158,11,0.08)] p-4 text-sm text-[var(--sev-warning)]" role="status">
             <strong>Roster telemetry {rosterHealth.state}:</strong> {rosterHealth.detail}
             {rosterHealth.futureLastSeenIds.length > 0 && <div className="mt-2 text-xs opacity-80">Excluded future timestamps: {rosterHealth.futureLastSeenIds.join(', ')}</div>}
+          </div>
+        )}
+
+        {!loading && (collectorState !== 'healthy' || !streamConnected) && (
+          <div className="rounded-[12px] border border-[rgba(245,158,11,0.30)] bg-[rgba(245,158,11,0.08)] p-4 text-sm text-[var(--sev-warning)]" role="status">
+            <strong>Near-real-time telemetry {collectorState === 'stale' ? 'stale' : 'unknown'}.</strong> Showing the one-minute sanitized snapshot fallback; active state is not inferred while the collector is unavailable.
           </div>
         )}
 
@@ -470,7 +483,7 @@ export default function OfficePage() {
           <span><span style={{ color: '#33ffcc' }}>Working</span>: supported task metadata reports active work</span>
           <span><span style={{ color: '#ffd060' }}>Idle</span>: recent metadata heartbeat, no confirmed active task</span>
           {suppressedCount > 0 && <span>{suppressedCount} older alias representation{suppressedCount === 1 ? '' : 's'} suppressed</span>}
-          <span className="ml-auto">Source: allowlisted OpenClaw metadata snapshot</span>
+          <span className="ml-auto">Source: sanitized OpenClaw events + one-minute snapshot fallback</span>
         </div>
       </div>
     </AppShell>

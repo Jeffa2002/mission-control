@@ -11,6 +11,7 @@ services:
       - IPERF_RESULTS_FILE=/workspace/mission-control/iperf-results.json
       - NETWORK_HISTORY_DB=/workspace/mission-control/network-history.db
       - NETWORK_CACHE_FILE=/tmp/mission-network-cache.json
+      - AGENT_TELEMETRY_FILE=/workspace/mission-control/runtime/agent-telemetry.json
       - CADVISOR_URL=http://mission-cadvisor:8080
       - 'SECURITY_REMOTE_HOSTS=[{"id":"crm8","label":"CRM8","host":"100.112.179.70","port":"2222","user":"root","key":"/root/.ssh/mission_security_telemetry"},{"id":"sec1","label":"Sec1","host":"100.122.8.93","port":"2222","user":"root","key":"/root/.ssh/mission_security_telemetry"},{"id":"backup-melb","label":"Backup Melbourne","host":"100.110.100.97","port":"2222","user":"root","key":"/root/.ssh/mission_security_telemetry"}]'
     ports:
