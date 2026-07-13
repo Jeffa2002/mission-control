@@ -22,7 +22,7 @@ const DB_PATHS = [
 type Range = 'day' | 'week' | 'month' | 'year';
 type Metric = 'ping' | 'iperf';
 
-const VALID_NODES = new Set(['prod', 'crm8', 'shazza', 'backup-melb', 'bazza', 'sec1']);
+const VALID_NODES = new Set(['prod', 'crm8', 'shazza', 'backup-melb', 'bazza', 'sec1', 'secspy-lab01']);
 const VALID_RANGES = new Set<Range>(['day', 'week', 'month', 'year']);
 const VALID_METRICS = new Set<Metric>(['ping', 'iperf']);
 

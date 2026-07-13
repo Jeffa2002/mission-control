@@ -62,6 +62,17 @@ export const SYSTEM_REGISTRY: SystemDefinition[] = [
     metadata: { publicHost: 'crm8.effectx.com.au', tailscaleIp: '100.112.179.70' },
   },
   {
+    id: 'secspy-lab01',
+    label: 'SecSpy Lab 01',
+    host: 'secspy-lab01.taile9fed9.ts.net',
+    role: 'Isolated security assessment lab',
+    probe: 'tailnet',
+    kind: 'command',
+    timeoutMs: 8_000,
+    command: { bin: 'ping', args: ['-c', '1', '-W', '2', '100.87.75.20'] },
+    metadata: { tailscaleIp: '100.87.75.20', hypervisor: 'pve', vmId: '106' },
+  },
+  {
     id: 'shazza',
     label: 'Shazza (Intel NUC u9-285H)',
     host: 'shazza.taile9fed9.ts.net',

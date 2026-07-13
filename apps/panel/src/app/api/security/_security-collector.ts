@@ -97,6 +97,7 @@ const SECURITY_FLEET_REGISTRY = [
   { id: 'bazza', label: 'Bazza' },
   { id: 'crm8', label: 'CRM8' },
   { id: 'sec1', label: 'Sec1' },
+  { id: 'secspy-lab01', label: 'SecSpy Lab 01' },
   { id: 'backup-melb', label: 'Backup Melbourne' },
   { id: 'shazza', label: 'Shazza' },
   { id: 'ubuntu-geekom', label: 'Ubuntu Geekom' },

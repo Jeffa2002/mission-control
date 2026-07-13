@@ -21,6 +21,7 @@ const IPERF_FILES = [
 const NODES = [
   { id: 'bazza',       label: 'Bazza',      emoji: '💻', ip: '100.125.171.52', location: 'Perth',     role: 'OpenClaw Host' },
   { id: 'sec1',        label: 'Sec1',       emoji: '🛡️', ip: '100.122.8.93',   location: 'Perth',     role: 'Security Host' },
+  { id: 'secspy-lab01', label: 'SecSpy Lab', emoji: '🧪', ip: '100.87.75.20',   location: 'Perth',     role: 'Isolated Security Lab' },
   { id: 'prod',        label: 'Prod',        emoji: '🚀', ip: '100.95.166.47',  location: 'Perth',     role: 'App Server' },
   { id: 'crm8',        label: 'CRM8',        emoji: '🏢', ip: '100.112.179.70', location: 'Perth',     role: 'CRM Server' },
   { id: 'shazza',      label: 'Shazza',      emoji: '🖥️', ip: '100.113.217.81', location: 'Perth',     role: 'AI / GPU' },
@@ -30,6 +31,7 @@ const NODES = [
 const LINK_DEFS = [
   { from: 'bazza',       to: 'prod',        label: 'agent-status push',   direction: 'bazza→prod'   },
   { from: 'bazza',       to: 'sec1',        label: 'security host',       direction: 'bazza→sec1'   },
+  { from: 'bazza',       to: 'secspy-lab01', label: 'authorised lab control', direction: 'bazza→lab' },
   { from: 'backup-melb', to: 'prod',        label: 'prod DB backup',      direction: 'melb←prod'    },
   { from: 'backup-melb', to: 'crm8',        label: 'crm8 DB backup',      direction: 'melb←crm8'   },
   { from: 'backup-melb', to: 'bazza',       label: 'bazza workspace bkp', direction: 'melb←bazza'  },
