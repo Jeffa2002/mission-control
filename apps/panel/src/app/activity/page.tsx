@@ -1,190 +1,28 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
-import { AppShell, SectionTitle, StatusBadge, ToolbarButton, card, muted, sevPill } from '../../components/ops-ui';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppShell } from '../../components/ops-ui';
+import styles from './activity.module.css';
 
-type UiStatus = 'healthy' | 'warning' | 'critical' | 'info' | 'neutral';
+type Severity='healthy'|'warning'|'critical'|'info'|'neutral';
+type Relationship='confirmed'|'correlated'|'unknown';
+type CoverageStatus='current'|'stale'|'partial'|'missing'|'error'|'unsupported';
+type Tab='evidence'|'related'|'raw';
+type EventItem={eventId:string;id:string;source:string;sourceEventId?:string;eventType:string;ts:string;tsQuality:'observed'|'fallback';severity:Severity;title:string;detail:string;entityRefs:string[];app?:string;host?:string;agentId?:string;environment?:string;href?:string;evidence:Record<string,string|number|boolean|null>;raw?:Record<string,string|number|boolean|null>;sourceFreshness:CoverageStatus;relationship:Relationship;relationshipBasis:string;dedupeCount:number;memberEventIds:string[];provenance?:Record<string,unknown>};
+type WindowItem={windowId:string;relationship:'confirmed'|'correlated';basis:string;title:string;detail:string;startTs:string;endTs:string;entityRefs:string[];eventIds:string[];severity:Severity};
+type Coverage={source:string;status:CoverageStatus;checkedAt:string;detail:string;eventCount:number};
+type Payload={ok:boolean;version:string;ts:string;partial:boolean;partialSources:string[];count:number;counts:Record<Severity,number>;items:EventItem[];windows:WindowItem[];coverage:Coverage[]};
+type Selection={kind:'event';event:EventItem}|{kind:'window';window:WindowItem};
+type Preset='all'|'attention'|'releases'|'agents';
 
-interface ActivityItem {
-  id: string;
-  ts: string;
-  source: string;
-  title: string;
-  detail: string;
-  severity: UiStatus;
-  href?: string;
-}
+function rel(value:string){const time=Date.parse(value);if(!Number.isFinite(time))return'Unknown time';const minutes=Math.max(0,Math.floor((Date.now()-time)/60000));if(minutes<1)return'Just now';if(minutes<60)return`${minutes}m ago`;const hours=Math.floor(minutes/60);return hours<24?`${hours}h ago`:`${Math.floor(hours/24)}d ago`;}
+function Badge({tone,label}:{tone:string;label:string}){return <span className={styles.badge} data-tone={tone}><span aria-hidden="true"/>{label}</span>}
+function Heading({eyebrow,title,copy}:{eyebrow:string;title:string;copy:string}){return <div className={styles.heading}><p className={styles.eyebrow}>{eyebrow}</p><h2>{title}</h2><p>{copy}</p></div>}
+function eventBlob(event:EventItem){return`${event.title} ${event.detail} ${event.source} ${event.eventType} ${event.entityRefs.join(' ')}`.toLowerCase()}
 
-function relTime(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(diff)) return 'unknown';
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
+function Density({events}:{events:EventItem[]}){const now=Date.now();const bins=Array.from({length:24},(_,index)=>{const start=now-(23-index)*3600000,end=start+3600000;const members=events.filter(event=>{const time=Date.parse(event.ts);return time>=start&&time<end});const severity:Severity=members.some(e=>e.severity==='critical')?'critical':members.some(e=>e.severity==='warning')?'warning':members.length?'info':'neutral';return{start,count:members.length,severity}});const total=bins.reduce((sum,bin)=>sum+bin.count,0);const peak=[...bins].sort((a,b)=>b.count-a.count)[0];return <section className={styles.density} aria-labelledby="density-title"><div><p className={styles.eyebrow}>Last 24 hours</p><h2 id="density-title">Event density</h2><p>{total} actual event records in the loaded 24-hour window.</p></div><div><div className={styles.ribbon} role="img" aria-label={`24 hour density ribbon with ${total} events`}>{bins.map(bin=><span key={bin.start} data-tone={bin.severity} style={{height:`${Math.max(18,Math.min(100,18+bin.count*14))}%`}} title={`${new Date(bin.start).toLocaleTimeString([], {hour:'2-digit'} )}: ${bin.count} events`}/>)}</div><div className={styles.scale}><span>24h ago</span><span>{peak.count?`Peak ${peak.count} at ${new Date(peak.start).toLocaleTimeString([],{hour:'2-digit'})}`:'No events'}</span><span>Now</span></div></div></section>}
 
-function label(status: UiStatus) {
-  if (status === 'critical') return 'Critical';
-  if (status === 'warning') return 'Warning';
-  if (status === 'healthy') return 'OK';
-  if (status === 'info') return 'Info';
-  return 'Signal';
-}
+function Inspector({selection,events,tab,setTab,open,onClose,returnFocus}:{selection:Selection|null;events:EventItem[];tab:Tab;setTab:(tab:Tab)=>void;open:boolean;onClose:()=>void;returnFocus:React.RefObject<HTMLElement|null>}){const aside=useRef<HTMLElement>(null),closeRef=useRef<HTMLButtonElement>(null);useEffect(()=>{if(!open||!window.matchMedia('(max-width:1080px)').matches)return;closeRef.current?.focus();const trap=(e:KeyboardEvent)=>{if(e.key!=='Tab'||!aside.current)return;const controls=Array.from(aside.current.querySelectorAll<HTMLElement>('button:not([disabled]),a[href]'));if(!controls.length)return;const first=controls[0],last=controls.at(-1)!;if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}};window.addEventListener('keydown',trap);return()=>window.removeEventListener('keydown',trap)},[open,selection]);const close=()=>{onClose();setTimeout(()=>returnFocus.current?.focus(),0)};if(!selection)return <aside className={styles.inspector} data-open="false"><Heading eyebrow="Context" title="Select evidence" copy="Choose a correlation window or event to inspect its normalized evidence."/></aside>;const isEvent=selection.kind==='event';const title=isEvent?selection.event.title:selection.window.title;const relationship=isEvent?selection.event.relationship:selection.window.relationship;const basis=isEvent?selection.event.relationshipBasis:selection.window.basis;const related=isEvent?events.filter(event=>event.eventId!==selection.event.eventId&&event.entityRefs.some(ref=>selection.event.entityRefs.includes(ref))).slice(0,8):events.filter(event=>selection.window.eventIds.includes(event.eventId));const evidence=isEvent?selection.event.evidence:{start:selection.window.startTs,end:selection.window.endTs,eventCount:selection.window.eventIds.length,severity:selection.window.severity};const raw=isEvent?{...(selection.event.raw??{}),sourceEventId:selection.event.sourceEventId??'',dedupeCount:selection.event.dedupeCount,memberEventIds:selection.event.memberEventIds.join(','),tsQuality:selection.event.tsQuality}: {windowId:selection.window.windowId,eventIds:selection.window.eventIds.join(','),entityRefs:selection.window.entityRefs.join(',')};return <aside ref={aside} className={styles.inspector} data-open={open} aria-label="Activity evidence inspector" aria-live="polite"><div className={styles.inspectorHead}><div><p className={styles.eyebrow}>{isEvent?selection.event.source:'Correlation window'}</p><h2>{title}</h2></div><button ref={closeRef} type="button" onClick={close} aria-label="Close activity inspector">×</button></div><div className={styles.inspectMeta}><Badge tone={relationship} label={relationship}/>{isEvent?<Badge tone={selection.event.severity} label={selection.event.severity}/>:null}</div><p className={styles.basis}>{basis}</p><div className={styles.tabs} role="tablist" aria-label="Inspector views">{(['evidence','related','raw'] as Tab[]).map(value=><button type="button" role="tab" aria-selected={tab===value} onClick={()=>setTab(value)} key={value}>{value}</button>)}</div><div className={styles.tabPanel} role="tabpanel">{tab==='evidence'?<dl>{Object.entries(evidence).map(([key,value])=><div key={key}><dt>{key}</dt><dd>{String(value??'Not reported')}</dd></div>)}</dl>:tab==='related'?<div className={styles.related}>{related.length?related.map(event=><button type="button" key={event.eventId}><strong>{event.title}</strong><span>{event.source} · {rel(event.ts)}</span></button>):<p>No related event shares the current entity/window basis.</p>}</div>:<pre>{Object.entries(raw).map(([key,value])=><code key={key}>{key}: {String(value??'')}</code>)}</pre>}</div>{isEvent&&selection.event.href?<Link className={styles.inspectorLink} href={selection.event.href}>Open owning surface →</Link>:null}</aside>}
 
-function ActivityRow({ item }: { item: ActivityItem }) {
-  const inner = (
-    <div className="grid grid-cols-[130px_1fr_auto] gap-4 border-b border-white/10 px-4 py-3 transition-colors hover:bg-white/[0.025]">
-      <div className="font-mono text-[11px] text-slate-500">
-        <div>{new Date(item.ts).toLocaleTimeString()}</div>
-        <div className="mt-1">{relTime(item.ts)}</div>
-      </div>
-      <div style={{ minWidth: 0 }}>
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <StatusBadge label={label(item.severity)} status={item.severity} pulse={item.severity === 'critical'} />
-          <span className={sevPill(item.source === 'deploys' ? 'info' : item.source === 'agent mesh' ? 'healthy' : 'neutral')}>{item.source}</span>
-        </div>
-        <div className="truncate text-[14px] font-bold text-slate-100">{item.title}</div>
-        <div className="mt-1 truncate text-[12px] text-slate-500">{item.detail}</div>
-      </div>
-      <div className="self-center text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Open</div>
-    </div>
-  );
-
-  return item.href ? <Link href={item.href}>{inner}</Link> : inner;
-}
-
-function MetricTile({ labelText, value, hint, status }: { labelText: string; value: string; hint: string; status: UiStatus }) {
-  return (
-    <div className={card + ' p-5'}>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">{labelText}</div>
-        <StatusBadge label={label(status)} status={status} pulse={status === 'critical'} />
-      </div>
-      <div className="text-[28px] font-extrabold leading-none text-slate-50">{value}</div>
-      <div className={muted + ' mt-2'}>{hint}</div>
-    </div>
-  );
-}
-
-export default function ActivityPage() {
-  const [items, setItems] = useState<ActivityItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('all');
-  const [error, setError] = useState<string | null>(null);
-  const [ts, setTs] = useState('');
-
-  async function load() {
-    setError(null);
-    try {
-      const res = await fetch('/api/activity?limit=100', { cache: 'no-store' });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setItems(data.items ?? []);
-      setTs(data.ts ?? new Date().toISOString());
-    } catch (e: any) {
-      setError(String(e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 15000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return items.filter((item) => {
-      const blob = `${item.title} ${item.detail} ${item.source}`.toLowerCase();
-      return (!q || blob.includes(q)) && (filter === 'all' || item.severity === filter || item.source === filter);
-    });
-  }, [items, query, filter]);
-
-  const critical = items.filter((item) => item.severity === 'critical').length;
-  const warning = items.filter((item) => item.severity === 'warning').length;
-  const healthy = items.filter((item) => item.severity === 'healthy').length;
-  const sources = Array.from(new Set(items.map((item) => item.source))).sort();
-
-  return (
-    <AppShell>
-      <div className="space-y-6">
-        <SectionTitle
-          title="Unified Activity"
-          subtitle="Audit events, deployments, and agent signals in one operational timeline"
-          action={<ToolbarButton onClick={load} disabled={loading}>{loading ? 'Refreshing' : 'Refresh'}</ToolbarButton>}
-        />
-
-        {error ? (
-          <div className={card + ' border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.07)] p-4'}>
-            <div className="text-sm font-semibold text-[var(--sev-critical)]">Activity stream unavailable</div>
-            <div className={muted + ' mt-1'}>{error}</div>
-          </div>
-        ) : null}
-
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricTile labelText="Signals" value={loading ? '-' : String(items.length)} hint={`${filtered.length} visible after filters`} status="info" />
-          <MetricTile labelText="Critical" value={loading ? '-' : String(critical)} hint="error events, failed deploys, or hot agents" status={critical ? 'critical' : 'healthy'} />
-          <MetricTile labelText="Warnings" value={loading ? '-' : String(warning)} hint="blocked events, running deploys, offline agents" status={warning ? 'warning' : 'healthy'} />
-          <MetricTile labelText="Nominal" value={loading ? '-' : String(healthy)} hint={ts ? `updated ${relTime(ts)}` : 'waiting for stream'} status="healthy" />
-        </section>
-
-        <section className={card + ' p-4'}>
-          <div className="grid gap-3 lg:grid-cols-[1fr_180px_auto]">
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search title, detail, source..."
-              className="h-10 rounded-lg border border-white/10 bg-black/20 px-3 text-[13px] text-slate-100 outline-none placeholder:text-slate-600 focus:border-[rgba(103,213,255,0.45)]"
-            />
-            <select
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              className="h-10 rounded-lg border border-white/10 bg-black/20 px-3 text-[13px] text-slate-100 outline-none"
-            >
-              <option value="all">All signals</option>
-              <option value="critical">Critical</option>
-              <option value="warning">Warnings</option>
-              <option value="healthy">OK</option>
-              {sources.map((source) => <option key={source} value={source}>{source}</option>)}
-            </select>
-            <ToolbarButton onClick={() => { setQuery(''); setFilter('all'); }}>Clear</ToolbarButton>
-          </div>
-        </section>
-
-        <section className={card + ' overflow-hidden'}>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[var(--bg-2)] px-4 py-3">
-            <div>
-              <div className="text-[13px] font-bold text-slate-100">Live Timeline</div>
-              <div className="mt-1 text-[12px] text-slate-500">Newest first, linked back to the owning Mission Control surface</div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className={sevPill('critical')}>{critical} critical</span>
-              <span className={sevPill('warning')}>{warning} warning</span>
-              <span className={sevPill('healthy')}>{healthy} ok</span>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="p-8 text-center text-[13px] text-slate-500">Loading activity stream...</div>
-          ) : filtered.length === 0 ? (
-            <div className="p-10 text-center">
-              <div className="text-[17px] font-bold text-[var(--sev-healthy)]">No matching activity</div>
-              <div className={muted + ' mx-auto mt-2 max-w-md'}>Clear filters or wait for the next telemetry refresh.</div>
-            </div>
-          ) : (
-            <div>
-              {filtered.map((item) => <ActivityRow key={item.id} item={item} />)}
-            </div>
-          )}
-        </section>
-      </div>
-    </AppShell>
-  );
-}
+export default function ActivityPage(){const[data,setData]=useState<Payload|null>(null),[loading,setLoading]=useState(true),[refreshing,setRefreshing]=useState(false),[error,setError]=useState<string|null>(null),[preset,setPreset]=useState<Preset>('all'),[query,setQuery]=useState(''),[source,setSource]=useState('all'),[severity,setSeverity]=useState('all'),[relationship,setRelationship]=useState('all'),[entity,setEntity]=useState('all'),[selection,setSelection]=useState<Selection|null>(null),[drawer,setDrawer]=useState(false),[tab,setTab]=useState<Tab>('evidence');const returnFocus=useRef<HTMLElement|null>(null);const load=useCallback(async(background=false)=>{if(background)setRefreshing(true);try{const response=await fetch('/api/activity?limit=200',{cache:'no-store'});if(!response.ok)throw new Error(await response.text());setData(await response.json());setError(null)}catch(caught){setError(caught instanceof Error?caught.message:String(caught))}finally{setLoading(false);setRefreshing(false)}},[]);useEffect(()=>{load();const timer=setInterval(()=>load(true),60000);return()=>clearInterval(timer)},[load]);useEffect(()=>{const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'&&drawer){setDrawer(false);setTimeout(()=>returnFocus.current?.focus(),0)}};window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape)},[drawer]);const items=data?.items??[],windows=data?.windows??[],coverage=data?.coverage??[];const sources=[...new Set(items.map(item=>item.source))].sort();const entities=[...new Set(items.flatMap(item=>item.entityRefs))].sort();const filtered=useMemo(()=>items.filter(item=>{if(preset==='attention'&&!['critical','warning'].includes(item.severity))return false;if(preset==='releases'&&item.source!=='deploys')return false;if(preset==='agents'&&item.source!=='agent-mesh')return false;if(source!=='all'&&item.source!==source)return false;if(severity!=='all'&&item.severity!==severity)return false;if(relationship!=='all'&&item.relationship!==relationship)return false;if(entity!=='all'&&!item.entityRefs.includes(entity))return false;return!query.trim()||eventBlob(item).includes(query.trim().toLowerCase())}),[items,preset,source,severity,relationship,entity,query]);const select=(value:Selection,event:React.MouseEvent<HTMLElement>)=>{returnFocus.current=event.currentTarget;setSelection(value);setTab('evidence');if(window.matchMedia('(max-width:1080px)').matches)setDrawer(true)};const problematic=coverage.filter(item=>['error','missing','partial','stale'].includes(item.status));const posture:Severity=items.some(item=>item.severity==='critical')?'critical':items.some(item=>item.severity==='warning')||problematic.length?'warning':items.length?'healthy':'neutral';const unavailableDimensions={source:!sources.length,entity:!entities.length,relationship:!items.some(item=>item.relationship!=='unknown')};return <AppShell><div className={styles.activity}><header className={styles.header}><div><p className={styles.eyebrow}>Adaptive Operations Prism</p><h1>Correlated Activity Timeline</h1><p>Cross-system evidence ordered by time, provenance, and explicit relationship boundaries.</p></div><div className={styles.freshness} data-partial={Boolean(data?.partial||error)}><span>{loading?'Loading live evidence…':error?'Refresh failed; retaining last successful view':data?.partial?`Partial · ${data.partialSources.join(', ')}`:`Current · ${rel(data?.ts??'')}`}</span><button type="button" onClick={()=>load(true)} disabled={refreshing}>{refreshing?'Refreshing…':'Refresh'}</button></div></header>{error?<div className={styles.error} role="status"><strong>Activity aggregation error.</strong> {error}</div>:null}<section className={styles.posture}><div><Badge tone={posture} label={posture==='critical'?'Critical evidence present':posture==='warning'?'Needs review':posture==='healthy'?'Sources reporting':'No evidence loaded'}/><p className={styles.eyebrow}>Timeline posture</p><h2>{posture==='critical'?'Critical activity needs review':posture==='warning'?'Evidence coverage is partial':posture==='healthy'?'Activity sources are current':'Timeline unavailable'}</h2><p>{posture==='critical'?'One or more normalized events are critical. Correlation labels describe association only.':problematic.length?`${problematic.length} source${problematic.length===1?'':'s'} are stale, partial, missing, or errored. Missing data is not a nominal zero.`:'Loaded sources have no critical or warning event in the bounded view.'}</p></div><dl><div><dt>Events</dt><dd>{items.length}</dd><span>after same-source dedupe</span></div><div><dt>Windows</dt><dd>{windows.length}</dd><span>confirmed or correlated</span></div><div><dt>Sources</dt><dd>{coverage.filter(item=>item.status==='current').length}/{coverage.length}</dd><span>currently reporting</span></div><div><dt>Fallback time</dt><dd>{items.filter(item=>item.tsQuality==='fallback').length}</dd><span>explicitly labelled</span></div></dl></section><Density events={items}/><section className={styles.controls} aria-label="Timeline filters"><div className={styles.presets}>{(['all','attention','releases','agents'] as Preset[]).map(value=><button type="button" key={value} aria-pressed={preset===value} onClick={()=>setPreset(value)}>{value==='all'?'All evidence':value==='attention'?'Needs attention':value==='releases'?'Release view':'Agent view'}</button>)}</div><div className={styles.filters}><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search evidence…" aria-label="Search activity"/><select value={source} onChange={event=>setSource(event.target.value)} disabled={unavailableDimensions.source} aria-label="Filter source"><option value="all">All sources</option>{sources.map(value=><option key={value}>{value}</option>)}</select><select value={severity} onChange={event=>setSeverity(event.target.value)} aria-label="Filter severity"><option value="all">All severities</option>{['critical','warning','healthy','info','neutral'].map(value=><option key={value}>{value}</option>)}</select><select value={relationship} onChange={event=>setRelationship(event.target.value)} disabled={unavailableDimensions.relationship} aria-label="Filter relationship"><option value="all">All relationships</option>{['confirmed','correlated','unknown'].map(value=><option key={value}>{value}</option>)}</select><select value={entity} onChange={event=>setEntity(event.target.value)} disabled={unavailableDimensions.entity} aria-label="Filter entity"><option value="all">All entities</option>{entities.map(value=><option key={value}>{value}</option>)}</select><button type="button" onClick={()=>{setQuery('');setSource('all');setSeverity('all');setRelationship('all');setEntity('all');setPreset('all')}}>Clear</button></div></section><div className={styles.workspace}><main className={styles.mainColumn}><section className={styles.panel}><Heading eyebrow="Context first" title="Correlation windows" copy="Explicit keys confirm association. Same-entity time proximity is correlated. Neither asserts causation."/>{windows.length?<div className={styles.windows}>{windows.slice(0,12).map(window=><button type="button" key={window.windowId} onClick={event=>select({kind:'window',window},event)}><Badge tone={window.relationship} label={window.relationship}/><span><strong>{window.title}</strong><small>{window.detail}</small></span><time>{rel(window.endTs)}</time></button>)}</div>:<p className={styles.empty}>No deterministic correlation window is present in the loaded evidence.</p>}</section><section className={styles.panel}><Heading eyebrow="Evidence ordered" title="Individual events" copy={`${filtered.length} visible events. Same-source duplicates expose count and member IDs in the inspector.`}/>{loading?<p className={styles.empty}>Loading normalized activity…</p>:filtered.length?<div className={styles.timeline}>{filtered.map(item=><button type="button" key={item.eventId} data-selected={selection?.kind==='event'&&selection.event.eventId===item.eventId} onClick={event=>select({kind:'event',event:item},event)}><time>{rel(item.ts)}<small>{item.tsQuality}</small></time><span className={styles.eventMark} data-tone={item.severity} aria-hidden="true"/><span className={styles.eventBody}><span><Badge tone={item.severity} label={item.severity}/><Badge tone={item.relationship} label={item.relationship}/><em>{item.source}</em></span><strong>{item.title}</strong><small>{item.detail}</small></span><span className={styles.entityRefs}>{item.entityRefs.slice(0,2).join(' · ')||'No entity ref'}{item.dedupeCount>1?<b>×{item.dedupeCount}</b>:null}</span></button>)}</div>:<p className={styles.empty}>No events match the current filters. This does not imply no source activity.</p>}</section><section className={styles.panel}><Heading eyebrow="Collection health" title="Source coverage" copy="Failed and missing sources remain visible and never become nominal zeroes."/><div className={styles.coverage}>{coverage.map(item=><article key={item.source} data-status={item.status}><div><strong>{item.source}</strong><Badge tone={item.status} label={item.status}/></div><p>{item.detail}</p><small>{item.eventCount} events · checked {rel(item.checkedAt)}</small></article>)}</div></section></main><Inspector selection={selection} events={items} tab={tab} setTab={setTab} open={drawer} onClose={()=>setDrawer(false)} returnFocus={returnFocus}/></div></div></AppShell>}
