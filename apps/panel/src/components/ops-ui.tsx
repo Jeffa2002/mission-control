@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState, createContext, useContext, useCallback, useMemo } from 'react';
+import { useEffect, useState, createContext, useContext, useCallback, useMemo, useRef } from 'react';
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
@@ -160,12 +160,16 @@ export const ROUTES: Route[] = [
   { href: '/actions', label: 'Audit Log', icon: 'audit', group: 'OPS' },
 ];
 
+export function isRouteActive(path: string, href: string) {
+  return href === '/' ? path === '/' : path === href || path.startsWith(`${href}/`);
+}
+
 // ─── Nav icons (inline SVG, no imports) ──────────────────────────────────────
 
 function NavIcon({ name, active }: { name: string; active: boolean }) {
   const col = active ? 'var(--accent)' : 'currentColor';
   const size = 15;
-  const props = { width: size, height: size, viewBox: '0 0 16 16', fill: 'none', style: { flexShrink: 0 } as React.CSSProperties };
+  const props = { width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true, focusable: false, style: { flexShrink: 0 } as React.CSSProperties };
 
   switch (name) {
     case 'overview':
@@ -305,18 +309,22 @@ export function useAppShell() {
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 function Sidebar({ path, health }: { path: string; health: HealthData | null }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
   const monitorRoutes = ROUTES.filter((r) => r.group === 'MONITOR');
   const opsRoutes = ROUTES.filter((r) => r.group === 'OPS');
 
   const overall = health?.overall ?? 'amber';
   const bazzaCheck = health?.checks?.['app'];
-  const bazzaOk = bazzaCheck?.status === 'ok';
+  const bazzaOk = bazzaCheck ? bazzaCheck.status === 'ok' : null;
   const panicCheck = health?.checks?.['panic_latch'];
-  const prodOk = panicCheck?.status === 'ok';
+  const prodOk = panicCheck ? panicCheck.status === 'ok' : null;
+
+  useEffect(() => setMobileOpen(false), [path]);
 
   return (
     <aside
       className="mc-sidebar"
+      data-mobile-open={mobileOpen ? 'true' : 'false'}
       style={{
         width: 260,
         minHeight: '100vh',
@@ -332,6 +340,7 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
     >
       {/* Logo area */}
       <div
+        className="mc-sidebar-brand"
         style={{
           padding: '22px 18px 18px',
           borderBottom: '1px solid var(--border)',
@@ -355,7 +364,7 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
               flexShrink: 0,
             }}
           >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true" focusable="false">
               <path d="M9 1.5L16 5.5V12.5L9 16.5L2 12.5V5.5L9 1.5Z" stroke="var(--accent)" strokeWidth="1.4" strokeLinejoin="round" />
               <circle cx="9" cy="9" r="2.5" fill="var(--accent)" fillOpacity="0.6" />
             </svg>
@@ -386,11 +395,24 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
               CONTROL
             </div>
           </div>
+          <button
+            type="button"
+            className="mc-mobile-menu-button"
+            aria-expanded={mobileOpen}
+            aria-controls="mc-primary-navigation"
+            onClick={() => setMobileOpen((open) => !open)}
+          >
+            <span aria-hidden="true">{mobileOpen ? '×' : '☰'}</span>
+            <span>{mobileOpen ? 'Close' : 'Menu'}</span>
+          </button>
         </div>
       </div>
 
       {/* Navigation */}
       <nav
+        id="mc-primary-navigation"
+        aria-label="Primary navigation"
+        data-mobile-open={mobileOpen ? 'true' : 'false'}
         style={{
           flex: 1,
           padding: '14px 12px',
@@ -416,7 +438,7 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {monitorRoutes.map((route) => (
-              <NavItem key={route.href} route={route} path={path} />
+              <NavItem key={route.href} route={route} path={path} onNavigate={() => setMobileOpen(false)} />
             ))}
           </div>
         </div>
@@ -437,7 +459,7 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {opsRoutes.map((route) => (
-              <NavItem key={route.href} route={route} path={path} />
+              <NavItem key={route.href} route={route} path={path} onNavigate={() => setMobileOpen(false)} />
             ))}
           </div>
         </div>
@@ -445,6 +467,7 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
 
       {/* Footer: server status + version */}
       <div
+        className="mc-sidebar-footer"
         style={{
           padding: '12px 16px',
           borderTop: '1px solid var(--border)',
@@ -510,12 +533,12 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
             (e.currentTarget as HTMLElement).style.borderColor = 'rgba(103,213,255,0.20)';
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
             <path d="M8 2.5C5 2.5 2.5 5 2.5 8s2.5 5.5 5.5 5.5 5.5-2.5 5.5-5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             <path d="M11 1l4 4-4 4M15 5H9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           OpenClaw
-          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ marginLeft: 'auto', opacity: 0.5 }}>
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true" focusable="false" style={{ marginLeft: 'auto', opacity: 0.5 }}>
             <path d="M2 10L10 2M10 2H5M10 2v5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </a>
@@ -524,12 +547,15 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
   );
 }
 
-function NavItem({ route, path }: { route: Route; path: string }) {
-  const active = path === route.href || (route.href !== '/' && path.startsWith(route.href));
+function NavItem({ route, path, onNavigate }: { route: Route; path: string; onNavigate?: () => void }) {
+  const active = isRouteActive(path, route.href);
 
   return (
     <Link
       href={route.href}
+      className="mc-nav-item"
+      aria-current={active ? 'page' : undefined}
+      onClick={onNavigate}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -567,20 +593,23 @@ function NavItem({ route, path }: { route: Route; path: string }) {
   );
 }
 
-function ServerDot({ label, ok }: { label: string; ok: boolean }) {
+function ServerDot({ label, ok }: { label: string; ok: boolean | null }) {
+  const color = ok === null ? 'var(--text-3)' : ok ? 'var(--sev-healthy)' : 'var(--sev-warning)';
+
   return (
     <div
+      title={ok === null ? `${label} status unavailable` : undefined}
       style={{
         display: 'flex',
         alignItems: 'center',
         gap: 5,
         padding: '4px 8px',
         borderRadius: 7,
-        border: `1px solid ${ok ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
-        background: ok ? 'rgba(34,197,94,0.06)' : 'rgba(245,158,11,0.06)',
+        border: `1px solid ${ok === null ? 'var(--border)' : ok ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
+        background: ok === null ? 'rgba(255,255,255,0.03)' : ok ? 'rgba(34,197,94,0.06)' : 'rgba(245,158,11,0.06)',
         fontSize: 11,
         fontWeight: 600,
-        color: ok ? 'var(--sev-healthy)' : 'var(--sev-warning)',
+        color,
       }}
     >
       <span
@@ -588,13 +617,13 @@ function ServerDot({ label, ok }: { label: string; ok: boolean }) {
           width: 6,
           height: 6,
           borderRadius: '50%',
-          background: ok ? 'var(--sev-healthy)' : 'var(--sev-warning)',
-          boxShadow: ok ? '0 0 6px var(--sev-healthy)' : '0 0 6px var(--sev-warning)',
+          background: color,
+          boxShadow: ok === null ? 'none' : `0 0 6px ${color}`,
           display: 'inline-block',
           flexShrink: 0,
         }}
       />
-      {label}
+      {label}{ok === null ? ' unavailable' : ''}
     </div>
   );
 }
@@ -604,6 +633,9 @@ function CommandPalette({ open, onOpenChange, onRefresh }: { open: boolean; onOp
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [runbookBusy, setRunbookBusy] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   const commands = useMemo(() => {
     const routeCommands = ROUTES.map((route) => ({
@@ -636,11 +668,53 @@ function CommandPalette({ open, onOpenChange, onRefresh }: { open: boolean; onOp
   }, [activeIndex, filtered.length]);
 
   useEffect(() => {
+    if (open) {
+      restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      inputRef.current?.focus();
+      return;
+    }
+
     if (!open) {
       setQuery('');
       setActiveIndex(0);
+      restoreFocusRef.current?.focus();
+      restoreFocusRef.current = null;
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onOpenChange(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+      ));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onOpenChange, open]);
 
   async function execute(command = filtered[activeIndex]) {
     if (!command) return;
@@ -675,19 +749,28 @@ function CommandPalette({ open, onOpenChange, onRefresh }: { open: boolean; onOp
   return (
     <div
       className="mc-command-backdrop"
+      role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onOpenChange(false);
       }}
     >
-      <div className="mc-command-palette">
+      <div
+        ref={dialogRef}
+        className="mc-command-palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+      >
         <div className="mc-command-input-row">
-          <span className="mc-command-mark">⌘K</span>
+          <span className="mc-command-mark" aria-hidden="true">⌘K</span>
           <input
-            autoFocus
+            ref={inputRef}
+            aria-label="Search commands"
+            aria-controls="mc-command-results"
+            aria-activedescendant={filtered[activeIndex] ? `mc-command-${filtered[activeIndex].id.replace(/[^a-z0-9-]/gi, '-')}` : undefined}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Escape') onOpenChange(false);
               if (event.key === 'ArrowDown') {
                 event.preventDefault();
                 setActiveIndex((i) => Math.min(i + 1, Math.max(filtered.length - 1, 0)));
@@ -704,19 +787,22 @@ function CommandPalette({ open, onOpenChange, onRefresh }: { open: boolean; onOp
             placeholder="Search surfaces, telemetry, runbooks..."
           />
         </div>
-        <div className="mc-command-results">
+        <div id="mc-command-results" className="mc-command-results" role="listbox" aria-label="Available commands">
           {filtered.length === 0 ? (
             <div className="px-4 py-6 text-center text-[13px] text-slate-500">No matching command</div>
           ) : filtered.map((command, index) => (
             <button
               key={command.id}
+              id={`mc-command-${command.id.replace(/[^a-z0-9-]/gi, '-')}`}
               type="button"
               className="mc-command-item"
+              role="option"
+              aria-selected={index === activeIndex}
               data-active={index === activeIndex ? 'true' : 'false'}
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => execute(command)}
             >
-              <span className="mc-command-dot" />
+              <span className="mc-command-dot" aria-hidden="true" />
               <span style={{ minWidth: 0 }}>
                 <span className="mc-command-label">{command.label}</span>
                 <span className="mc-command-detail">{runbookBusy === (command as any).action ? 'Recording intent...' : command.detail}</span>
@@ -735,22 +821,24 @@ function CommandPalette({ open, onOpenChange, onRefresh }: { open: boolean; onOp
 function Header({
   path,
   health,
+  healthStatus,
   lastUpdated,
   onRefresh,
 }: {
   path: string;
   health: HealthData | null;
+  healthStatus: 'loading' | 'ready' | 'unavailable';
   lastUpdated: string;
   onRefresh: () => void;
 }) {
-  const overall = health?.overall ?? 'green';
+  const overall = healthStatus === 'ready' && health ? health.overall : 'amber';
   const css = HEALTH_CSS[overall];
-  const alertCount = health?.checks
+  const alertCount = healthStatus === 'ready' && health?.checks
     ? Object.values(health.checks).filter((c) => c.status === 'error' || c.status === 'degraded').length
-    : 0;
+    : null;
 
   // Build breadcrumb
-  const route = ROUTES.find((r) => r.href === path || (r.href !== '/' && path.startsWith(r.href)));
+  const route = ROUTES.find((candidate) => isRouteActive(path, candidate.href));
   const rawName = path.replace('/', '').replace(/\b\w/g, (l) => l.toUpperCase());
   const pageName = route?.label ?? (rawName || 'Overview');
 
@@ -780,7 +868,7 @@ function Header({
 
       {/* Header content */}
       <div
-        className="mc-app-shell"
+        className="mc-header-row"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -814,15 +902,19 @@ function Header({
               gap: 6,
               padding: '4px 10px',
               borderRadius: 999,
-              border: alertCount > 0
+              border: alertCount === null
+                ? '1px solid rgba(245,158,11,0.25)'
+                : alertCount > 0
                 ? '1px solid rgba(239,68,68,0.35)'
                 : '1px solid rgba(34,197,94,0.25)',
-              background: alertCount > 0
+              background: alertCount === null
+                ? 'rgba(245,158,11,0.06)'
+                : alertCount > 0
                 ? 'rgba(239,68,68,0.08)'
                 : 'rgba(34,197,94,0.06)',
               fontSize: 12,
               fontWeight: 600,
-              color: alertCount > 0 ? 'var(--sev-critical)' : 'var(--sev-healthy)',
+              color: alertCount === null ? 'var(--sev-warning)' : alertCount > 0 ? 'var(--sev-critical)' : 'var(--sev-healthy)',
             }}
           >
             <span
@@ -830,12 +922,12 @@ function Header({
                 width: 7,
                 height: 7,
                 borderRadius: '50%',
-                background: alertCount > 0 ? 'var(--sev-critical)' : 'var(--sev-healthy)',
-                boxShadow: alertCount > 0 ? '0 0 6px var(--sev-critical)' : 'none',
+                background: alertCount === null ? 'var(--sev-warning)' : alertCount > 0 ? 'var(--sev-critical)' : 'var(--sev-healthy)',
+                boxShadow: alertCount && alertCount > 0 ? '0 0 6px var(--sev-critical)' : 'none',
                 display: 'inline-block',
               }}
             />
-            {alertCount > 0 ? `${alertCount} alert${alertCount !== 1 ? 's' : ''}` : 'All clear'}
+            {alertCount === null ? 'Alerts unavailable' : alertCount > 0 ? `${alertCount} alert${alertCount !== 1 ? 's' : ''}` : 'All clear'}
           </div>
 
           {/* Health dot */}
@@ -863,7 +955,7 @@ function Header({
                 display: 'inline-block',
               }}
             />
-            {overall === 'green' ? 'Healthy' : overall === 'amber' ? 'Degraded' : 'Critical'}
+            {healthStatus === 'loading' ? 'Checking' : healthStatus === 'unavailable' ? 'Unavailable' : overall === 'green' ? 'Healthy' : overall === 'amber' ? 'Degraded' : 'Critical'}
           </div>
         </div>
 
@@ -871,7 +963,7 @@ function Header({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {lastUpdated && (
             <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-              {lastUpdated}
+              Updated {lastUpdated}
             </span>
           )}
           <button
@@ -899,7 +991,7 @@ function Header({
               (e.currentTarget as HTMLElement).style.color = 'var(--text-2)';
             }}
           >
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true" focusable="false">
               <path d="M10.5 2A5.5 5.5 0 1111.5 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
               <path d="M10.5 2L10.5 5L7.5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -916,8 +1008,8 @@ function Header({
 export function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const [health, setHealth] = useState<HealthData | null>(null);
+  const [healthStatus, setHealthStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [lastUpdated, setLastUpdated] = useState('');
-  const [currentTime, setCurrentTime] = useState('');
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const loadHealth = useCallback(async () => {
@@ -931,9 +1023,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         const hasDegraded = checks.some((c) => c.status === 'degraded');
         const computedOverall: HealthColor = hasError ? 'red' : hasDegraded ? 'amber' : (data.overall ?? 'green');
         setHealth({ ...data, overall: computedOverall });
+        setHealthStatus('ready');
         setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      } else {
+        setHealth(null);
+        setHealthStatus('unavailable');
       }
-    } catch {}
+    } catch {
+      setHealth(null);
+      setHealthStatus('unavailable');
+    }
   }, []);
 
   useEffect(() => {
@@ -941,16 +1040,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const t = setInterval(loadHealth, 30_000);
     return () => clearInterval(t);
   }, [loadHealth]);
-
-  // Live clock — updates every second
-  useEffect(() => {
-    function tick() {
-      setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-    }
-    tick();
-    const t = setInterval(tick, 1_000);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -986,12 +1075,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           display: 'flex',
         }}
       >
-        <Sidebar path={path} health={health} />
+        <Sidebar path={path} health={healthStatus === 'ready' ? health : null} />
         <div className="mc-content-shell" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <Header
             path={path}
             health={health}
-            lastUpdated={currentTime || lastUpdated}
+            healthStatus={healthStatus}
+            lastUpdated={lastUpdated}
             onRefresh={loadHealth}
           />
           <main className="mc-main" style={{ flex: 1, padding: '24px 28px' }}>
