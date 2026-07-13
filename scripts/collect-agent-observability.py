@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import subprocess
+import time
 from datetime import datetime, timezone
 
 
@@ -24,8 +25,14 @@ STATUS_MAP = {
 
 
 def cli_json(*args):
-    result = subprocess.run(["openclaw", *args], check=True, capture_output=True, text=True, timeout=30)
-    return json.loads(result.stdout)
+    last_error = None
+    for attempt in range(5):
+        result = subprocess.run(["openclaw", *args], capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        last_error = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+        time.sleep(attempt + 1)
+    raise RuntimeError(f"openclaw {' '.join(args)} failed after retries: {last_error}")
 
 
 def iso(milliseconds):
