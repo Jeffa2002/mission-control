@@ -11,8 +11,8 @@
 
 import { useEffect, useState } from 'react';
 import { AppShell, SectionTitle, StatusBadge, card, card2, muted } from '../../components/ops-ui';
-import { AgentActivityDrawer } from '../../components/AgentActivityDrawer';
 import { buildActiveRoster, type RawAgentStatus, type RosterHealth } from './roster';
+import type { SafeWorkProjection } from '../api/agents/status/safe-work-model';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,7 @@ interface AgentStatus {
   lastSeen: string | null;
   currentTask: string | null;
   sessionId: string | null;
+  work: SafeWorkProjection | null;
 }
 
 // ─── Colour + theme helpers ───────────────────────────────────────────────────
@@ -61,6 +62,14 @@ function fmtRelative(iso: string | null): string {
   if (m < 60)  return `${m}m ago`;
   const h = Math.floor(m / 60);
   return `${h}h ago`;
+}
+
+function fmtDuration(milliseconds: number | null): string {
+  if (milliseconds === null) return 'elapsed unknown';
+  const minutes = Math.floor(milliseconds / 60_000);
+  if (minutes < 1) return '<1m elapsed';
+  if (minutes < 60) return `${minutes}m elapsed`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m elapsed`;
 }
 
 // ─── Avatar SVG ───────────────────────────────────────────────────────────────
@@ -117,10 +126,11 @@ function AgentAvatar({ emoji, status, busy }: { emoji: string; status: string; b
 
 // ─── Computer / Work Area ─────────────────────────────────────────────────────
 
-function WorkArea({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: AgentStatus) => void }) {
+function WorkArea({ agent }: { agent: AgentStatus }) {
   const isWorking = agent.status === 'Working';
-  const isIdle    = agent.status === 'Idle';
   const isOffline = agent.status === 'Offline';
+  const work = agent.work;
+  const title = work?.title || work?.goal || 'Declared work unavailable';
 
   return (
     <div
@@ -134,91 +144,39 @@ function WorkArea({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: Agent
         position: 'relative',
       }}
     >
-      {/* Monitor SVG */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={(e) => { e.stopPropagation(); onOpen(agent); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); onOpen(agent); } }}
-          aria-label={`Open activity for ${agent.label}`}
-          style={{
-            border: 'none',
-            background: 'transparent',
-            padding: 0,
-            cursor: 'pointer',
-            borderRadius: 8,
-            outline: 'none',
-          }}
-        >
+        <div aria-hidden="true">
           <MonitorSVG active={isWorking} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          {isOffline ? (
+          {isOffline && !work ? (
             <div style={{ color: '#667799', fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>
               No recent activity
             </div>
-          ) : isIdle ? (
-            <div style={{ color: '#ffd060', fontSize: 12, marginTop: 4 }}>
-              💤 Idle
-              {agent.currentTask && (
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 11,
-                    color: '#9fefff',
-                    opacity: 0.7,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={agent.currentTask}
-                >
-                  Last: {agent.currentTask}
-                </div>
-              )}
-            </div>
           ) : (
-            // Working
             <div style={{ marginTop: 2 }}>
               <div
                 style={{
                   fontSize: 11,
-                  color: '#33ffcc',
+                  color: isWorking ? '#33ffcc' : '#ffd060',
                   fontWeight: 700,
                   display: 'flex',
                   alignItems: 'center',
                   gap: 5,
                 }}
               >
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: 7,
-                    height: 7,
-                    borderRadius: '50%',
-                    background: '#33ffcc',
-                    animation: 'officeDotPulse 1s ease-in-out infinite',
-                  }}
-                />
-                Working
+                {work?.status ?? 'unknown'} · {work?.phase ?? 'unknown'}
               </div>
-              {agent.currentTask && (
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 11,
-                    color: '#bff7ff',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    maxWidth: '100%',
-                  }}
-                  title={agent.currentTask}
-                >
-                  {agent.currentTask}
-                </div>
-              )}
+              <div style={{ marginTop: 4, fontSize: 12, color: '#bff7ff', fontWeight: 650, overflowWrap: 'anywhere' }}>{title}</div>
+              <div style={{ marginTop: 5, fontSize: 10, color: '#9fefff', opacity: 0.72 }}>
+                {fmtDuration(work?.elapsedMs ?? null)} · {work?.freshness ?? 'unknown'} freshness
+              </div>
+              <div style={{ marginTop: 4, fontSize: 10, color: '#b7c8dc' }}>
+                {work?.lastEvent ? `${work.lastEvent.category}: ${work.lastEvent.summary}` : 'No safe event available'}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 10, color: '#8195ad' }}>
+                {work?.childCount ?? 0} children · blocker {work?.blockerCategory ?? 'none'} · progress {work?.progress.kind === 'milestones' ? `${work.progress.completed}/${work.progress.total} ${work.progress.unit}` : 'indeterminate'}
+              </div>
             </div>
           )}
         </div>
@@ -270,17 +228,13 @@ function MonitorSVG({ active }: { active: boolean }) {
 
 // ─── Agent Desk Card ──────────────────────────────────────────────────────────
 
-function DeskCard({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: AgentStatus) => void }) {
+function DeskCard({ agent }: { agent: AgentStatus }) {
   const color  = STATUS_COLORS[agent.status] ?? '#667799';
   const bg     = STATUS_BG[agent.status]     ?? 'rgba(40,50,70,0.08)';
   const border = STATUS_BORDER[agent.status] ?? 'rgba(80,100,140,0.18)';
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen(agent)}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(agent); }}
       style={{
         borderRadius: 18,
         border: `1px solid ${border}`,
@@ -292,7 +246,6 @@ function DeskCard({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: Agent
         display: 'flex',
         flexDirection: 'column',
         transition: 'box-shadow 0.4s ease, transform 0.2s ease, border-color 0.2s ease',
-        cursor: 'pointer',
       }}
     >
       {/* Header: avatar + name + status badge */}
@@ -346,7 +299,7 @@ function DeskCard({ agent, onOpen }: { agent: AgentStatus; onOpen: (agent: Agent
       </div>
 
       {/* Work area */}
-      <WorkArea agent={agent} onOpen={onOpen} />
+      <WorkArea agent={agent} />
 
       {/* Footer: last seen */}
       <div
@@ -434,7 +387,6 @@ export default function OfficePage() {
   const [suppressedCount, setSuppressedCount] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedAgent, setSelectedAgent] = useState<AgentStatus | null>(null);
 
   async function fetchStatus() {
     try {
@@ -469,7 +421,7 @@ export default function OfficePage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <SectionTitle
             title="Digital Office"
-            subtitle="Canonical active roster with live work state and activity drill-in."
+            subtitle="Canonical active roster with allowlisted live work state. No prompts, transcripts, reasoning, or tool payloads."
           />
           <div className="flex flex-col items-end gap-2 text-xs text-slate-400">
             <StatusBadge
@@ -503,7 +455,7 @@ export default function OfficePage() {
         {/* Agent grid */}
         <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
           {agents.map((agent) => (
-            <DeskCard key={agent.id} agent={agent} onOpen={setSelectedAgent} />
+            <DeskCard key={agent.id} agent={agent} />
           ))}
 
           {/* Empty state */}
@@ -514,17 +466,11 @@ export default function OfficePage() {
           )}
         </div>
 
-        <AgentActivityDrawer
-          agent={selectedAgent ? { ...selectedAgent, id: selectedAgent.sourceId } : null}
-          open={!!selectedAgent}
-          onClose={() => setSelectedAgent(null)}
-        />
-
         <div className={card2 + ' flex flex-wrap gap-4 p-3 text-xs text-slate-400'}>
-          <span><span style={{ color: '#33ffcc' }}>Working</span>: upstream working and seen within 2m</span>
-          <span><span style={{ color: '#ffd060' }}>Idle</span>: upstream active and seen within 20m</span>
+          <span><span style={{ color: '#33ffcc' }}>Working</span>: supported task metadata reports active work</span>
+          <span><span style={{ color: '#ffd060' }}>Idle</span>: recent metadata heartbeat, no confirmed active task</span>
           {suppressedCount > 0 && <span>{suppressedCount} older alias representation{suppressedCount === 1 ? '' : 's'} suppressed</span>}
-          <span className="ml-auto">Source: one-minute collector snapshot</span>
+          <span className="ml-auto">Source: allowlisted OpenClaw metadata snapshot</span>
         </div>
       </div>
     </AppShell>

@@ -25,6 +25,7 @@ export type ActiveAgentStatus = 'Working' | 'Idle';
 export interface RawAgentStatus {
   id: string; label?: string; emoji?: string; busy?: boolean; status?: string; lastSeen?: string | null;
   currentTask?: string | null; sessionId?: string | null; model?: string | null;
+  work?: SafeWorkProjection | null;
 }
 
 export interface CanonicalAgentIdentity {
@@ -41,6 +42,7 @@ export interface CanonicalAgentIdentity {
   currentTask: string | null;
   sessionId: string | null;
   model: string | null;
+  work: SafeWorkProjection | null;
   inactiveReason: string | null;
 }
 
@@ -198,6 +200,7 @@ export function buildCanonicalRoster(rawAgents: RawAgentStatus[], snapshotAt: un
       currentTask: winner.currentTask?.trim() || null,
       sessionId: winner.sessionId?.trim() || null,
       model: winner.model?.trim() || null,
+      work: winner.work ?? null,
       inactiveReason: availability.reason,
     });
   });
@@ -245,3 +248,4 @@ export function buildTeamDirectory(rawAgents: RawAgentStatus[], snapshotAt: unkn
   })));
   return { roles, active: projection.active, unassignedActive, aliasHistory, health: projection.health };
 }
+import type { SafeWorkProjection } from '../api/agents/status/safe-work-model';
