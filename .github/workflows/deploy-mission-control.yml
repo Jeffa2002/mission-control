@@ -61,6 +61,8 @@ jobs:
         working-directory: /var/www/mission-control/apps
         run: |
           set -euo pipefail
+          exec 9>/var/lock/per-web-deploy.lock
+          flock -w 1800 9
           if current_image="$(docker image inspect --format '{{.Id}}' apps-panel:latest 2>/dev/null)"; then
             docker image tag "$current_image" apps-panel:rollback
           fi
