@@ -206,6 +206,7 @@ const APPS = [
     name: 'Mission Control',
     description: 'Operations panel',
     url: 'https://mission.effectx.com.au',
+    probeUrl: 'http://127.0.0.1:3020',
     healthPath: '/',
     kind: 'internal',
     upstream: '127.0.0.1:3020',
@@ -280,7 +281,7 @@ async function checkApp(app: typeof APPS[number]): Promise<AppHealth> {
     (async () => {
       try {
         const res = await Promise.race([
-          fetch(`${app.url}${app.healthPath}`, {
+          fetch(`${'probeUrl' in app ? app.probeUrl : app.url}${app.healthPath}`, {
             cache: 'no-store',
             headers: { 'User-Agent': 'MissionControl/1.0 HealthCheck' },
           }),
