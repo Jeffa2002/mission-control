@@ -3,6 +3,7 @@ import JSZip from 'jszip';
 import { readFile } from 'node:fs/promises';
 import { requireSessionAuth } from '../../_session-auth';
 import { redactIncidentText } from './incident-bundle-model';
+import { audit } from '../../_util';
 
 function safeName(s: string) {
   return s.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -20,14 +21,21 @@ export async function GET(req: Request) {
     zip.file('README.txt', `Mission Control incident bundle\nGenerated: ${new Date().toISOString()}\nWindow: last ${minutes} minutes\nContents are allowlisted and redacted. Raw configuration, container state, and secrets are intentionally excluded.\n`);
 
     // Mission Control audit tail
-    const audit = await readFile('/workspace/mission-control/runtime/audit.log', 'utf-8').catch(() => '');
-    if (audit) {
-      const lines = audit.split('\n').filter(Boolean);
-      zip.file('mission-control/audit-tail.jsonl', redactIncidentText(lines.slice(-200).join('\n')) + '\n');
+    const auditLog = await readFile('/workspace/mission-control/runtime/audit.log', 'utf-8').catch(() => '');
+    if (auditLog) {
+      const lines = auditLog.split('\n').filter(Boolean);
+      const bounded = lines.slice(-200).join('\n').slice(-262_144);
+      zip.file('mission-control/audit-tail.jsonl', redactIncidentText(bounded) + '\n');
     }
 
     const out = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
     const filename = safeName(`incident_${new Date().toISOString()}_${minutes}m.zip`);
+    await audit('incident_bundle_export', `sanitized incident bundle exported (${minutes} minutes)`, {
+      actor: 'session',
+      auth_method: 'session',
+      ip: req.headers.get('x-real-ip') || 'unknown',
+      result: 'ok',
+    }).catch(() => {});
 
     return new NextResponse(out.buffer as any, {
       headers: {

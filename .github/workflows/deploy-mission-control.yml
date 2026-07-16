@@ -72,6 +72,16 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 0700 -o 100 -g 101 /var/www/mission-control/runtime/auth
+          install -d -m 0750 -o 100 -g 101 /var/www/mission-control/runtime
+          touch /var/www/mission-control/runtime/audit.log
+          chown 100:101 /var/www/mission-control/runtime/audit.log
+          chmod 0640 /var/www/mission-control/runtime/audit.log
+          for state_file in armed.json panic_latch.json; do
+            if [ -e "/var/www/mission-control/runtime/$state_file" ]; then
+              chown 100:101 "/var/www/mission-control/runtime/$state_file"
+              chmod 0640 "/var/www/mission-control/runtime/$state_file"
+            fi
+          done
           exec 9>/var/lock/per-web-deploy.lock
           flock -w 1800 9
           if current_image="$(docker image inspect --format '{{.Id}}' apps-panel:latest 2>/dev/null)"; then
