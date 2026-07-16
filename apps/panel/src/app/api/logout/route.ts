@@ -6,10 +6,7 @@ export async function POST(req: Request) {
   const authErr = requireSessionAuth(req);
   if (authErr) return authErr;
 
-  const ip =
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    req.headers.get('x-real-ip') ??
-    'unknown';
+  const ip = req.headers.get('x-real-ip') ?? 'unknown';
 
   await audit('logout', 'session cookie cleared', {
     actor: 'session',

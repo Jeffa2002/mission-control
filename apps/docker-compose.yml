@@ -19,7 +19,7 @@ services:
       - "127.0.0.1:3020:3020"
     volumes:
       - /root/.openclaw/workspace:/workspace:ro
-      - /var/www/mission-control/runtime:/workspace/mission-control/runtime:ro
+      - /var/www/mission-control/runtime:/workspace/mission-control/runtime
       - /root/.openclaw/agents:/agent-data:ro
       - /root/.openclaw/workspace:/workspace-data:ro
       - /root/.ssh/mission_security_telemetry:/root/.ssh/mission_security_telemetry:ro
