@@ -3,8 +3,7 @@ import { isSessionAuthorized } from './_session-auth-core';
 
 /**
  * Session cookie auth guard for API routes.
- * Reads `mc_auth` cookie from the request and validates it against
- * the `MISSION_COOKIE_SECRET` env var using a timing-safe comparison.
+ * Validates the short-lived HMAC-signed `mc_auth` cookie.
  *
  * Returns a 401 NextResponse if auth fails, or null if auth is OK.
  */

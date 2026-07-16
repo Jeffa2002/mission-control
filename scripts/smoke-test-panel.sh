@@ -2,9 +2,14 @@
 set -euo pipefail
 
 BASE_URL="${1:-http://127.0.0.1:3020}"
-: "${MISSION_COOKIE_SECRET:?MISSION_COOKIE_SECRET must be set}"
+: "${MISSION_USER:?MISSION_USER must be set}"
+: "${MISSION_PASSWORD:?MISSION_PASSWORD must be set}"
 
-curl_auth=(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET")
+cookie_jar="$(mktemp)"
+trap 'rm -f "$cookie_jar"' EXIT
+login_payload="$(node -e 'process.stdout.write(JSON.stringify({user:process.env.MISSION_USER,password:process.env.MISSION_PASSWORD}))')"
+curl -fsS -c "$cookie_jar" -H 'content-type: application/json' --data "$login_payload" "$BASE_URL/api/login" >/dev/null
+curl_auth=(curl -fsS -b "$cookie_jar")
 
 dashboard_html="$("${curl_auth[@]}" "$BASE_URL/")"
 security_html="$("${curl_auth[@]}" "$BASE_URL/security")"

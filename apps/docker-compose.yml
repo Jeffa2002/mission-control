@@ -25,12 +25,18 @@ services:
       - /root/.ssh/mission_security_telemetry:/root/.ssh/mission_security_telemetry:ro
       - /root/.ssh/prod_deploy_v3:/root/.ssh/prod_deploy_v3:ro
       - /var/log:/host-logs:ro
+      - /var/www/mission-control/runtime/auth:/auth-data
     security_opt:
       - no-new-privileges:true
+    read_only: true
     cap_drop:
       - ALL
     tmpfs:
       - /tmp:size=64m,mode=1777
+      - /app/.next/cache:size=64m,uid=100,gid=101
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2.0
     networks:
       - infra_default
       - docker_api

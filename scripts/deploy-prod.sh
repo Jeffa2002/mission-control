@@ -24,7 +24,9 @@ SSH_OPTS=(
   -i "$PROD_KEY"
   -p "$PROD_PORT"
   -o BatchMode=yes
-  -o StrictHostKeyChecking=no
+  -o StrictHostKeyChecking=yes
+  -o UserKnownHostsFile=/root/.ssh/known_hosts
+  -o 'HostKeyAlias=[203.57.50.240]:2222'
 )
 
 RSYNC_EXCLUDES=(
