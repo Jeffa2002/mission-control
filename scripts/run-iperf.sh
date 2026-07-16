@@ -88,6 +88,7 @@ try:
     with os.fdopen(fd, "w") as f:
         json.dump(snapshot, f, indent=2)
         f.write("\n")
+    os.chmod(tmp, 0o644)
     os.replace(tmp, output)
 finally:
     if os.path.exists(tmp):
