@@ -133,6 +133,7 @@ const APPS = [
     upstream: '100.112.179.70:443',
     source: 'crm8 tailnet host',
     color: '#F43F5E',
+    healthyStatusCodes: [403],
   },
   {
     id: 'effectx-site',
@@ -152,17 +153,6 @@ const APPS = [
     url: 'https://equim8.com.au',
     healthPath: '/',
     kind: 'site',
-    upstream: 'static export',
-    source: '/var/www/equim8-site/out',
-    color: '#84CC16',
-  },
-  {
-    id: 'equim8-effectx-alias',
-    name: 'Equim8 EffectX Alias',
-    description: 'EffectX-hosted Equim8 alias',
-    url: 'https://equim8.effectx.com.au',
-    healthPath: '/',
-    kind: 'alias',
     upstream: 'static export',
     source: '/var/www/equim8-site/out',
     color: '#84CC16',
@@ -299,8 +289,9 @@ async function checkApp(app: typeof APPS[number]): Promise<AppHealth> {
           ),
         ]);
         const latencyMs = Date.now() - start;
-        // 2xx and 3xx = up, 4xx = reachable but unhealthy/auth-blocked, 5xx = down.
-        const status: AppStatus = res.status < 400 ? 'up' : res.status < 500 ? 'degraded' : 'down';
+        const expectedStatus = 'healthyStatusCodes' in app && (app.healthyStatusCodes as readonly number[]).includes(res.status);
+        // 2xx/3xx and explicitly configured access-control responses are healthy.
+        const status: AppStatus = res.status < 400 || expectedStatus ? 'up' : res.status < 500 ? 'degraded' : 'down';
         return { status, statusCode: res.status, latencyMs, error: undefined as string | undefined };
       } catch (e: any) {
         return { status: 'down' as AppStatus, latencyMs: Date.now() - start, error: String(e?.message || e), statusCode: undefined };
