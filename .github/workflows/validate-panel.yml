@@ -3,11 +3,6 @@ name: Validate Panel
 on:
   pull_request:
     branches: [master]
-    paths:
-      - 'apps/panel/**'
-      - 'apps/docker-compose.yml'
-      - 'scripts/**'
-      - '.github/workflows/**'
 
 permissions:
   contents: read
