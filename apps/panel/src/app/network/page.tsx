@@ -21,8 +21,8 @@ interface NetworkData {
 }
 
 /* ─── History types ──────────────────────────────────────────────────── */
-interface HistoryPoint { ts: string; value: number; recv?: number; rtt?: number; }
-interface HistoryData { node: string; range: string; metric: string; points: HistoryPoint[]; }
+interface HistoryPoint { ts: string; value: number | null; recv?: number; rtt?: number; loss?: number; availability?: number; retransmits?: number; samples?: number; }
+interface HistoryData { node: string; range: string; metric: string; summary?: Record<string, number | string | null>; points: HistoryPoint[]; }
 
 /* ─── Node positions (SVG viewBox 0 0 600 340) ──────────────────────── */
 const NODE_POS: Record<string, { x: number; y: number }> = {
@@ -188,7 +188,7 @@ function NodeCircle({ node, selected, onClick }: { node: NodeData; selected: boo
 }
 
 /* ─── SVG Line Chart ─────────────────────────────────────────────────── */
-interface LineConfig { points: HistoryPoint[]; valueKey: 'value' | 'recv'; color: string; label: string; }
+interface LineConfig { points: HistoryPoint[]; valueKey: 'value' | 'recv' | 'loss' | 'availability'; color: string; label: string; }
 
 function SvgLineChart({ lines, range }: { lines: LineConfig[]; range: HistoryRange }) {
   const W = 560, H = 160;
@@ -197,9 +197,7 @@ function SvgLineChart({ lines, range }: { lines: LineConfig[]; range: HistoryRan
   const plotH = H - PAD.top - PAD.bottom;
 
   // Collect all values across all series
-  const allVals = lines.flatMap(l =>
-    l.points.map(p => (l.valueKey === 'recv' ? (p.recv ?? null) : p.value)).filter((v): v is number => v !== null && v !== undefined)
-  );
+  const allVals = lines.flatMap(l => l.points.map(p => p[l.valueKey] ?? null).filter((v): v is number => v !== null && v !== undefined));
   if (!allVals.length) return null;
 
   const rawMin = Math.min(...allVals);
@@ -261,7 +259,7 @@ function SvgLineChart({ lines, range }: { lines: LineConfig[]; range: HistoryRan
       {lines.map((line, li) => {
         const pathParts: string[] = [];
         line.points.forEach((p, i) => {
-          const raw = line.valueKey === 'recv' ? (p.recv ?? null) : p.value;
+          const raw = p[line.valueKey] ?? null;
           if (raw === null || raw === undefined) return;
           const cmd = pathParts.length === 0 ? 'M' : 'L';
           pathParts.push(`${cmd}${toX(i).toFixed(1)} ${toY(raw).toFixed(1)}`);
@@ -284,7 +282,7 @@ function SvgLineChart({ lines, range }: { lines: LineConfig[]; range: HistoryRan
       {lines.map((line, li) => {
         const last = line.points[line.points.length - 1];
         if (!last) return null;
-        const raw = line.valueKey === 'recv' ? (last.recv ?? null) : last.value;
+        const raw = last[line.valueKey] ?? null;
         if (raw === null || raw === undefined) return null;
         return (
           <circle key={li}
@@ -414,6 +412,12 @@ function NetworkHistorySection() {
     { points: iperfData?.points ?? [], valueKey: 'value', color: 'var(--accent)',      label: '↑ Send' },
     { points: iperfData?.points ?? [], valueKey: 'recv',  color: 'var(--sev-healthy)', label: '↓ Recv' },
   ];
+  const availabilityLines: LineConfig[] = [
+    { points: pingData?.points ?? [], valueKey: 'availability', color: 'var(--sev-healthy)', label: 'Availability' },
+    { points: pingData?.points ?? [], valueKey: 'loss', color: 'var(--sev-critical)', label: 'Packet loss' },
+  ];
+  const pingSummary = pingData?.summary ?? {};
+  const iperfSummary = iperfData?.summary ?? {};
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
     padding: '5px 14px',
@@ -439,9 +443,13 @@ function NetworkHistorySection() {
       {/* Section header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-1)', letterSpacing: 0, whiteSpace: 'nowrap' }}>
-          📈 Network History
+          📈 Per-server Network Monitor
         </div>
         <div style={{ flex: 1, height: 1, background: 'rgba(148,163,184,0.1)' }} />
+      </div>
+
+      <div style={{ fontSize: 11, color: '#64748B', marginTop: -8 }}>
+        Retained latency, availability, packet-loss and throughput history. Raw probes are kept for 30 days; hourly rollups preserve the long view.
       </div>
 
       {error && <div role="status" style={{ color: 'var(--sev-critical)', fontSize: 12 }}>History unavailable: {error}</div>}
@@ -466,6 +474,23 @@ function NetworkHistorySection() {
         </div>
       </div>
 
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 8 }}>
+        {[
+          ['Availability', pingSummary.availabilityPct == null ? '—' : `${Number(pingSummary.availabilityPct).toFixed(2)}%`, `${pingSummary.samples ?? 0} ping samples`],
+          ['Average RTT', pingSummary.averageMs == null ? '—' : `${Number(pingSummary.averageMs).toFixed(1)}ms`, 'retained probe average'],
+          ['Peak RTT', pingSummary.maximumMs == null ? '—' : `${Number(pingSummary.maximumMs).toFixed(1)}ms`, 'highest bucket average'],
+          ['Average send', iperfSummary.averageSendMbps == null ? '—' : fmtMbps(Number(iperfSummary.averageSendMbps)), `${iperfSummary.samples ?? 0} speed tests`],
+          ['Average receive', iperfSummary.averageRecvMbps == null ? '—' : fmtMbps(Number(iperfSummary.averageRecvMbps)), 'iperf receive stream'],
+          ['Retransmits', String(iperfSummary.retransmits ?? '—'), 'selected period total'],
+        ].map(([label, value, hint]) => (
+          <div key={label} style={{ padding: 11, borderRadius: 11, border: '1px solid rgba(103,213,255,0.12)', background: 'linear-gradient(145deg, rgba(103,213,255,0.07), rgba(255,255,255,0.025))' }}>
+            <div style={{ fontSize: 9, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 900 }}>{label}</div>
+            <div style={{ marginTop: 5, fontSize: 17, color: '#F3F7FF', fontWeight: 950 }}>{value}</div>
+            <div style={{ marginTop: 3, fontSize: 9, color: '#64748B' }}>{hint}</div>
+          </div>
+        ))}
+      </div>
+
       {/* Chart panels — side by side, stack on narrow */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         <HistoryChartPanel
@@ -477,6 +502,12 @@ function NetworkHistorySection() {
         <HistoryChartPanel
           title="Throughput (Mbps)"
           lines={iperfLines}
+          loading={loading}
+          range={activeRange}
+        />
+        <HistoryChartPanel
+          title="Availability / Packet Loss (%)"
+          lines={availabilityLines}
           loading={loading}
           range={activeRange}
         />
@@ -726,6 +757,70 @@ function EventStrip({ nodes, links, measuredAt }: { nodes: NodeData[]; links: Li
   );
 }
 
+function HistoricalTimeline() {
+  const [range, setRange] = useState<HistoryRange>('week');
+  const [events, setEvents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/network/timeline?range=${range}`, { cache: 'no-store' })
+      .then(async response => {
+        if (!response.ok) throw new Error(`Timeline request failed (${response.status})`);
+        return response.json();
+      })
+      .then(data => { if (!cancelled) setEvents(Array.isArray(data.events) ? data.events : []); })
+      .catch(caught => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [range]);
+
+  const colors: Record<string, string> = { critical: '#EF4444', warning: '#F59E0B', healthy: '#22C55E', info: '#67D5FF' };
+  const labels: Record<HistoryRange, string> = { day: '24h', week: '7d', month: '31d', year: '1y' };
+
+  return (
+    <GlassPanel style={{ padding: 16 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <PanelTitle eyebrow="Historical Timeline" title="Recorded network events" />
+        <div style={{ display: 'flex', gap: 5 }}>
+          {HISTORY_RANGES.map(option => (
+            <button key={option} type="button" onClick={() => setRange(option)} style={{
+              padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 850,
+              border: range === option ? '1px solid rgba(103,213,255,0.42)' : '1px solid rgba(255,255,255,0.08)',
+              background: range === option ? 'rgba(103,213,255,0.12)' : 'rgba(255,255,255,0.03)',
+              color: range === option ? '#67D5FF' : '#8B96AA',
+            }}>{labels[option]}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginTop: 4, fontSize: 11, color: '#64748B' }}>Persistent reachability transitions and iperf measurements from the network archive.</div>
+      {error && <div role="status" style={{ marginTop: 12, color: '#EF4444', fontSize: 11 }}>{error}</div>}
+      {loading && <div style={{ padding: 24, color: '#64748B', fontSize: 11, textAlign: 'center' }}>Loading retained events…</div>}
+      {!loading && !error && events.length === 0 && <div style={{ padding: 24, color: '#64748B', fontSize: 11, textAlign: 'center' }}>No events recorded in this period.</div>}
+      {!loading && events.length > 0 && (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 430, overflowY: 'auto', paddingRight: 3 }}>
+          {events.map((event, index) => {
+            const color = colors[event.severity] ?? '#67D5FF';
+            return (
+              <div key={`${event.ts}-${event.node}-${index}`} style={{ display: 'grid', gridTemplateColumns: '110px 10px minmax(0,1fr)', gap: 9, alignItems: 'start', padding: '9px 10px', borderRadius: 10, border: `1px solid ${color}22`, background: `${color}09` }}>
+                <time dateTime={event.ts} style={{ fontSize: 10, color: '#64748B', fontVariantNumeric: 'tabular-nums' }}>{new Date(event.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time>
+                <span style={{ width: 8, height: 8, marginTop: 2, borderRadius: 99, background: color, boxShadow: `0 0 10px ${color}` }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: '#F3F7FF', fontWeight: 900 }}>{event.title}</div>
+                  <div style={{ marginTop: 2, fontSize: 10, color: '#8B96AA', lineHeight: 1.35 }}>{event.detail}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </GlassPanel>
+  );
+}
+
 function LayerPanel({ view, nodes, links, nodeMap, measuredAt, setSelectedNode, setSelectedLink }: any) {
   if (view === 'Services') {
     const groups = [
@@ -774,7 +869,7 @@ function LayerPanel({ view, nodes, links, nodeMap, measuredAt, setSelectedNode, 
   }
 
   if (view === 'Timeline') {
-    return <EventStrip nodes={nodes} links={links} measuredAt={measuredAt} />;
+    return <HistoricalTimeline />;
   }
 
   return (
