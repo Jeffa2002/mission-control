@@ -105,7 +105,13 @@ function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, selected
   const off = 9;
 
   return (
-    <g onClick={onClick} style={{ cursor: 'pointer' }}>
+    <g
+      onClick={onClick}
+      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick(); } }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Inspect endpoint link, ${active ? 'both endpoints online' : 'reachability incomplete'}`}
+      style={{ cursor: 'pointer' }}>
       <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={16} />
       {selected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={8} strokeOpacity={0.12} />}
       <line x1={x1} y1={y1} x2={x2} y2={y2}
@@ -149,7 +155,13 @@ function NodeCircle({ node, selected, onClick }: { node: NodeData; selected: boo
   const r = 28;
 
   return (
-    <g onClick={onClick} style={{ cursor: 'pointer' }}>
+    <g
+      onClick={onClick}
+      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick(); } }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Inspect ${node.label}, ${node.status}, ${fmtMs(node.latencyMs)}`}
+      style={{ cursor: 'pointer' }}>
       {/* Glow */}
       <circle cx={pos.x} cy={pos.y} r={r + 10} fill={sc} fillOpacity={selected ? 0.15 : 0.07}>
         {node.status === 'online' && (
@@ -363,19 +375,30 @@ function NetworkHistorySection() {
   const [pingData, setPingData]   = useState<HistoryData | null>(null);
   const [iperfData, setIperfData] = useState<HistoryData | null>(null);
   const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState<string | null>(null);
 
   const fetchHistory = useCallback(async (node: string, range: HistoryRange) => {
     setLoading(true);
-    // Don't clear data immediately — keep old data visible while loading
+    setError(null);
+    setPingData(null);
+    setIperfData(null);
     try {
       const [pr, ir] = await Promise.all([
         fetch(`/api/network/history?node=${node}&range=${range}&metric=ping`),
         fetch(`/api/network/history?node=${node}&range=${range}&metric=iperf`),
       ]);
-      if (pr.ok)  setPingData(await pr.json());
-      if (ir.ok) setIperfData(await ir.json());
-    } catch {}
-    setLoading(false);
+      if (!pr.ok || !ir.ok) throw new Error(`History request failed (${pr.status}/${ir.status})`);
+      const [ping, iperf] = await Promise.all([pr.json(), ir.json()]);
+      if (ping.node !== node || ping.range !== range || iperf.node !== node || iperf.range !== range) {
+        throw new Error('History response did not match the selected node and range');
+      }
+      setPingData(ping);
+      setIperfData(iperf);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { fetchHistory(activeNode, activeRange); }, [activeNode, activeRange, fetchHistory]);
@@ -420,6 +443,8 @@ function NetworkHistorySection() {
         </div>
         <div style={{ flex: 1, height: 1, background: 'rgba(148,163,184,0.1)' }} />
       </div>
+
+      {error && <div role="status" style={{ color: 'var(--sev-critical)', fontSize: 12 }}>History unavailable: {error}</div>}
 
       {/* Controls row */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
@@ -641,9 +666,10 @@ function NodeStatusList({ nodes, selectedNode, setSelectedNode, setSelectedLink 
       <PanelTitle eyebrow="Tailnet Nodes" title="Fleet reachability" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {(nodes || []).map((node: NodeData) => (
-          <div key={node.id}
+          <button type="button" key={node.id}
             onClick={() => { setSelectedNode(selectedNode === node.id ? null : node.id); setSelectedLink(null); }}
             style={{
+              width: '100%', color: 'inherit', textAlign: 'left',
               display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 9, padding: '9px 10px',
               borderRadius: 11, cursor: 'pointer',
               background: selectedNode === node.id ? 'rgba(103,213,255,0.10)' : 'rgba(255,255,255,0.025)',
@@ -660,7 +686,7 @@ function NodeStatusList({ nodes, selectedNode, setSelectedNode, setSelectedLink 
               <div style={{ fontSize: 11, fontWeight: 900, color: latencyColor(node.latencyMs) }}>{fmtMs(node.latencyMs)}</div>
               <div style={{ fontSize: 9, color: statusColor(node.status), textTransform: 'uppercase', letterSpacing: '0.07em' }}>{node.status}</div>
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </GlassPanel>
@@ -674,7 +700,7 @@ function EventStrip({ nodes, links, measuredAt }: { nodes: NodeData[]; links: Li
       .map(n => ({ tone: n.status === 'degraded' ? '#F59E0B' : '#EF4444', title: `${n.label} ${n.status}`, body: n.latencyMs === null ? 'No ping response from latest scan.' : `RTT is ${fmtMs(n.latencyMs)}.` })),
     ...links
       .filter(l => !l.active || l.packetLoss > 0 || (l.latencyMs ?? 0) > 50)
-      .map(l => ({ tone: !l.active ? '#EF4444' : '#F59E0B', title: `${l.from} → ${l.to}`, body: !l.active ? 'Route inactive or one endpoint offline.' : `Route latency is ${fmtMs(l.latencyMs)}.` })),
+      .map(l => ({ tone: !l.active ? '#EF4444' : '#F59E0B', title: `${l.from} → ${l.to}`, body: !l.active ? 'One or both endpoints did not respond.' : `Average endpoint RTT is ${fmtMs(l.latencyMs)}; this is not a route measurement.` })),
   ].slice(0, 5);
 
   const visibleEvents = events.length ? events : [
