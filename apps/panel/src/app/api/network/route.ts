@@ -6,7 +6,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-import { execSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'node:util';
 import { readFile, writeFile } from 'node:fs/promises';
 import { requireSessionAuth } from '../_session-auth';
 
@@ -45,9 +46,11 @@ let inFlight = false;
 let lastRefresh = 0;
 const REFRESH_INTERVAL_MS = 60_000; // only ping once per minute
 
-function ping(ip: string): number | null {
+const execFileAsync = promisify(execFile);
+
+async function ping(ip: string): Promise<number | null> {
   try {
-    const out = execSync(`ping -c 3 -W 1 -q ${ip} 2>/dev/null`, { timeout: 5000 }).toString();
+    const { stdout: out } = await execFileAsync('ping', ['-c', '3', '-W', '1', '-q', ip], { timeout: 5000 });
     const m = out.match(/= [\d.]+\/([\d.]+)\//);
     return m ? parseFloat(m[1]) : null;
   } catch { return null; }
@@ -74,7 +77,7 @@ function cacheMatchesNodes(cached: any) {
 }
 
 async function buildData(iperf: Record<string, any>) {
-  const pings = await Promise.all(NODES.map(async n => ({ id: n.id, ms: ping(n.ip) })));
+  const pings = await Promise.all(NODES.map(async n => ({ id: n.id, ms: await ping(n.ip) })));
   const pingMap: Record<string, number | null> = {};
   for (const p of pings) {
     pingMap[p.id] = p.ms;
