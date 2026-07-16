@@ -42,9 +42,13 @@ rsync -az --delete \
     "${PROD_HOST}:${PROD_AGENT_DATA}/" 2>/dev/null
 
 # ── 4. Write status JSON after rsync (so --delete doesn't wipe it) ────────────
+# Land as a temp file, then chown/chmod so the non-root panel container (uid 100,
+# gid 101) can read it, then atomically move into place.
 scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
     "$STATUS_FILE" \
-    "${PROD_HOST}:${PROD_AGENT_DATA}/agent-status.json" 2>/dev/null
+    "${PROD_HOST}:${PROD_AGENT_DATA}/agent-status.json.tmp" 2>/dev/null \
+  && ssh -i "$PROD_KEY" -p "$PROD_PORT" -o StrictHostKeyChecking=no "$PROD_HOST" \
+    "chown 100:101 '${PROD_AGENT_DATA}/agent-status.json.tmp'; chmod 640 '${PROD_AGENT_DATA}/agent-status.json.tmp'; mv '${PROD_AGENT_DATA}/agent-status.json.tmp' '${PROD_AGENT_DATA}/agent-status.json'" 2>/dev/null
 
 # ── 5. Sync iperf-results.json to prod agents dir ──────────────────────────────
 IPERF_SRC="/root/.openclaw/workspace/mission-control/iperf-results.json"
