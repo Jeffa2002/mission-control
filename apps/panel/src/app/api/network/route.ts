@@ -35,6 +35,7 @@ const LINK_DEFS = [
   { from: 'backup-melb', to: 'prod',        label: 'prod DB backup',      direction: 'melb←prod'    },
   { from: 'backup-melb', to: 'crm8',        label: 'crm8 DB backup',      direction: 'melb←crm8'   },
   { from: 'backup-melb', to: 'bazza',       label: 'bazza workspace bkp', direction: 'melb←bazza'  },
+  { from: 'backup-melb', to: 'shazza',      label: 'shazza backup',       direction: 'melb←shazza' },
   { from: 'bazza',       to: 'shazza',      label: 'tailnet telemetry',    direction: 'bazza→shazza' },
   { from: 'prod',        to: 'crm8',        label: 'tailnet peering',     direction: 'peer'         },
 ];
