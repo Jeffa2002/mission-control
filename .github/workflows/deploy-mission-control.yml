@@ -18,6 +18,7 @@ concurrency:
 jobs:
   deploy:
     name: Build and deploy panel
+    environment: production
     runs-on:
       - self-hosted
       - mission-control-prod
