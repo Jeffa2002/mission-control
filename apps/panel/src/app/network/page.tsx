@@ -28,6 +28,7 @@ interface HistoryData { node: string; range: string; metric: string; points: His
 const NODE_POS: Record<string, { x: number; y: number }> = {
   bazza:        { x: 300, y: 152 },
   sec1:         { x: 300, y: 34  },
+  'secspy-lab01': { x: 132, y: 92 },
   prod:         { x: 472, y: 122 },
   crm8:         { x: 492, y: 248 },
   shazza:       { x: 120, y: 244 },
@@ -42,6 +43,7 @@ const HISTORY_NODES = [
   { id: 'backup-melb', label: 'Backup Melb' },
   { id: 'bazza',       label: 'Bazza' },
   { id: 'sec1',        label: 'Sec1' },
+  { id: 'secspy-lab01', label: 'SecSpy Lab' },
 ];
 const HISTORY_RANGES = ['day', 'week', 'month', 'year'] as const;
 type HistoryRange = typeof HISTORY_RANGES[number];
