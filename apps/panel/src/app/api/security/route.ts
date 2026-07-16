@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server';
 import { requireSessionAuth } from '../_session-auth';
 import fs from 'fs/promises';
 import { collectSecurityData } from './_security-collector';
+import { readCloudflare } from './_cloudflare-source';
 
 const SECURITY_FILES = [
   process.env.SECURITY_DATA_FILE,
@@ -22,7 +23,11 @@ export async function GET(req: Request) {
   if (authErr) return authErr;
 
   try {
-    return NextResponse.json(await collectSecurityData());
+    const [core, cloudflare] = await Promise.all([
+      collectSecurityData(),
+      readCloudflare().catch(() => null),
+    ]);
+    return NextResponse.json({ ...core, cloudflare });
   } catch {
     // fall back to the legacy sync file below
   }

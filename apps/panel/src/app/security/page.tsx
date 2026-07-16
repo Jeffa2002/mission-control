@@ -28,6 +28,24 @@ type SecurityData = {
   kernel?: { issueCount: number; criticalCount?: number; byHost?: Rollup[]; recent: string[] };
   system?: { issueCount: number; criticalCount?: number; byHost?: Rollup[]; recent: string[] };
   timeline?: { recent: string[] };
+  cloudflare?: CloudflareData | null;
+};
+
+
+type CloudflareOffender = { ip: string; count: number; country?: string };
+type CloudflareZoneStat = { name: string; blocked: number; error?: string };
+type CloudflareData = {
+  available: boolean;
+  checkedAt: string;
+  blocked24h: number;
+  windowHours: number;
+  baseline?: number | null;
+  deviation?: number | null;
+  spike: boolean;
+  topOffenders: CloudflareOffender[];
+  byZone: CloudflareZoneStat[];
+  errors: string[];
+  skipped?: boolean;
 };
 
 type SecurityAlert = { time: string; type: string; detail: string; severity: 'low' | 'medium' | 'high' };
@@ -85,6 +103,7 @@ const EMPTY_SECURITY: SecurityData = {
   kernel: { issueCount: 0, criticalCount: 0, recent: [] },
   system: { issueCount: 0, criticalCount: 0, recent: [] },
   timeline: { recent: [] },
+  cloudflare: null,
 };
 
 const EMPTY_EVIDENCE: TargetedEvidence = { alerts: [], auth: [], firewall: [], web: [], ssh: [] };
@@ -309,6 +328,7 @@ export default function SecurityPage() {
     const requests = [
       ['summary', '/api/security'], ['alerts', '/api/security/alerts'], ['auth', '/api/security/auth-log'],
       ['firewall', '/api/security/firewall'], ['web', '/api/security/nginx-logs'], ['ssh', '/api/security/ssh-attacks'],
+      ['cloudflare', '/api/security/cloudflare'],
     ] as const;
     const results = await Promise.allSettled(requests.map(([, path]) => fetchJson(path)));
     const failures: string[] = [];
@@ -316,7 +336,8 @@ export default function SecurityPage() {
     results.forEach((result, index) => {
       const [key] = requests[index];
       if (result.status === 'rejected') { failures.push(`${key}: ${result.reason instanceof Error ? result.reason.message : 'request failed'}`); return; }
-      if (key === 'summary') setData(result.value);
+      if (key === 'summary') setData((prev) => ({ ...prev, ...result.value }));
+      if (key === 'cloudflare') setData((prev) => ({ ...prev, cloudflare: result.value }));
       if (key === 'alerts') nextEvidence.alerts = result.value.alerts ?? [];
       if (key === 'auth') nextEvidence.auth = result.value.recent ?? [];
       if (key === 'firewall') nextEvidence.firewall = result.value.recent ?? [];
@@ -341,8 +362,13 @@ export default function SecurityPage() {
   const reportingHosts = (data.hosts ?? []).filter((host) => host.reporting).length;
   const criticalCount = threats.filter((item) => item.tone === 'incident').length;
   const attentionCount = threats.filter((item) => item.tone === 'attention').length;
+  const cf = data.cloudflare ?? null;
+  const cfBlocked = cf?.blocked24h ?? 0;
+  const cfSpike = Boolean(cf?.spike);
+  const cfBaseline = cf?.baseline ?? null;
+  const cfDeviation = cf?.deviation ?? null;
   const sourceUnavailable = data.source === 'empty-fallback' || !data.checkedAt;
-  const posture: Tone = sourceUnavailable ? 'unknown' : criticalCount ? 'incident' : attentionCount || data.stale ? 'attention' : 'nominal';
+  const posture: Tone = sourceUnavailable ? 'unknown' : criticalCount ? 'incident' : (attentionCount || data.stale || cfSpike) ? 'attention' : 'nominal';
   const postureTitle = posture === 'incident' ? 'Containment review required' : posture === 'attention' ? 'Security needs review' : posture === 'nominal' ? 'Controls are holding' : 'Security posture unknown';
   const postureCopy = posture === 'incident' ? `${criticalCount} evidence-backed high-priority signal${criticalCount === 1 ? '' : 's'} require operator review.` : posture === 'attention' ? `${attentionCount} review signal${attentionCount === 1 ? '' : 's'} or coverage condition needs attention.` : posture === 'nominal' ? 'Loaded collectors show no ranked incident or attention condition. Unobserved stages remain unknown.' : 'The active collector cannot support a security assessment.';
   const currentSelection = selected ?? threats[0] ?? fallbackItem(data);
@@ -376,13 +402,23 @@ export default function SecurityPage() {
 
       <section className={styles.postureHero} aria-labelledby="security-posture-title">
         <div className={styles.postureMain}><ToneBadge tone={posture} /><p className={styles.eyebrow}>Overall security posture</p><h2 id="security-posture-title">{postureTitle}</h2><p>{postureCopy}</p><div className={styles.heroActions}><button type="button" disabled={actionBusy} onClick={() => runIntent('capture_diagnostics')}>Capture diagnostics</button><button type="button" disabled={actionBusy} onClick={() => runIntent('open_incident')}>Open incident intent</button><a href="/api/incident/bundle?minutes=30">Download evidence bundle</a></div>{actionMessage ? <p className={styles.actionMessage} role="status">{actionMessage}</p> : null}</div>
-        <dl className={styles.postureFacts}><div><dt>Review queue</dt><dd>{threats.length}</dd><span>{criticalCount} incident · {attentionCount} attention</span></div><div><dt>Host coverage</dt><dd>{reportingHosts}/{coverageTotal || '—'}</dd><span>registered channels reporting</span></div><div><dt>Active bans</dt><dd>{data.fail2ban.banned}</dd><span>{data.fail2ban.available ? 'Fail2ban available' : 'control unavailable or unreported'}</span></div><div><dt>Firewall blocks</dt><dd>{data.firewall?.blockCount ?? 0}</dd><span>{data.firewall?.sampleCount ?? 0} sampled records</span></div></dl>
+        <dl className={styles.postureFacts}><div><dt>Edge blocked (24h)</dt><dd data-spike={cfSpike ? 'true' : 'false'}>{cf ? cfBlocked.toLocaleString() : '—'}</dd><span>{cf == null ? 'Cloudflare unavailable' : cfSpike ? `SPIKE ${cfDeviation}x baseline` : cfBaseline ? `~${cfBaseline.toLocaleString()} typical` : 'Cloudflare edge'}</span></div><div><dt>Review queue</dt><dd>{threats.length}</dd><span>{criticalCount} incident · {attentionCount} attention</span></div><div><dt>Host coverage</dt><dd>{reportingHosts}/{coverageTotal || '—'}</dd><span>registered channels reporting</span></div><div><dt>Active bans</dt><dd>{data.fail2ban.banned}</dd><span>{data.fail2ban.available ? 'Fail2ban available' : 'control unavailable or unreported'}</span></div><div><dt>Firewall blocks</dt><dd>{data.firewall?.blockCount ?? 0}</dd><span>{data.firewall?.sampleCount ?? 0} sampled records</span></div></dl>
       </section>
 
       <div className={styles.workspace} id="security-workspace">
         <div className={styles.mainColumn}>
           <section className={`${styles.panel} ${styles.threatPanel}`} aria-labelledby="threat-title"><SectionHeading eyebrow="Triage" title="Active threats and review signals" copy="Ranked by impact, collector confidence, coverage risk, and operator actionability." action={<Link href="/incidents">Incident console →</Link>} />
             {threats.length ? <ol className={styles.threatList}>{threats.map((item, index) => <li key={item.id}><button type="button" data-selected={currentSelection.id === item.id} onClick={(event) => inspect(item, event)}><span className={styles.rank}>{String(index + 1).padStart(2, '0')}</span><span className={styles.threatBody}><span><ToneBadge tone={item.tone} label={item.state} /><ConfidenceBadge value={item.confidence} />{item.time ? <time>{relativeTime(item.time)}</time> : null}</span><strong>{item.title}</strong><small>{item.summary}</small></span><span aria-hidden="true">→</span></button></li>)}</ol> : <div className={styles.emptyState}><ToneBadge tone={posture === 'nominal' ? 'nominal' : 'unknown'} label={posture === 'nominal' ? 'No ranked signal' : 'Assessment unavailable'} /><strong>{posture === 'nominal' ? 'No action item meets the queue rules' : 'Collector coverage is insufficient'}</strong><p>{posture === 'nominal' ? 'Unobserved activity remains unknown and is not presented as safe.' : 'Restore collection before interpreting zero counts.'}</p></div>}
+          </section>
+
+          <section className={`${styles.panel} ${styles.edgePanel}`} aria-labelledby="edge-title"><SectionHeading eyebrow="Edge tier" title="Cloudflare edge blocks" copy="The loud outer layer. These attacks are stopped at Cloudflare before reaching origin; origin collectors never see them." action={<span className={styles.eyebrow}>{cf?.checkedAt ? relativeTime(cf.checkedAt) : 'no data'}</span>} />
+            {cf == null || cf.skipped ? <div className={styles.emptyState}><ToneBadge tone="unknown" label="Cloudflare unavailable" /><strong>No edge telemetry</strong><p>Cloudflare token/zones not configured or unreachable.</p></div> :
+            <div className={styles.edgeGrid}>
+              <div className={styles.edgeStat} data-spike={cfSpike ? 'true' : 'false'}><span className={styles.eyebrow}>Blocked (last {cf.windowHours}h)</span><strong>{cfBlocked.toLocaleString()}</strong><small>{cfSpike ? `⚠ SPIKE — ${cfDeviation}× the ~${(cfBaseline ?? 0).toLocaleString()} baseline` : cfBaseline ? `Baseline ~${cfBaseline.toLocaleString()} · ${cfDeviation ?? '—'}×` : 'Learning baseline…'}</small></div>
+              <div className={styles.edgeOffenders}><span className={styles.eyebrow}>Top offender IPs</span><ol>{cf.topOffenders.length ? cf.topOffenders.map((o) => <li key={o.ip}><code>{o.ip}</code><span>{o.country || '—'}</span><strong>{o.count.toLocaleString()}</strong></li>) : <li><span>No blocked sources in window</span></li>}</ol></div>
+              <div className={styles.edgeZones}><span className={styles.eyebrow}>By zone</span><ul>{cf.byZone.map((z) => <li key={z.name}><span>{z.name}</span><strong data-err={z.error ? 'true' : 'false'}>{z.error ? 'err' : z.blocked.toLocaleString()}</strong></li>)}</ul></div>
+            </div>}
+            {cf?.errors?.length ? <p className={styles.edgeErr}>Zone errors: {cf.errors.join('; ')}</p> : null}
           </section>
 
           <section className={`${styles.panel} ${styles.topology}`} aria-labelledby="topology-title"><SectionHeading eyebrow="Supported relationships" title="Host and exposure topology" copy="External signals flow to registered host channels and their actual reporting sources; no application dependency is inferred." action={<Link href="/estate">Estate →</Link>} />
