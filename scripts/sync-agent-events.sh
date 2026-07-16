@@ -20,15 +20,15 @@ reconcile_snapshot() {
   temporary=$(mktemp /tmp/mission-agent-status.XXXXXX.json)
   trap 'rm -f "$temporary"' RETURN
   python3 "$(dirname "$0")/collect-agent-observability.py" --output "$temporary" \
-    && rsync -az --chmod=F600 -e "ssh -i $PROD_KEY -p $PROD_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes" "$temporary" "$PROD_HOST:$REMOTE_SNAPSHOT_DIR/agent-status.json.tmp" \
-    && ssh -i "$PROD_KEY" -p "$PROD_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$PROD_HOST" "mv '$REMOTE_SNAPSHOT_DIR/agent-status.json.tmp' '$REMOTE_SNAPSHOT_DIR/agent-status.json'"
+    && rsync -az --chown=100:101 --chmod=F640 -e "ssh -i $PROD_KEY -p $PROD_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes" "$temporary" "$PROD_HOST:$REMOTE_SNAPSHOT_DIR/agent-status.json.tmp" \
+    && ssh -i "$PROD_KEY" -p "$PROD_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$PROD_HOST" "chown 100:101 '$REMOTE_SNAPSHOT_DIR/agent-status.json.tmp'; chmod 640 '$REMOTE_SNAPSHOT_DIR/agent-status.json.tmp'; mv '$REMOTE_SNAPSHOT_DIR/agent-status.json.tmp' '$REMOTE_SNAPSHOT_DIR/agent-status.json'"
 }
 next_reconcile=0
 while true; do
   if [[ -s "$SOURCE" ]]; then
-    ssh -i "$PROD_KEY" -p "$PROD_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$PROD_HOST" "install -d -m 700 '$REMOTE_DIR'" \
-      && rsync -az --chmod=F600 -e "ssh -i $PROD_KEY -p $PROD_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes" "$SOURCE" "$PROD_HOST:$REMOTE_DIR/agent-telemetry.json.tmp" \
-      && ssh -i "$PROD_KEY" -p "$PROD_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$PROD_HOST" "mv '$REMOTE_DIR/agent-telemetry.json.tmp' '$REMOTE_DIR/agent-telemetry.json'"
+    ssh -i "$PROD_KEY" -p "$PROD_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$PROD_HOST" "install -d -m 750 -o 100 -g 101 '$REMOTE_DIR'" \
+      && rsync -az --chown=100:101 --chmod=F640 -e "ssh -i $PROD_KEY -p $PROD_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes" "$SOURCE" "$PROD_HOST:$REMOTE_DIR/agent-telemetry.json.tmp" \
+      && ssh -i "$PROD_KEY" -p "$PROD_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$PROD_HOST" "chown 100:101 '$REMOTE_DIR/agent-telemetry.json.tmp'; chmod 640 '$REMOTE_DIR/agent-telemetry.json.tmp'; mv '$REMOTE_DIR/agent-telemetry.json.tmp' '$REMOTE_DIR/agent-telemetry.json'"
   fi
   now=$(date +%s)
   if (( now >= next_reconcile )); then
