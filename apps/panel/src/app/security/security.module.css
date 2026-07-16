@@ -153,3 +153,20 @@
 @media (max-width: 760px) { .header { align-items: flex-start; flex-direction: column; } .freshness { width: 100%; justify-content: space-between; white-space: normal; } .errorBanner { align-items: flex-start; flex-direction: column; } .errorBanner details { margin-left: 0; } .postureHero { padding: 24px 20px; } .postureMain h2 { font-size: clamp(36px,12vw,54px); } .postureFacts { grid-template-columns: repeat(2,minmax(0,1fr)); } .postureFacts div, .postureFacts div:nth-child(2n), .postureFacts div:nth-last-child(-n+2) { border-right: 1px solid var(--prism-line); border-bottom: 1px solid var(--prism-line); } .postureFacts div:nth-child(2n) { border-right: 0; } .postureFacts div:nth-last-child(-n+2) { border-bottom: 0; } .topologyGrid { grid-template-columns: 1fr; gap: 14px; } .topologyArrow { transform: rotate(90deg); } .killChain ol { grid-template-columns: repeat(2,minmax(0,1fr)); } .containmentGrid { grid-template-columns: 1fr; } .nextAction { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 520px) { .panel { padding: 16px; } .heroActions { flex-direction: column; } .heroActions > * { justify-content: center; width: 100%; } .threatList button { grid-template-columns: 25px minmax(0,1fr); } .threatList button > span:last-child { display: none; } .threatBody > span { flex-wrap: wrap; } .threatBody time { width: 100%; margin-left: 0; } .killChain ol { grid-template-columns: 1fr; } .killChain button { min-height: 150px; } }
 @media (prefers-reduced-motion: reduce) { .security *, .security *::before, .security *::after, .skipLink { animation: none !important; scroll-behavior: auto !important; transition: none !important; } }
+
+/* --- Cloudflare edge tier (added 2026-07-16) --- */
+.edgePanel .edgeGrid { display: grid; grid-template-columns: 1.1fr 1.4fr 0.9fr; gap: 1rem; }
+@media (max-width: 980px){ .edgePanel .edgeGrid { grid-template-columns: 1fr; } }
+.edgeStat { display:flex; flex-direction:column; gap:.25rem; padding:1rem; border-radius:12px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); }
+.edgeStat strong { font-size:2rem; line-height:1; }
+.edgeStat[data-spike="true"] { border-color:#EF4444; background:rgba(239,68,68,.08); }
+.edgeStat[data-spike="true"] strong { color:#EF4444; }
+.postureFacts dd[data-spike="true"] { color:#EF4444; }
+.edgeOffenders ol, .edgeZones ul { list-style:none; margin:.4rem 0 0; padding:0; display:flex; flex-direction:column; gap:.3rem; }
+.edgeOffenders li { display:grid; grid-template-columns:1fr auto auto; gap:.5rem; align-items:center; font-size:.85rem; }
+.edgeOffenders code { font-family:ui-monospace,monospace; }
+.edgeOffenders li span { opacity:.6; font-size:.75rem; }
+.edgeOffenders li strong { color:#F59E0B; }
+.edgeZones li { display:flex; justify-content:space-between; font-size:.85rem; padding:.15rem 0; border-bottom:1px solid rgba(255,255,255,.04); }
+.edgeZones strong[data-err="true"] { color:#EF4444; }
+.edgeErr { margin-top:.6rem; font-size:.75rem; color:#EF4444; opacity:.85; }

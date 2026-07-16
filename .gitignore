@@ -13,3 +13,4 @@ iperf-results.json
 network-history.db
 network-history.db-journal
 apps/panel/tsconfig.tsbuildinfo
+__pycache__/
