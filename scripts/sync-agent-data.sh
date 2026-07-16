@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+exec 9>/tmp/mission-control-agent-sync.lock
+flock -n 9 || exit 0
+
 AGENTS_DIR="/root/.openclaw/agents"
 PROD_HOST="root@100.95.166.47"
 PROD_PORT="2222"
@@ -33,6 +36,8 @@ rsync -az --delete \
     --exclude="shell_snapshots/" \
     --exclude="models_cache.json" \
     --exclude="agent-status.json" \
+    --exclude="iperf-results.json" \
+    --exclude="network-history.db" \
     "$AGENTS_DIR/" \
     "${PROD_HOST}:${PROD_AGENT_DATA}/" 2>/dev/null
 
@@ -54,13 +59,15 @@ DB="/root/.openclaw/workspace/mission-control/network-history.db"
 if [ -f "$DB" ]; then
   python3 - <<'PINGEOF'
 import subprocess, sqlite3, time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 NODES = {
     "prod":        "100.95.166.47",
+    "sec1":        "100.122.8.93",
+    "secspy-lab01":"100.87.75.20",
     "crm8":        "100.112.179.70",
     "shazza":      "100.113.217.81",
-    "backup-melb": "43.229.63.19",
+    "backup-melb": "100.110.100.97",
     "bazza":       "127.0.0.1",
 }
 
@@ -71,33 +78,72 @@ def ping(ip):
             stderr=subprocess.DEVNULL, timeout=8
         ).decode()
         import re
-        m = re.search(r"= [\d.]+/([\d.]+)/", out)
-        return float(m.group(1)) if m else None
+        latency = re.search(r"= [\d.]+/([\d.]+)/", out)
+        loss = re.search(r"([\d.]+)% packet loss", out)
+        return (float(latency.group(1)) if latency else None,
+                float(loss.group(1)) if loss else 100.0)
     except Exception:
-        return None
+        return None, 100.0
 
 ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 con = sqlite3.connect("/root/.openclaw/workspace/mission-control/network-history.db", timeout=30)
 cur = con.cursor()
 cur.execute("PRAGMA busy_timeout=30000")
+cur.execute("""CREATE TABLE IF NOT EXISTS ping_hourly (
+  bucket TEXT NOT NULL, node_id TEXT NOT NULL, ping_avg REAL, ping_min REAL,
+  ping_max REAL, packet_loss_avg REAL NOT NULL DEFAULT 0,
+  availability_pct REAL NOT NULL DEFAULT 100, samples INTEGER NOT NULL,
+  PRIMARY KEY (bucket, node_id))""")
+cur.execute("CREATE INDEX IF NOT EXISTS idx_ping_hourly_node ON ping_hourly(node_id, bucket)")
+columns = {row[1] for row in cur.execute("PRAGMA table_info(ping_history)")}
+if "reachable" not in columns:
+    cur.execute("ALTER TABLE ping_history ADD COLUMN reachable INTEGER NOT NULL DEFAULT 1")
+if "packet_loss" not in columns:
+    cur.execute("ALTER TABLE ping_history ADD COLUMN packet_loss REAL NOT NULL DEFAULT 0")
 rows = 0
 for node_id, ip in NODES.items():
-    ms = ping(ip)
-    if ms is not None:
-        cur.execute("INSERT INTO ping_history (ts, node_id, ping_ms) VALUES (?,?,?)", (ts, node_id, ms))
-        rows += 1
+    ms, loss = ping(ip)
+    cur.execute(
+        "INSERT INTO ping_history (ts, node_id, ping_ms, reachable, packet_loss) VALUES (?,?,?,?,?)",
+        (ts, node_id, ms, 1 if ms is not None else 0, loss),
+    )
+    rows += 1
+
+if int(time.strftime("%M")) % 10 == 0:
+    current_hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
+    last_bucket = cur.execute("SELECT MAX(bucket) FROM ping_hourly").fetchone()[0]
+    where = "ts < ?" if not last_bucket else "ts >= ? AND ts < ?"
+    params = (current_hour,) if not last_bucket else (last_bucket, current_hour)
+    cur.execute(f"""INSERT OR REPLACE INTO ping_hourly
+      (bucket,node_id,ping_avg,ping_min,ping_max,packet_loss_avg,availability_pct,samples)
+      SELECT strftime('%Y-%m-%dT%H:00:00Z',ts), node_id,
+             ROUND(AVG(ping_ms),2), ROUND(MIN(ping_ms),2), ROUND(MAX(ping_ms),2),
+             ROUND(AVG(packet_loss),2), ROUND(AVG(reachable)*100,2), COUNT(*)
+      FROM ping_history WHERE {where}
+      GROUP BY strftime('%Y-%m-%dT%H:00:00Z',ts), node_id""", params)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cur.execute("DELETE FROM ping_history WHERE ts < ?", (cutoff,))
 con.commit()
 con.close()
 print(f"Ping: {rows} rows recorded")
 PINGEOF
 fi
 
-# ── 6c. Sync network-history.db to prod ──────────────────────────────────────
+# ── 6c. Snapshot and atomically sync network-history.db to prod ──────────────
 if [ -f "$DB" ] && [ $((10#$(date +%M) % 10)) -eq 0 ]; then
+  SNAPSHOT=$(mktemp /tmp/network-history.XXXXXX.db)
+  python3 - "$DB" "$SNAPSHOT" <<'SNAPEOF'
+import os, sqlite3, sys
+source, destination = sys.argv[1], sys.argv[2]
+with sqlite3.connect(source) as src, sqlite3.connect(destination) as dst:
+    src.backup(dst)
+os.chmod(destination, 0o644)
+SNAPEOF
   rsync -az \
-      -e "ssh -i $PROD_KEY -p $PROD_PORT -o StrictHostKeyChecking=no" \
-      "$DB" \
+      -e "ssh -i $PROD_KEY -p $PROD_PORT -o StrictHostKeyChecking=yes" \
+      "$SNAPSHOT" \
       "${PROD_HOST}:${PROD_AGENT_DATA}/network-history.db" 2>/dev/null && true
+  rm -f "$SNAPSHOT"
 fi
 
 # ── 6. Collect real security data from prod and sync ──────────────────────────

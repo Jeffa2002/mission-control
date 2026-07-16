@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS ping_history (
   id       INTEGER PRIMARY KEY AUTOINCREMENT,
   ts       TEXT NOT NULL,
   node_id  TEXT NOT NULL,
-  ping_ms  REAL
+  ping_ms  REAL,
+  reachable INTEGER NOT NULL DEFAULT 1,
+  packet_loss REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_ping_ts   ON ping_history(ts);
 CREATE INDEX IF NOT EXISTS idx_ping_node ON ping_history(node_id, ts);
@@ -39,7 +41,26 @@ DELETE FROM ping_history
 WHERE id NOT IN (SELECT MIN(id) FROM ping_history GROUP BY ts, node_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_iperf_ts_node ON iperf_history(ts, node_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ping_ts_node ON ping_history(ts, node_id);
+
+CREATE TABLE IF NOT EXISTS ping_hourly (
+  bucket          TEXT NOT NULL,
+  node_id         TEXT NOT NULL,
+  ping_avg        REAL,
+  ping_min        REAL,
+  ping_max        REAL,
+  packet_loss_avg REAL NOT NULL DEFAULT 0,
+  availability_pct REAL NOT NULL DEFAULT 100,
+  samples         INTEGER NOT NULL,
+  PRIMARY KEY (bucket, node_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ping_hourly_node ON ping_hourly(node_id, bucket);
 """)
+
+ping_columns = {row[1] for row in cur.execute("PRAGMA table_info(ping_history)")}
+if "reachable" not in ping_columns:
+    cur.execute("ALTER TABLE ping_history ADD COLUMN reachable INTEGER NOT NULL DEFAULT 1")
+if "packet_loss" not in ping_columns:
+    cur.execute("ALTER TABLE ping_history ADD COLUMN packet_loss REAL NOT NULL DEFAULT 0")
 
 con.commit()
 con.close()
