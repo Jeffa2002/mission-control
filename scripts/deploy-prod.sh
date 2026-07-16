@@ -60,10 +60,7 @@ ssh "${SSH_OPTS[@]}" "$PROD_HOST" '
   set -a
   . /etc/infisical/generated/mission-control.runtime.env
   set +a
-  html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)"
-  printf "%s" "$html" | grep -q "Unified Activity"
-  printf "%s" "$html" | grep -q "Runbook"
-  curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null
+  /var/www/mission-control/scripts/smoke-test-panel.sh http://127.0.0.1:3020
   systems_json="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/api/systems)"
   SYSTEMS_JSON="$systems_json" node -e '"'"'
     const data = JSON.parse(process.env.SYSTEMS_JSON || "{}");

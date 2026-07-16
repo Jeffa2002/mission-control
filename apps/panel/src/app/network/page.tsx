@@ -700,7 +700,7 @@ function EventStrip({ nodes, links, measuredAt }: { nodes: NodeData[]; links: Li
   );
 }
 
-function LayerPanel({ view, nodes, links, nodeMap, setSelectedNode, setSelectedLink }: any) {
+function LayerPanel({ view, nodes, links, nodeMap, measuredAt, setSelectedNode, setSelectedLink }: any) {
   if (view === 'Services') {
     const groups = [
       { title: 'Prod edge', subtitle: 'public nginx + app upstreams', items: ['Mission Control', 'EffectX apps', 'Hearth preview'] },
@@ -748,18 +748,18 @@ function LayerPanel({ view, nodes, links, nodeMap, setSelectedNode, setSelectedL
   }
 
   if (view === 'Timeline') {
-    return <EventStrip nodes={nodes} links={links} measuredAt={undefined} />;
+    return <EventStrip nodes={nodes} links={links} measuredAt={measuredAt} />;
   }
 
   return (
     <GlassPanel style={{ padding: 16 }}>
-      <PanelTitle eyebrow="Route Quality" title="Live path scoring" />
+      <PanelTitle eyebrow="Endpoint Reachability" title="Derived link indicators" />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
         {(links || []).slice(0, 6).map((link: LinkData) => {
           const key = `${link.from}-${link.to}`;
           const quality = routeQuality(link);
           return (
-            <div key={key} onClick={() => { setSelectedLink(key); setSelectedNode(null); }} style={{ padding: 11, borderRadius: 12, cursor: 'pointer', border: `1px solid ${quality.color}26`, background: `linear-gradient(145deg, ${quality.color}10, rgba(255,255,255,0.025))` }}>
+            <button type="button" key={key} onClick={() => { setSelectedLink(key); setSelectedNode(null); }} style={{ width: '100%', padding: 11, borderRadius: 12, cursor: 'pointer', textAlign: 'left', color: 'inherit', border: `1px solid ${quality.color}26`, background: `linear-gradient(145deg, ${quality.color}10, rgba(255,255,255,0.025))` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: '#F3F7FF', fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -771,8 +771,8 @@ function LayerPanel({ view, nodes, links, nodeMap, setSelectedNode, setSelectedL
               </div>
               <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
                 {[
-                  ['RTT', fmtMs(link.latencyMs)],
-                  ['Loss', `${link.packetLoss}%`],
+                  ['Avg endpoint RTT', fmtMs(link.latencyMs)],
+                  ['Reachability', link.active ? 'both online' : 'incomplete'],
                   ['Flow', fmtMbps(link.iperf?.mbpsSend)],
                 ].map(([k, v]) => (
                   <div key={k} style={{ padding: '6px 4px', borderRadius: 8, background: 'rgba(0,0,0,0.18)', textAlign: 'center' }}>
@@ -781,7 +781,7 @@ function LayerPanel({ view, nodes, links, nodeMap, setSelectedNode, setSelectedL
                   </div>
                 ))}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -992,7 +992,7 @@ export default function NetworkPage() {
               )}
             </div>
 
-            <LayerPanel view={view} nodes={nodes} links={links} nodeMap={nodeMap} setSelectedNode={setSelectedNode} setSelectedLink={setSelectedLink} />
+            <LayerPanel view={view} nodes={nodes} links={links} nodeMap={nodeMap} measuredAt={data?.measuredAt} setSelectedNode={setSelectedNode} setSelectedLink={setSelectedLink} />
             {view !== 'Timeline' && <EventStrip nodes={nodes} links={links} measuredAt={data?.measuredAt} />}
           </div>
 

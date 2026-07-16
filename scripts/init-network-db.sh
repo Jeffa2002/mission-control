@@ -32,6 +32,13 @@ CREATE TABLE IF NOT EXISTS ping_history (
 );
 CREATE INDEX IF NOT EXISTS idx_ping_ts   ON ping_history(ts);
 CREATE INDEX IF NOT EXISTS idx_ping_node ON ping_history(node_id, ts);
+
+DELETE FROM iperf_history
+WHERE id NOT IN (SELECT MIN(id) FROM iperf_history GROUP BY ts, node_id);
+DELETE FROM ping_history
+WHERE id NOT IN (SELECT MIN(id) FROM ping_history GROUP BY ts, node_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_iperf_ts_node ON iperf_history(ts, node_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ping_ts_node ON ping_history(ts, node_id);
 """)
 
 con.commit()

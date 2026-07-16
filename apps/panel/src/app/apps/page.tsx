@@ -373,11 +373,16 @@ export default function AppsPage() {
   async function load() {
     setError(null);
     try {
+      const fetchJson = async (url: string) => {
+        const response = await fetch(url, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+        return response.json();
+      };
       const [healthRes, effectxRes, agentsRes, deploysRes] = await Promise.allSettled([
-        fetch('/api/health', { cache: 'no-store' }).then((r) => r.json()),
-        fetch('/api/effectx', { cache: 'no-store' }).then((r) => r.json()),
-        fetch('/api/agents/status', { cache: 'no-store' }).then((r) => r.json()),
-        fetch('/api/deploys', { cache: 'no-store' }).then((r) => r.json()),
+        fetchJson('/api/health'),
+        fetchJson('/api/effectx'),
+        fetchJson('/api/agents/status'),
+        fetchJson('/api/deploys'),
       ]);
 
       if (healthRes.status === 'fulfilled') setHealth(healthRes.value);

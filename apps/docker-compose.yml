@@ -13,21 +13,47 @@ services:
       - NETWORK_CACHE_FILE=/tmp/mission-network-cache.json
       - AGENT_TELEMETRY_FILE=/workspace/mission-control/runtime/agent-telemetry.json
       - CADVISOR_URL=http://mission-cadvisor:8080
+      - DOCKER_HOST=tcp://docker-proxy:2375
       - 'SECURITY_REMOTE_HOSTS=[{"id":"crm8","label":"CRM8","host":"100.112.179.70","port":"2222","user":"root","key":"/root/.ssh/mission_security_telemetry"},{"id":"sec1","label":"Sec1","host":"100.122.8.93","port":"2222","user":"root","key":"/root/.ssh/mission_security_telemetry"},{"id":"secspy-lab01","label":"SecSpy Lab 01","host":"100.87.75.20","port":"22","user":"secspy","key":"/root/.ssh/mission_security_telemetry"},{"id":"backup-melb","label":"Backup Melbourne","host":"100.110.100.97","port":"2222","user":"root","key":"/root/.ssh/mission_security_telemetry"}]'
     ports:
       - "127.0.0.1:3020:3020"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /root/.openclaw/workspace:/workspace
+      - /root/.openclaw/workspace:/workspace:ro
       - /var/www/mission-control/runtime:/workspace/mission-control/runtime:ro
       - /root/.openclaw/agents:/agent-data:ro
       - /root/.openclaw/workspace:/workspace-data:ro
-      - /root/.ssh:/root/.ssh:ro
+      - /root/.ssh/mission_security_telemetry:/root/.ssh/mission_security_telemetry:ro
+      - /root/.ssh/prod_deploy_v3:/root/.ssh/prod_deploy_v3:ro
       - /var/log:/host-logs:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     networks:
       - infra_default
+      - docker_api
+    depends_on:
+      - docker-proxy
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - INFO=1
+      - POST=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - docker_api
 
 networks:
+  docker_api:
+    internal: true
   infra_default:
     external: true
     name: infra_default

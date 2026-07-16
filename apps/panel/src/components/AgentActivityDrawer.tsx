@@ -75,6 +75,7 @@ export function AgentActivityDrawer({ agent, open, onClose }: { agent: Agent | n
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [offline, setOffline] = useState(false);
   const [lastPoll, setLastPoll] = useState(Date.now());
+  const lastPollRef = useRef(Date.now());
   const scroller = useRef<HTMLDivElement | null>(null);
   const lastTimestampRef = useRef('');
 
@@ -86,6 +87,7 @@ export function AgentActivityDrawer({ agent, open, onClose }: { agent: Agent | n
     setEvents([]);
     lastTimestampRef.current = '';
     setOffline(false);
+    lastPollRef.current = Date.now();
 
     async function load(initial = false) {
       const since = lastTimestampRef.current;
@@ -98,12 +100,14 @@ export function AgentActivityDrawer({ agent, open, onClose }: { agent: Agent | n
       if (initial) setEvents(newEvents);
       else if (newEvents.length) setEvents((prev) => [...prev, ...newEvents]);
       if (newEvents.length) lastTimestampRef.current = newEvents[newEvents.length - 1].timestamp;
-      setLastPoll(Date.now());
+      const polledAt = Date.now();
+      lastPollRef.current = polledAt;
+      setLastPoll(polledAt);
     }
 
     load(true);
     const t = setInterval(() => load(false), 2000);
-    const offlineT = setInterval(() => setOffline(agent.status === 'Working' && Date.now() - lastPoll > 30000), 1000);
+    const offlineT = setInterval(() => setOffline(agent.status === 'Working' && Date.now() - lastPollRef.current > 30000), 1000);
     return () => { cancelled = true; clearInterval(t); clearInterval(offlineT); };
   }, [open, agent?.id]);
 

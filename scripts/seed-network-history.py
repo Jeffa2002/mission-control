@@ -46,6 +46,8 @@ def main():
     steps = (30 * 24) // step_h  # 120 points per node
 
     for node_id, r in nodes.items():
+        if cur.execute("SELECT 1 FROM iperf_history WHERE node_id = ? LIMIT 1", (node_id,)).fetchone():
+            continue
         for i in range(steps, -1, -1):
             ts = now - timedelta(hours=i * step_h)
             ts_str = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -71,6 +73,8 @@ def main():
     ping_steps = (7 * 24 * 60) // ping_step_min  # 672 points per node
 
     for node_id, baseline in PING_BASELINES.items():
+        if cur.execute("SELECT 1 FROM ping_history WHERE node_id = ? LIMIT 1", (node_id,)).fetchone():
+            continue
         for i in range(ping_steps, -1, -1):
             ts = now - timedelta(minutes=i * ping_step_min)
             ts_str = ts.strftime("%Y-%m-%dT%H:%M:%SZ")

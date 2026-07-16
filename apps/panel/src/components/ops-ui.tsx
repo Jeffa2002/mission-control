@@ -314,10 +314,10 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
   const opsRoutes = ROUTES.filter((r) => r.group === 'OPS');
 
   const overall = health?.overall ?? 'amber';
-  const bazzaCheck = health?.checks?.['app'];
-  const bazzaOk = bazzaCheck ? bazzaCheck.status === 'ok' : null;
+  const panelCheck = health?.checks?.['app'];
+  const panelOk = panelCheck ? panelCheck.status === 'ok' : null;
   const panicCheck = health?.checks?.['panic_latch'];
-  const prodOk = panicCheck ? panicCheck.status === 'ok' : null;
+  const panicOk = panicCheck ? panicCheck.status === 'ok' : null;
 
   useEffect(() => setMobileOpen(false), [path]);
 
@@ -488,8 +488,8 @@ function Sidebar({ path, health }: { path: string; health: HealthData | null }) 
             SERVERS
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <ServerDot label="bazza" ok={bazzaOk} />
-            <ServerDot label="prod" ok={prodOk} />
+            <ServerDot label="panel" ok={panelOk} />
+            <ServerDot label="panic latch" ok={panicOk} />
           </div>
         </div>
 

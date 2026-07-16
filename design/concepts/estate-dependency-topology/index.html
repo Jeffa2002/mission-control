@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estate Dependency Topology — Mission Control</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-state="nominal">
+  <a class="skip" href="#topology">Skip to topology</a>
+  <header>
+    <a class="brand" href="#top"><b>✦</b> Mission Control</a>
+    <nav aria-label="Primary"><a href="#">Overview</a><a class="active" href="#topology">Estate</a><a href="#">Activity</a><a href="#">Security</a><a href="#">Deploys</a></nav>
+    <div class="right"><span class="live"><i></i>Evidence view</span><button class="quiet" type="button">Last checked 10:24</button><button class="avatar" aria-label="Account">J</button></div>
+  </header>
+
+  <main id="top" class="shell">
+    <section class="intro" aria-labelledby="page-title">
+      <div><p class="eyebrow">Estate / Dependency topology <time>Concept · current data boundary</time></p><h1 id="page-title">See what is evidenced before you estimate the radius.</h1><p class="lede">A dependency evidence map for repository, endpoint and operational signals. It does not claim runtime call paths or customer impact where those sources are not captured.</p></div>
+      <div class="states" role="group" aria-label="Preview state"><span>Preview</span><button class="chosen" data-state="nominal">Nominal</button><button data-state="attention">Attention</button><button data-state="partial">Partial source</button></div>
+    </section>
+
+    <section class="posture" aria-label="Topology posture">
+      <article><div class="kicker"><i></i><span id="posture-kicker">Evidence coverage: constrained</span><button id="coverage-button" type="button" aria-haspopup="dialog">Coverage</button></div><div class="score"><strong id="posture-title">Map the evidence, not assumptions</strong><b id="posture-score">58% known</b></div><p id="posture-copy">11 configured smoke endpoints and 10 repositories are observable. Runtime dependency, package dependency and customer-journey sources are not collected by the current estate API.</p><footer><span id="observed-count">21 observed entities</span><a href="#coverage">View source coverage ↓</a></footer></article>
+      <article><p>Confirmed edges</p><strong id="confirmed-count">11</strong><small>Repository → configured smoke endpoint</small></article>
+      <article><p>Inferred relationships</p><strong id="inferred-count">0</strong><small>None rendered without an evidence rule</small></article>
+      <article><p>Unknown coverage</p><strong id="unknown-count">13</strong><small>Runtime, data and external dependencies</small></article>
+      <article><p>Current watch</p><strong id="watch-count">3</strong><small>Signals on evidence-backed entities</small></article>
+    </section>
+
+    <section class="toolbar" aria-label="Topology controls">
+      <div class="saved"><span>Views</span><button class="selected" data-view="all">Estate evidence</button><button data-view="production">Production exposure</button><button data-view="watch">Needs review</button></div>
+      <div class="control-row"><label>Scope <select id="scope"><option>All entities</option><option>Applications</option><option>Endpoints</option><option>Operational controls</option></select></label><label>Relationship <select id="relationship"><option>All evidence</option><option>Confirmed only</option><option>Inferred only</option><option>Unknown coverage</option></select></label><button class="quiet" id="reset" type="button">Reset view</button></div>
+    </section>
+
+    <section class="workspace">
+      <div class="map-panel panel">
+        <div class="section-head"><div><p class="eyebrow">Topology canvas</p><h2>Production estate evidence</h2><p class="sub">Select a node or relationship to inspect evidence. Solid lines are confirmed configuration records; dashed lines are future-only inferred examples; fog marks uncollected coverage.</p></div><div class="legend" aria-label="Relationship legend"><span><i class="edge-confirmed"></i>Confirmed</span><span><i class="edge-inferred"></i>Inferred</span><span><i class="edge-unknown"></i>Unknown</span></div></div>
+        <div class="map-actions"><button type="button" class="map-mode selected" data-mode="topology">Topology</button><button type="button" class="map-mode" data-mode="radius">Blast radius</button><span id="mode-note">Select an entity to focus its evidence-backed connections.</span><button type="button" class="quiet" id="zoom-out">Reset focus</button></div>
+        <div class="topology" id="topology" tabindex="0" aria-label="Interactive estate topology. Use Tab to select entities and Enter to inspect.">
+          <div class="zone apps"><span class="zone-label">Repositories</span>
+            <button class="node app selected-node critical" data-node="mission" aria-pressed="true"><b>Mission<br>Control</b><small>Watch · repo</small></button>
+            <button class="node app" data-node="crm8"><b>CRM8</b><small>Watch · repo</small></button>
+            <button class="node app" data-node="queue"><b>QueueM8</b><small>Healthy · repo</small></button>
+            <button class="node app" data-node="projenta"><b>Projenta</b><small>Healthy · repo</small></button>
+            <button class="node app dimmable" data-node="others"><b>+6 repos</b><small>Collapsed group</small></button>
+          </div>
+          <div class="links" aria-hidden="true"><i class="link l1 confirmed"></i><i class="link l2 confirmed"></i><i class="link l3 confirmed"></i><i class="link l4 confirmed"></i><i class="link l5 unknown"></i><i class="link l6 inferred"></i></div>
+          <div class="zone endpoints"><span class="zone-label">Configured smoke endpoints</span>
+            <button class="node endpoint critical" data-node="mc-smoke"><b>mission.effectx<br>.com</b><small>200 · 184ms</small></button>
+            <button class="node endpoint" data-node="crm-smoke"><b>crm8.effectx<br>.com/api/health</b><small>200 · 241ms</small></button>
+            <button class="node endpoint" data-node="queue-smoke"><b>queuem8.effectx<br>.com</b><small>200 · 119ms</small></button>
+            <button class="node endpoint" data-node="projenta-smoke"><b>projenta.io</b><small>200 · 164ms</small></button>
+            <button class="node endpoint dimmable" data-node="more-smokes"><b>+7 endpoints</b><small>Configured checks</small></button>
+          </div>
+          <div class="zone unknown-zone"><span class="zone-label">Uncollected dependency coverage</span><button class="fog" data-node="runtime"><b>Runtime services</b><small>Not captured</small></button><button class="fog" data-node="packages"><b>Package dependencies</b><small>Not captured</small></button><button class="fog" data-node="external"><b>External providers</b><small>Not captured</small></button></div>
+          <span class="edge-label label1">confirmed ownership</span><span class="edge-label label2">not an execution path</span>
+        </div>
+        <div class="map-caption"><span><b>Evidence note:</b> A configured smoke URL establishes an estate association only. It does not establish a deploy target, upstream/downstream runtime dependency, or affected user scope.</span><button type="button" id="show-all" class="link-button">Show all evidence</button></div>
+      </div>
+
+      <aside class="inspector panel" aria-live="polite" aria-label="Topology inspector">
+        <div class="inspect-head"><div><p class="eyebrow">Evidence inspector</p><h2 id="inspect-title">Mission Control</h2><p id="inspect-kind" class="sub">Repository · current estate record</p></div><button type="button" id="close-inspector" aria-label="Clear topology selection">×</button></div>
+        <div class="relationship-badge confirmed" id="inspect-relation">Confirmed configuration link</div>
+        <p class="inspect-summary" id="inspect-summary">The current estate API configures this repository with a smoke endpoint. That supports an ownership/monitoring association, not a runtime or causal claim.</p>
+        <div class="tabs" role="tablist" aria-label="Inspector contents"><button role="tab" aria-selected="true" data-tab="evidence">Evidence</button><button role="tab" aria-selected="false" data-tab="radius">Blast radius</button><button role="tab" aria-selected="false" data-tab="coverage">Coverage</button></div>
+        <div id="tab-content"></div>
+        <div class="inspect-links"><a href="#">Open Estate</a><a href="#">Open Deploys</a><a href="#">Open Activity</a><a href="#">Open Security</a></div>
+      </aside>
+    </section>
+
+    <section id="coverage" class="lower-grid">
+      <article class="panel"><div class="section-head"><div><p class="eyebrow">Blast-radius semantics</p><h2>Reach is a tiered estimate, never an impact verdict.</h2></div></div><div class="radius-grid"><div><span class="radius-key confirmed">1</span><h3>Confirmed association</h3><p>Directly configured or explicitly linked records. The selected repository and its configured smoke endpoint can be shown together.</p></div><div><span class="radius-key inferred">2</span><h3>Inferred relationship</h3><p>Future-only: a deterministic rule may link package, trace or inventory records. Label the rule and evidence; do not call it impact.</p></div><div><span class="radius-key unknown">?</span><h3>Unknown coverage</h3><p>No graph edge, radius count, or “unaffected” conclusion is available when required dependency sources are missing.</p></div></div></article>
+      <article class="panel coverage"><div class="section-head"><div><p class="eyebrow">Source coverage</p><h2>Freshness and limitations</h2></div><button class="quiet" type="button">Refresh evidence</button></div><div class="coverage-list"><div><b><i class="dot current"></i>/api/estate</b><span>Current · repos, latest workflow, Dependabot aggregate, smoke result</span></div><div><b><i class="dot partial"></i>/api/activity</b><span>Partial · current estate snapshots can be normalized, not historical topology</span></div><div><b><i class="dot missing"></i>Runtime tracing</b><span>Missing · no service-to-service calls or request journey graph</span></div><div><b><i class="dot missing"></i>SBOM / manifests</b><span>Missing · no versioned package dependency graph</span></div></div></article>
+    </section>
+  </main>
+  <dialog id="coverage-dialog"><button class="dialog-close" aria-label="Close coverage details">×</button><p class="eyebrow">Coverage boundary</p><h2>Known sources are limited</h2><p>The displayed topology uses current estate configuration and snapshots. Runtime, package and vendor dependency edges are intentionally not filled in from names, timing, or visual proximity.</p><button class="quiet dialog-close">Done</button></dialog>
+  <script src="script.js"></script>
+</body>
+</html>

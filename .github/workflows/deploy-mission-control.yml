@@ -39,6 +39,15 @@ jobs:
           git reset --hard FETCH_HEAD
           git clean -fd
 
+      - name: Validate panel
+        working-directory: /tmp/mission-control-deploy-src/apps/panel
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+
       - name: Sync source into production tree
         working-directory: /tmp/mission-control-deploy-src
         run: |
@@ -76,24 +85,36 @@ jobs:
           . /etc/infisical/generated/mission-control.runtime.env
           set +a
           for attempt in $(seq 1 20); do
-            if dashboard_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/)" \
-              && security_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/security)" \
-              && office_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/office)" \
-              && teams_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/teams)" \
-              && deploys_html="$(curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/deploys)" \
-              && printf "%s" "$dashboard_html" | grep -qi "operational brief" \
-              && printf "%s" "$dashboard_html" | grep -q "Needs action" \
-              && printf "%s" "$security_html" | grep -q "Security Threat Surface" \
-              && printf "%s" "$office_html" | grep -qi "active roster" \
-              && printf "%s" "$teams_html" | grep -q "Team Directory" \
-              && printf "%s" "$deploys_html" | grep -q "Release Impact Console" \
-              && curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/api/deploys | grep -q '"source"' \
-              && curl -fsS -H "Cookie: mc_auth=$MISSION_COOKIE_SECRET" http://127.0.0.1:3020/activity >/dev/null; then
+            if /var/www/mission-control/scripts/smoke-test-panel.sh http://127.0.0.1:3020; then
               exit 0
             fi
             echo "Waiting for panel restart ($attempt/20)..."
             sleep 3
           done
+          exit 1
+
+      - name: Roll back failed release
+        if: failure()
+        working-directory: /var/www/mission-control/apps
+        run: |
+          set -euo pipefail
+          if ! docker image inspect apps-panel:rollback >/dev/null 2>&1; then
+            echo "No rollback image is available" >&2
+            exit 1
+          fi
+          docker image tag apps-panel:rollback apps-panel:latest
+          docker-compose up -d --no-deps --force-recreate panel
+          set -a
+          . /etc/infisical/generated/mission-control.runtime.env
+          set +a
+          for attempt in $(seq 1 20); do
+            if /var/www/mission-control/scripts/smoke-test-panel.sh http://127.0.0.1:3020; then
+              echo "Previous panel image restored and verified"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Rollback image did not become healthy" >&2
           exit 1
 
       - name: Prune stale Docker artifacts

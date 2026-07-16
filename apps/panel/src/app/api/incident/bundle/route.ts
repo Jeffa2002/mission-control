@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import JSZip from 'jszip';
 import { readFile } from 'node:fs/promises';
-import { sh } from '../../_util';
 import { requireSessionAuth } from '../../_session-auth';
+import { redactIncidentText } from './incident-bundle-model';
 
 function safeName(s: string) {
   return s.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -17,36 +17,13 @@ export async function GET(req: Request) {
     const minutes = Math.min(240, Math.max(5, Number(url.searchParams.get('minutes') || '30')));
 
     const zip = new JSZip();
-    zip.file('README.txt', `CUTLINE/Mission Control incident bundle\nGenerated: ${new Date().toISOString()}\nWindow: last ${minutes} minutes\n`);
-
-    const warnings: string[] = [];
-
-    // Bot logs
-    const botLogs = await sh('docker', ['logs', '--since', `${minutes}m`, 'crypto-bot'], { timeoutMs: 60_000 }).catch((e) => {
-      warnings.push(`crypto-bot/logs.txt unavailable: ${String(e?.message || e)}`);
-      return '';
-    });
-    if (botLogs) zip.file('crypto-bot/logs.txt', botLogs);
-
-    // Bot state + config
-    const state = await sh('docker', ['exec', 'crypto-bot', 'cat', '/data/state.json'], { timeoutMs: 10_000 }).catch(() => '');
-    if (state) zip.file('crypto-bot/state.json', state);
-
-    const botCfg = await readFile('/workspace/crypto-bot/config/bot-config.json', 'utf-8').catch(() => '');
-    if (botCfg) zip.file('crypto-bot/bot-config.json', botCfg);
-
-    const compose = await readFile('/workspace/crypto-bot/docker-compose.yml', 'utf-8').catch(() => '');
-    if (compose) zip.file('crypto-bot/docker-compose.yml', compose);
+    zip.file('README.txt', `Mission Control incident bundle\nGenerated: ${new Date().toISOString()}\nWindow: last ${minutes} minutes\nContents are allowlisted and redacted. Raw configuration, container state, and secrets are intentionally excluded.\n`);
 
     // Mission Control audit tail
     const audit = await readFile('/workspace/mission-control/runtime/audit.log', 'utf-8').catch(() => '');
     if (audit) {
       const lines = audit.split('\n').filter(Boolean);
-      zip.file('mission-control/audit-tail.jsonl', lines.slice(-200).join('\n') + '\n');
-    }
-
-    if (warnings.length) {
-      zip.file('WARNINGS.txt', warnings.join('\n') + '\n');
+      zip.file('mission-control/audit-tail.jsonl', redactIncidentText(lines.slice(-200).join('\n')) + '\n');
     }
 
     const out = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
@@ -56,6 +33,7 @@ export async function GET(req: Request) {
       headers: {
         'content-type': 'application/zip',
         'content-disposition': `attachment; filename="${filename}"`,
+        'cache-control': 'no-store, private',
       },
     });
   } catch (e: any) {

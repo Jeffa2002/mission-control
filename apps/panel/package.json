@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -p 3020",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node --test $(find src -name '*.test.mjs' -type f -print)"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.2",
@@ -15,7 +16,6 @@
     "next": "^16.2.10",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-simple-maps": "^3.0.0",
     "tailwindcss": "^4.3.2",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2"

@@ -55,10 +55,12 @@ export async function GET(req: Request) {
 
   const hasError = Object.values(checks).some((c) => c.status === 'error');
   const hasDegraded = Object.values(checks).some((c) => c.status === 'degraded');
-  const overall = hasError ? 'red' : hasDegraded ? 'amber' : 'green';
+  const hasUnknown = Object.values(checks).some((c) => c.status === 'unknown');
+  const overall = hasError ? 'red' : hasDegraded || hasUnknown ? 'amber' : 'green';
 
   return NextResponse.json({
     ok: !hasError,
+    coverage_complete: !hasUnknown,
     overall,
     checks,
     checked_at: new Date().toISOString(),
