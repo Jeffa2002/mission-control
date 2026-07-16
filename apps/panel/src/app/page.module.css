@@ -332,10 +332,81 @@
 
 .dashboard :is(button, a, summary):focus-visible { outline: 2px solid var(--brief-blue); outline-offset: 3px; }
 
+/* Operational overview */
+.statusBar {
+  --state-color: var(--brief-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--state-color) 35%, var(--brief-line));
+  border-radius: 13px;
+  background: linear-gradient(110deg, color-mix(in srgb, var(--state-color) 8%, var(--brief-surface)), var(--brief-surface));
+}
+.statusBar[data-tone="nominal"] { --state-color: var(--brief-green); }
+.statusBar[data-tone="attention"] { --state-color: var(--brief-amber); }
+.statusBar[data-tone="incident"] { --state-color: var(--brief-red); }
+.statusSummary { display: flex; min-width: 0; align-items: center; gap: 15px; }
+.statusSummary h2 { margin: 0; color: var(--brief-text); font-size: 19px; font-weight: 680; letter-spacing: -0.025em; }
+.statusSummary p { margin: 3px 0 0; color: var(--brief-muted); font-size: 11px; line-height: 1.45; }
+.statusLinks { display: flex; flex-shrink: 0; gap: 8px; }
+.statusLinks a { padding: 9px 11px; border: 1px solid var(--brief-line); border-radius: 8px; color: var(--brief-muted); font-size: 10px; font-weight: 750; text-decoration: none; }
+.statusLinks a:hover { border-color: var(--brief-line-strong); color: var(--brief-text); }
+
+.kpiStrip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin: 14px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--brief-line);
+  border-radius: 13px;
+  background: var(--brief-surface);
+}
+.kpiStrip a { min-width: 0; padding: 15px 16px; border-right: 1px solid var(--brief-line); text-decoration: none; }
+.kpiStrip a:last-child { border-right: 0; }
+.kpiStrip a:hover { background: rgba(255,255,255,0.035); }
+.kpiStrip dt { color: var(--brief-subtle); font-size: 9px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.kpiStrip dd { margin: 5px 0 2px; color: var(--brief-text); font-size: 25px; font-weight: 650; letter-spacing: -0.04em; }
+.kpiStrip span { display: block; overflow: hidden; color: var(--brief-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+
+.commandGrid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(340px, 0.7fr); gap: 14px; margin-top: 14px; align-items: stretch; }
+.commandGrid > .panel { height: 100%; }
+.healthPanel { min-width: 0; }
+.healthList { display: grid; }
+.healthRow { --row-tone: var(--brief-subtle); display: grid; min-height: 50px; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 11px; border-bottom: 1px solid var(--brief-line); text-decoration: none; }
+.healthRow:last-child { border-bottom: 0; }
+.healthRow:hover strong { color: var(--brief-blue); }
+.healthRow[data-tone="nominal"] { --row-tone: var(--brief-green); }
+.healthRow[data-tone="attention"] { --row-tone: var(--brief-amber); }
+.healthRow[data-tone="incident"] { --row-tone: var(--brief-red); }
+.healthDot { width: 7px; height: 7px; border-radius: 50%; background: var(--row-tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--row-tone) 12%, transparent); }
+.healthRow strong, .healthRow small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.healthRow strong { color: var(--brief-text); font-size: 11px; font-weight: 680; }
+.healthRow small { margin-top: 2px; color: var(--brief-subtle); font-size: 9px; }
+.healthValue { color: var(--brief-muted); font: 650 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.emptyCompact { padding: 22px 0; color: var(--brief-subtle); font-size: 10px; }
+
+.dashboard > .inspector { position: static; min-height: 0; margin-top: 14px; border-color: var(--brief-line-strong); }
+.operationsGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 14px; align-items: start; }
+.pulseList { display: grid; }
+.pulseList > a { display: grid; min-height: 50px; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 9px; border-bottom: 1px solid var(--brief-line); text-decoration: none; }
+.pulseList > a:last-child { border-bottom: 0; }
+.pulseList > a:hover strong { color: var(--brief-blue); }
+.pulseList strong, .pulseList small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pulseList strong { font-size: 11px; font-weight: 680; }
+.pulseList small { margin-top: 2px; color: var(--brief-subtle); font-size: 9px; text-transform: capitalize; }
+
 @media (max-width: 1280px) {
   .postureHero { grid-template-columns: minmax(300px, 1fr) minmax(390px, 0.9fr); gap: 28px; }
   .workspaceGrid { grid-template-columns: minmax(0, 1fr) 280px; }
   .splitPanels { grid-template-columns: 1fr; }
+  .kpiStrip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kpiStrip a:nth-child(3) { border-right: 0; }
+  .kpiStrip a:nth-child(-n+3) { border-bottom: 1px solid var(--brief-line); }
+  .operationsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pulsePanel { grid-column: 1 / -1; }
 }
 
 @media (max-width: 1040px) {
@@ -345,6 +416,7 @@
   .postureFacts div:last-child { border-right: 0; }
   .workspaceGrid { grid-template-columns: 1fr; }
   .inspector { position: static; min-height: 0; }
+  .commandGrid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 760px) {
@@ -362,6 +434,13 @@
   .ribbonScale { grid-column: 1; }
   .constellationMap { grid-template-columns: 1fr; gap: 22px; }
   .connector { display: none; }
+  .statusBar, .statusSummary { align-items: flex-start; }
+  .statusBar { flex-direction: column; }
+  .statusSummary { flex-direction: column; }
+  .statusLinks { width: 100%; }
+  .statusLinks a { flex: 1; text-align: center; }
+  .operationsGrid { grid-template-columns: 1fr; }
+  .pulsePanel { grid-column: auto; }
 }
 
 @media (max-width: 520px) {
@@ -375,6 +454,11 @@
   .inspectArrow { display: none; }
   .changeItem { grid-template-columns: 28px minmax(0, 1fr); }
   .changeItem time { grid-column: 2; }
+  .kpiStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpiStrip a, .kpiStrip a:nth-child(3) { border-right: 1px solid var(--brief-line); border-bottom: 1px solid var(--brief-line); }
+  .kpiStrip a:nth-child(2n) { border-right: 0; }
+  .kpiStrip a:nth-last-child(-n+2) { border-bottom: 0; }
+  .commandGrid { margin-top: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -90,6 +90,11 @@ type BriefData = {
   alerts: PromAlert[];
   bazza: HostData | null;
   shazza: HostData | null;
+  network: {
+    nodes: Array<{ id: string; label: string; role: string; status: 'online' | 'degraded' | 'offline'; latencyMs: number | null }>;
+    measuredAt?: string;
+    stale?: boolean;
+  } | null;
 };
 
 type InspectorItem = {
@@ -127,6 +132,7 @@ const EMPTY_DATA: BriefData = {
   alerts: [],
   bazza: null,
   shazza: null,
+  network: null,
 };
 
 function toneLabel(tone: Tone) {
@@ -627,7 +633,7 @@ export default function Home() {
     const requests = [
       ['health', '/api/health'], ['agents', '/api/agents/status'], ['apps', '/api/effectx'],
       ['deploys', '/api/deploys'], ['activity', '/api/activity?limit=24'], ['alerts', '/api/alerts'],
-      ['bazza', '/api/bazza'], ['shazza', '/api/shazza'],
+      ['bazza', '/api/bazza'], ['shazza', '/api/shazza'], ['network', '/api/network'],
     ] as const;
     const results = await Promise.allSettled(requests.map(([, path]) => fetchJson(path)));
     const failures: string[] = [];
@@ -647,6 +653,7 @@ export default function Home() {
       if (key === 'alerts') next.alerts = value.data?.alerts ?? [];
       if (key === 'bazza') next.bazza = value;
       if (key === 'shazza') next.shazza = value;
+      if (key === 'network') next.network = value;
     });
     setData((current) => ({ ...current, ...next }));
     setErrors(failures);
@@ -670,8 +677,9 @@ export default function Home() {
   const unknownCount = data.apps.filter((app) => app.status === 'unknown').length + [data.bazza, data.shazza].filter((host) => hostTone(host) === 'unknown').length;
   const postureTone: Tone = incidentCount > 0 || data.health?.overall === 'red' ? 'incident' : attentionCount > 0 || data.health?.overall === 'amber' ? 'attention' : data.health ? 'nominal' : 'unknown';
   const healthyApps = data.apps.filter((app) => app.status === 'up').length;
-  const availableHosts = [data.bazza, data.shazza].filter((host) => hostTone(host) === 'nominal' || hostTone(host) === 'attention').length;
   const activeAgents = data.agents.filter((agent) => ['working', 'idle'].includes((agent.status ?? '').toLowerCase())).length;
+  const onlineNodes = data.network?.nodes.filter((node) => node.status === 'online').length ?? 0;
+  const successfulDeploys = data.deploys.filter((deploy) => deploy.status === 'success').length;
   const stale = updatedAt ? now - updatedAt.getTime() > 90_000 : false;
   const postureTitle = postureTone === 'incident' ? 'Incident active' : postureTone === 'attention' ? 'Needs attention' : postureTone === 'nominal' ? 'Estate stable' : 'Awaiting telemetry';
   const postureCopy = postureTone === 'incident'
@@ -688,7 +696,7 @@ export default function Home() {
     <AppShell>
       <div className={styles.dashboard} data-posture={postureTone}>
         <header className={styles.briefHeader}>
-          <div><p className={styles.eyebrow}>Operational brief</p><h1>Mission Control</h1><p>Current posture, recent changes, and the next operator decision.</p></div>
+          <div><p className={styles.eyebrow}>Live operations</p><h1>Mission Control</h1><p>What needs attention, what changed, and where to act.</p></div>
           <div className={styles.freshness} data-stale={stale}>
             <span>{loading ? 'Loading live telemetry…' : stale ? 'Telemetry is stale' : updatedAt ? `Updated ${relativeTime(updatedAt.toISOString())}` : 'No telemetry loaded'}</span>
             <button type="button" onClick={() => load(true)} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
@@ -697,31 +705,60 @@ export default function Home() {
 
         {errors.length ? <div className={styles.errorBanner} role="status"><strong>Partial data</strong><span>{errors.length} endpoint{errors.length === 1 ? '' : 's'} failed; the brief retains the last successful values.</span><details><summary>Details</summary><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></details></div> : null}
 
-        <section className={styles.postureHero} aria-labelledby="posture-title">
-          <div className={styles.postureMain}>
+        <section className={styles.statusBar} aria-labelledby="posture-title" data-tone={postureTone}>
+          <div className={styles.statusSummary}>
             <ToneBadge tone={postureTone} />
-            <p className={styles.eyebrow}>Operational posture</p>
-            <h2 id="posture-title">{postureTitle}</h2>
-            <p>{postureCopy}</p>
-            <div className={styles.heroLinks}><Link href="/activity">Review signals</Link><Link href="/incidents">Incident console</Link></div>
+            <div><h2 id="posture-title">{postureTitle}</h2><p>{postureCopy}</p></div>
           </div>
-          <dl className={styles.postureFacts}>
-            <div><dt>Action queue</dt><dd>{queue.length}</dd><span>{incidentCount} incident · {attentionCount} attention</span></div>
-            <div><dt>Applications</dt><dd>{healthyApps}/{data.apps.length || '—'}</dd><span>{unknownCount ? `${unknownCount} estate signals unknown` : 'live checks reporting'}</span></div>
-            <div><dt>Hosts</dt><dd>{availableHosts}/2</dd><span>reachable or reporting</span></div>
-            <div><dt>Agent mesh</dt><dd>{activeAgents}/{data.agents.length || '—'}</dd><span>working or idle</span></div>
-            <div><dt>Firing alerts</dt><dd>{firingAlerts}</dd><span>from Prometheus</span></div>
-          </dl>
+          <div className={styles.statusLinks}><Link href="/incidents">Incidents</Link><Link href="/activity">All activity</Link></div>
         </section>
 
-        <SignalRibbon changes={changes} currentTone={postureTone} />
+        <dl className={styles.kpiStrip}>
+          <Link href="/incidents"><dt>Needs action</dt><dd>{queue.length}</dd><span>{incidentCount} incident · {attentionCount} attention</span></Link>
+          <Link href="/apps"><dt>Applications</dt><dd>{healthyApps}/{data.apps.length || '—'}</dd><span>{unknownCount ? `${unknownCount} unknown` : 'healthy checks'}</span></Link>
+          <Link href="/network"><dt>Servers</dt><dd>{onlineNodes}/{data.network?.nodes.length || '—'}</dd><span>{data.network?.stale ? 'telemetry stale' : 'reachable now'}</span></Link>
+          <Link href="/office"><dt>Agents</dt><dd>{activeAgents}/{data.agents.length || '—'}</dd><span>working or idle</span></Link>
+          <Link href="/deploys"><dt>Deployments</dt><dd>{successfulDeploys}/{data.deploys.length || '—'}</dd><span>recently successful</span></Link>
+          <Link href="/security"><dt>Alerts</dt><dd>{firingAlerts}</dd><span>currently firing</span></Link>
+        </dl>
 
-        <div className={styles.workspaceGrid}>
-          <div className={styles.primaryColumn}>
-            <div className={styles.splitPanels}><Queue items={queue} selectedKey={selected?.key} onSelect={setSelected} /><Changes items={changes} /></div>
-            <Constellation data={data} selectedKey={selected?.key} onSelect={setSelected} />
-          </div>
-          <Inspector item={selected} onClose={() => setSelected(null)} />
+        <div className={styles.commandGrid}>
+          <Queue items={queue} selectedKey={selected?.key} onSelect={setSelected} />
+          <section className={`${styles.panel} ${styles.healthPanel}`} aria-labelledby="server-health-title">
+            <SectionHeading eyebrow="Infrastructure" title="Server health" copy="Live reachability across the tailnet." action={<Link href="/network">Network →</Link>} />
+            <div className={styles.healthList}>
+              {(data.network?.nodes ?? []).map((node) => (
+                <Link href={`/network?node=${encodeURIComponent(node.id)}`} key={node.id} className={styles.healthRow} data-tone={node.status === 'online' ? 'nominal' : node.status === 'degraded' ? 'attention' : 'incident'}>
+                  <span className={styles.healthDot} /><span><strong>{node.label}</strong><small>{node.role}</small></span><span className={styles.healthValue}>{node.latencyMs == null ? 'Offline' : `${node.latencyMs.toFixed(1)} ms`}</span>
+                </Link>
+              ))}
+              {!data.network?.nodes.length ? <div className={styles.emptyCompact}>Network telemetry unavailable</div> : null}
+            </div>
+          </section>
+        </div>
+
+        {selected ? <Inspector item={selected} onClose={() => setSelected(null)} /> : null}
+
+        <div className={styles.operationsGrid}>
+          <Changes items={changes} />
+          <section className={`${styles.panel} ${styles.healthPanel}`} aria-labelledby="app-health-title">
+            <SectionHeading eyebrow="Services" title="Application health" copy="Current public checks and response times." action={<Link href="/apps">Applications →</Link>} />
+            <div className={styles.healthList}>
+              {data.apps.slice(0, 8).map((app) => (
+                <Link href="/apps" key={app.id} className={styles.healthRow} data-tone={appTone(app.status)}>
+                  <span className={styles.healthDot} /><span><strong>{app.name}</strong><small>{app.kind ?? 'application'}</small></span><span className={styles.healthValue}>{app.latencyMs == null ? app.status : `${app.latencyMs} ms`}</span>
+                </Link>
+              ))}
+              {!data.apps.length ? <div className={styles.emptyCompact}>Application telemetry unavailable</div> : null}
+            </div>
+          </section>
+          <section className={`${styles.panel} ${styles.pulsePanel}`} aria-labelledby="agent-pulse-title">
+            <SectionHeading eyebrow="Automation" title="Agent pulse" copy="Current OpenClaw worker state." action={<Link href="/office">Office →</Link>} />
+            <div className={styles.pulseList}>
+              {data.agents.slice(0, 7).map((agent) => <Link href={`/agents/${encodeURIComponent(agent.id)}`} key={agent.id}><span>{agent.emoji || '◇'}</span><span><strong>{agent.label || agent.id}</strong><small>{agent.busy ? 'Working now' : agent.status || 'Unknown'}</small></span><ToneBadge tone={agentTone(agent)} label={agent.busy ? 'Working' : agent.status || 'Unknown'} /></Link>)}
+              {!data.agents.length ? <div className={styles.emptyCompact}>Agent status unavailable</div> : null}
+            </div>
+          </section>
         </div>
       </div>
     </AppShell>
