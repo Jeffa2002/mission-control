@@ -71,6 +71,7 @@ type ActivityItem = {
   detail: string;
   severity: ActivitySeverity;
   href?: string;
+  eventType?: string;
 };
 
 type PromAlert = {
@@ -375,7 +376,14 @@ function buildQueue(data: BriefData): QueueItem[] {
     items.push({ ...host, priority: host.tone === 'incident' ? 90 : 66 });
   });
 
-  data.deploys.forEach((deploy) => {
+  const latestDeploys = new Map<string, Deploy>();
+  [...data.deploys]
+    .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime())
+    .forEach((deploy) => {
+      if (!latestDeploys.has(deploy.app)) latestDeploys.set(deploy.app, deploy);
+    });
+
+  latestDeploys.forEach((deploy) => {
     if (deploy.status === 'success') return;
     const tone: Tone = deploy.status === 'failure' ? 'incident' : 'attention';
     items.push({
@@ -407,7 +415,9 @@ function buildQueue(data: BriefData): QueueItem[] {
 }
 
 function buildChanges(data: BriefData): ChangeItem[] {
-  const activity: ChangeItem[] = data.activity.map((item) => ({
+  const activity: ChangeItem[] = data.activity
+    .filter((item) => item.source !== 'deploys' && !item.eventType?.endsWith('.snapshot') && item.eventType !== 'audit.login')
+    .map((item) => ({
     id: `activity:${item.id}`,
     title: item.title,
     detail: item.detail,
@@ -415,8 +425,14 @@ function buildChanges(data: BriefData): ChangeItem[] {
     tone: activityTone(item.severity),
     source: item.source,
     href: item.href || '/activity',
-  }));
-  const deploys: ChangeItem[] = data.deploys.map((deploy) => ({
+    }));
+  const latestDeploys = new Map<string, Deploy>();
+  [...data.deploys]
+    .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime())
+    .forEach((deploy) => {
+      if (!latestDeploys.has(deploy.app)) latestDeploys.set(deploy.app, deploy);
+    });
+  const deploys: ChangeItem[] = [...latestDeploys.values()].map((deploy) => ({
     id: `deploy:${deploy.id}`,
     title: `${deploy.app} deploy ${deploy.status}`,
     detail: [deploy.branch, deploy.commit?.slice(0, 8), deploy.commitMsg].filter(Boolean).join(' · '),
@@ -675,7 +691,7 @@ export default function Home() {
   const incidentCount = queue.filter((item) => item.tone === 'incident').length;
   const attentionCount = queue.filter((item) => item.tone === 'attention').length;
   const unknownCount = data.apps.filter((app) => app.status === 'unknown').length + [data.bazza, data.shazza].filter((host) => hostTone(host) === 'unknown').length;
-  const postureTone: Tone = incidentCount > 0 || data.health?.overall === 'red' ? 'incident' : attentionCount > 0 || data.health?.overall === 'amber' ? 'attention' : data.health ? 'nominal' : 'unknown';
+  const postureTone: Tone = incidentCount > 0 ? 'incident' : attentionCount > 0 ? 'attention' : data.health ? 'nominal' : 'unknown';
   const healthyApps = data.apps.filter((app) => app.status === 'up').length;
   const activeAgents = data.agents.filter((agent) => ['working', 'idle'].includes((agent.status ?? '').toLowerCase())).length;
   const onlineNodes = data.network?.nodes.filter((node) => node.status === 'online').length ?? 0;
