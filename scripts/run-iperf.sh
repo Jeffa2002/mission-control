@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+TARGET_NODE="${1:-all}"
+LOCK_FILE="/tmp/mission-control-iperf.lock"
+
 PROD_HOST="root@100.95.166.47"
 PROD_PORT="2222"
 PROD_KEY="/root/.ssh/prod_deploy_v3"
@@ -17,6 +20,14 @@ NODES[secspy-lab01]="100.87.75.20"
 NODES[crm8]="100.112.179.70"
 NODES[shazza]="100.113.217.81"
 NODES[backup-melb]="100.110.100.97"
+
+if [[ "$TARGET_NODE" != "all" && -z "${NODES[$TARGET_NODE]:-}" ]]; then
+  echo "Unknown iperf node: $TARGET_NODE" >&2
+  exit 2
+fi
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || { echo "Another iperf collection is already running" >&2; exit 0; }
 
 run_iperf() {
   local id="$1"
@@ -34,37 +45,65 @@ run_iperf() {
   echo "{\"id\":\"$id\",\"status\":\"ok\",\"mbpsSend\":$send,\"mbpsRecv\":$recv,\"rttMs\":$rtt,\"retransmits\":$retransmits}"
 }
 
-echo "Running iperf3 tests from bazza..."
+echo "Running iperf3 tests from bazza (target: $TARGET_NODE)..."
 RESULTS=""
 for id in "${!NODES[@]}"; do
+  [[ "$TARGET_NODE" == "all" || "$TARGET_NODE" == "$id" ]] || continue
   ip="${NODES[$id]}"
   echo "  → $id ($ip)..."
   r=$(run_iperf "$id" "$ip")
   RESULTS="${RESULTS}${r},"
 done
 
-# Trim trailing comma
+# Merge this run into the existing snapshot so staggered tests retain the
+# latest measurement for every node. Each result carries its own timestamp.
 RESULTS="${RESULTS%,}"
+python3 - "$OUTPUT" "$RESULTS" <<'PYEOF'
+import json, os, sys, tempfile
+from datetime import datetime, timezone
 
-# Write JSON
-cat > "$OUTPUT" << JSONEOF
-{
-  "measuredAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "testedFrom": "bazza",
-  "results": [${RESULTS}]
+output, raw_results = sys.argv[1], sys.argv[2]
+measured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+current = {"testedFrom": "bazza", "results": []}
+try:
+    with open(output) as f:
+        current = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    pass
+
+incoming = json.loads(f"[{raw_results}]")
+by_id = {row.get("id"): row for row in current.get("results", []) if row.get("id")}
+for row in incoming:
+    row["measuredAt"] = measured_at
+    by_id[row["id"]] = row
+
+snapshot = {
+    "measuredAt": measured_at,
+    "testedFrom": "bazza",
+    "results": sorted(by_id.values(), key=lambda row: row["id"]),
 }
-JSONEOF
+directory = os.path.dirname(output)
+fd, tmp = tempfile.mkstemp(prefix=".iperf-results-", dir=directory, text=True)
+try:
+    with os.fdopen(fd, "w") as f:
+        json.dump(snapshot, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, output)
+finally:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+PYEOF
 
 echo "iperf results written to $OUTPUT"
 
 # Append results to network-history.db
 DB="/root/.openclaw/workspace/mission-control/network-history.db"
 if [ -f "$DB" ]; then
-  python3 - "$OUTPUT" "$DB" <<'PYEOF'
+  python3 - "$OUTPUT" "$DB" "$TARGET_NODE" <<'PYEOF'
 import json, sqlite3, sys
 from datetime import datetime, timezone
 
-iperf_file, db_path = sys.argv[1], sys.argv[2]
+iperf_file, db_path, target_node = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(iperf_file) as f:
     data = json.load(f)
 
@@ -73,12 +112,14 @@ con = sqlite3.connect(db_path)
 cur = con.cursor()
 rows = 0
 for r in data.get("results", []):
+    if target_node != "all" and r.get("id") != target_node:
+        continue
     if r.get("status") != "ok":
         continue
     cur.execute(
         "INSERT INTO iperf_history (ts, node_id, mbps_send, mbps_recv, rtt_ms, retransmits) "
         "VALUES (?,?,?,?,?,?)",
-        (ts, r["id"], r.get("mbpsSend"), r.get("mbpsRecv"), r.get("rttMs"), r.get("retransmits", 0)),
+        (r.get("measuredAt", ts), r["id"], r.get("mbpsSend"), r.get("mbpsRecv"), r.get("rttMs"), r.get("retransmits", 0)),
     )
     rows += 1
 con.commit()

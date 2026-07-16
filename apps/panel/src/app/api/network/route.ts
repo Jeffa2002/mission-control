@@ -59,7 +59,7 @@ async function loadIperf() {
       const raw = await readFile(file, 'utf-8');
       const data = JSON.parse(raw);
       for (const r of data.results || []) {
-        if (r.status === 'ok') out[r.id] = { ...r, measuredAt: data.measuredAt };
+        if (r.status === 'ok') out[r.id] = { ...r, measuredAt: r.measuredAt || data.measuredAt };
       }
       return out;
     } catch {}

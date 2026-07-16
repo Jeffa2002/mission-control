@@ -1,0 +1,17 @@
+# disabled 2026-05-24: missing script, replaced by mission-control/scripts/sync-agent-data.sh
+# * * * * * /root/.openclaw/workspace/push-agent-status.sh
+* * * * * bash /root/.openclaw/workspace/mission-control/scripts/sync-agent-data.sh >> /tmp/agent-sync.log 2>&1
+
+# Stagger iperf tests: each node runs every six hours on its assigned hour.
+0 0,6,12,18 * * * bash /root/.openclaw/workspace/mission-control/scripts/run-iperf.sh prod >> /tmp/iperf.log 2>&1
+0 1,7,13,19 * * * bash /root/.openclaw/workspace/mission-control/scripts/run-iperf.sh sec1 >> /tmp/iperf.log 2>&1
+0 2,8,14,20 * * * bash /root/.openclaw/workspace/mission-control/scripts/run-iperf.sh secspy-lab01 >> /tmp/iperf.log 2>&1
+0 3,9,15,21 * * * bash /root/.openclaw/workspace/mission-control/scripts/run-iperf.sh crm8 >> /tmp/iperf.log 2>&1
+0 4,10,16,22 * * * bash /root/.openclaw/workspace/mission-control/scripts/run-iperf.sh shazza >> /tmp/iperf.log 2>&1
+0 5,11,17,23 * * * bash /root/.openclaw/workspace/mission-control/scripts/run-iperf.sh backup-melb >> /tmp/iperf.log 2>&1
+
+0 1 * * 0 /root/generate_changelog.sh >> /var/log/changelog_cron.log 2>&1
+# fuel-price-monitor:start
+CRON_TZ=Australia/Perth
+0 7 * * * cd /root/.openclaw/workspace/fuel-price-monitor && /usr/bin/flock -n /tmp/fuel-price-monitor.lock npm run collect >> logs/collect.log 2>&1
+# fuel-price-monitor:end
