@@ -345,12 +345,16 @@ function SvgLineChart({ lines, range }: { lines: LineConfig[]; range: HistoryRan
 /* ─── Live flow gauges (Tier A, Netdata-style) ────────────── */
 /* Rolling send/recv throughput bars per node. Fed by iperf snapshots today;
    swap `nodes[].iperf` for a Tier B live bytes/sec feed without touching UI. */
-function LiveFlowGauges({ nodes, onSelect, selectedNode }: any) {
+function LiveFlowGauges({ nodes, onSelect, selectedNode, live }: any) {
+  const lnodes = live?.nodes ?? null;
   const rows = (nodes || [])
-    .map((n: any) => ({
-      id: n.id, label: n.label, emoji: n.emoji, status: n.status,
-      send: n.iperf?.mbpsSend ?? 0, recv: n.iperf?.mbpsRecv ?? 0,
-    }))
+    .map((n: any) => {
+      const lv = lnodes?.[n.id];
+      // Live bytes/sec -> Mbps split across tx(send)/rx(recv); else iperf snapshot.
+      const send = lv ? +((lv.txBps * 8) / 1e6).toFixed(2) : (n.iperf?.mbpsSend ?? 0);
+      const recv = lv ? +((lv.rxBps * 8) / 1e6).toFixed(2) : (n.iperf?.mbpsRecv ?? 0);
+      return { id: n.id, label: n.label, emoji: n.emoji, status: n.status, send, recv };
+    })
     .sort((a: any, b: any) => Math.max(b.send, b.recv) - Math.max(a.send, a.recv));
   const peak = Math.max(1, ...rows.map((r: any) => Math.max(r.send, r.recv)));
   const totalSend = rows.reduce((s: number, r: any) => s + r.send, 0);
@@ -1033,6 +1037,7 @@ function LayerPanel({ view, nodes, links, nodeMap, measuredAt, setSelectedNode, 
 /* ─── Main page ──────────────────────────────────────────────────────── */
 export default function NetworkPage() {
   const [data, setData] = useState<NetworkData | null>(null);
+  const [live, setLive] = useState<{ measuredAt: string | null; stale: boolean; nodes: Record<string, { rxBps: number; txBps: number; mbps: number }> } | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedLink, setSelectedLink] = useState<string | null>(null);
@@ -1047,6 +1052,11 @@ export default function NetworkPage() {
         setData(d);
         setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       }
+      // Tier B: live per-node bytes/sec (real traffic flow)
+      try {
+        const lr = await fetch(`/api/network/live?ts=${Date.now()}`, { cache: 'no-store' });
+        if (lr.ok) setLive(await lr.json());
+      } catch {}
     } catch {}
     setLoading(false);
   }, []);
@@ -1054,7 +1064,14 @@ export default function NetworkPage() {
   useEffect(() => {
     load();
     const iv = setInterval(load, 15_000);
-    return () => clearInterval(iv);
+    // Refresh just the live throughput more frequently for smoother flow.
+    const liveIv = setInterval(async () => {
+      try {
+        const lr = await fetch(`/api/network/live?ts=${Date.now()}`, { cache: 'no-store' });
+        if (lr.ok) setLive(await lr.json());
+      } catch {}
+    }, 5_000);
+    return () => { clearInterval(iv); clearInterval(liveIv); };
   }, [load]);
 
   const nodeMap = Object.fromEntries((data?.nodes || []).map(n => [n.id, n]));
@@ -1065,6 +1082,19 @@ export default function NetworkPage() {
 
   const nodes = data?.nodes ?? [];
   const links = data?.links ?? [];
+  // Tier B: live Mbps per node (combined rx+tx). Falls back to iperf when live is stale/absent.
+  const liveFresh = !!live && !live.stale;
+  const liveMbps = (id: string): number | null => {
+    if (liveFresh && live?.nodes?.[id]) return live.nodes[id].mbps;
+    return null;
+  };
+  // Endpoint mbps for a link = max live throughput of its two endpoints (fallback to iperf).
+  const linkMbps = (link: any): number | null => {
+    const l = Math.max(liveMbps(link.from) ?? 0, liveMbps(link.to) ?? 0);
+    if (l > 0) return l;
+    const ip = Math.max(link.iperf?.mbpsSend ?? 0, link.iperf?.mbpsRecv ?? 0);
+    return ip || null;
+  };
   const totalNodes = data?.nodes.length ?? (loading ? 0 : HISTORY_NODES.length);
   const onlineCount = nodes.filter(n => n.status === 'online').length;
   const degradedCount = nodes.filter(n => n.status === 'degraded').length;
@@ -1190,7 +1220,7 @@ export default function NetworkPage() {
                       color={latencyColor(link.latencyMs)}
                       active={link.active}
                       latencyMs={link.latencyMs}
-                      mbps={Math.max(link.iperf?.mbpsSend ?? 0, link.iperf?.mbpsRecv ?? 0) || null}
+                      mbps={linkMbps(link)}
                       reverse={(link.direction || '').includes('←')}
                       selected={selectedLink === key}
                       onClick={() => {
@@ -1234,7 +1264,7 @@ export default function NetworkPage() {
               )}
             </div>
 
-            <LiveFlowGauges nodes={nodes} selectedNode={selectedNode}
+            <LiveFlowGauges nodes={nodes} live={liveFresh ? live : null} selectedNode={selectedNode}
               onSelect={(id: string) => { setSelectedNode(selectedNode === id ? null : id); setSelectedLink(null); }} />
             <LayerPanel view={view} nodes={nodes} links={links} nodeMap={nodeMap} measuredAt={data?.measuredAt} setSelectedNode={setSelectedNode} setSelectedLink={setSelectedLink} />
             {view !== 'Timeline' && <EventStrip nodes={nodes} links={links} measuredAt={data?.measuredAt} />}
