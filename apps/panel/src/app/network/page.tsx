@@ -62,6 +62,34 @@ function statusColor(s: string) {
 }
 function fmtMs(ms: number | null) { return ms === null ? '—' : `${ms.toFixed(1)}ms`; }
 
+/* ─── Flow visual mapping (Tier A) ───────────────────────────── */
+/* Maps a link's real throughput (Mbps) to particle speed, density and stroke
+   width. Kept as pure helpers so a future Tier B live feed (bytes/sec from
+   /proc/net/dev via /api/network/live) can reuse the exact same mapping. */
+const FLOW_MAX_MBPS = 1000;          // ~1 Gbps tailnet ceiling for scaling
+function flowFraction(mbps: number | null | undefined): number {
+  if (!mbps || mbps <= 0) return 0;
+  // sqrt curve so low-throughput links still show visible motion
+  return Math.min(1, Math.sqrt(mbps / FLOW_MAX_MBPS));
+}
+// Particle traversal duration in seconds: busy link => faster (shorter dur)
+function flowDuration(len: number, mbps: number | null | undefined): number {
+  const f = flowFraction(mbps);
+  const slow = len / 40;   // idle-ish link
+  const fast = len / 260;  // saturated link
+  return +(slow - (slow - fast) * f).toFixed(2);
+}
+// Number of particles on a link, scaled to throughput
+function flowParticles(mbps: number | null | undefined): number {
+  const f = flowFraction(mbps);
+  return 1 + Math.round(f * 4); // 1..5 particles
+}
+// Stroke width scaled to throughput
+function flowStroke(mbps: number | null | undefined, selected: boolean): number {
+  const f = flowFraction(mbps);
+  return (selected ? 2.5 : 1.25) + f * 3;
+}
+
 function formatTs(ts: string, range: HistoryRange): string {
   try {
     const d = new Date(ts);
@@ -95,14 +123,24 @@ function Sparkline({ data, color = '#7ce8ff', w = 80, h = 28 }: { data: number[]
   );
 }
 
-/* ─── Animated dash for SVG links ──────────────────────────────────── */
-function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, selected, onClick }: any) {
+/* ─── Animated flow link for SVG (Tier A) ──────────────── */
+function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, reverse, selected, onClick }: any) {
   const mid = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
-  const len = Math.sqrt((x2-x1)**2 + (y2-y1)**2);
+  const len = Math.sqrt((x2-x1)**2 + (y2-y1)**2) || 1;
   // Offset labels perpendicular to line so they don't overlap
   const dx = x2 - x1, dy = y2 - y1;
   const nx = -dy / len, ny = dx / len;
   const off = 9;
+
+  // Real-data-driven flow characteristics
+  const dur = flowDuration(len, mbps);
+  const count = active ? flowParticles(mbps) : 0;
+  const stroke = flowStroke(mbps, selected);
+  const busy = flowFraction(mbps);
+  // Flow direction: reverse means traffic heads from (x2,y2) -> (x1,y1)
+  const motionPath = reverse
+    ? `M${x2},${y2} L${x1},${y1}`
+    : `M${x1},${y1} L${x2},${y2}`;
 
   return (
     <g
@@ -110,21 +148,30 @@ function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, selected
       onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick(); } }}
       role="button"
       tabIndex={0}
-      aria-label={`Inspect endpoint link, ${active ? 'both endpoints online' : 'reachability incomplete'}`}
+      aria-label={`Inspect endpoint link, ${active ? 'both endpoints online' : 'reachability incomplete'}${mbps ? `, ${Math.round(mbps)} Mbps` : ''}`}
       style={{ cursor: 'pointer' }}>
+      {/* Hit target */}
       <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={16} />
-      {selected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={8} strokeOpacity={0.12} />}
+      {/* Selection halo */}
+      {selected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={10} strokeOpacity={0.12} />}
+      {/* Base conduit — thickness scales with throughput */}
       <line x1={x1} y1={y1} x2={x2} y2={y2}
-        stroke={color} strokeWidth={selected ? 2.5 : 1.5}
-        strokeOpacity={active ? 0.85 : 0.25}
+        stroke={color} strokeWidth={stroke}
+        strokeOpacity={active ? 0.35 + busy * 0.4 : 0.2}
+        strokeLinecap="round"
         strokeDasharray={active ? 'none' : '4 4'}
       />
-      {active && (
-        <circle r={4} fill={color} fillOpacity={0.9}>
-          <animateMotion dur={`${(len / 80).toFixed(1)}s`} repeatCount="indefinite"
-            path={`M${x1},${y1} L${x2},${y2}`} />
+      {/* Flowing particles — count + speed scale with throughput */}
+      {count > 0 && Array.from({ length: count }).map((_, i) => (
+        <circle key={i} r={2 + busy * 2.5} fill={color} fillOpacity={0.95}>
+          <animateMotion
+            dur={`${dur}s`}
+            begin={`${((dur / count) * i).toFixed(2)}s`}
+            repeatCount="indefinite"
+            path={motionPath}
+          />
         </circle>
-      )}
+      ))}
       {/* Latency label — above line */}
       {latencyMs !== null && (
         <text
@@ -140,7 +187,7 @@ function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, selected
           x={mid.x + nx * off} y={mid.y + ny * off + 6}
           textAnchor="middle" fontSize={8} fill={color} fontWeight={600} fillOpacity={0.75}
           style={{ pointerEvents: 'none' }}>
-          {mbps >= 1000 ? `${(mbps/1000).toFixed(1)}Gbps` : `${mbps}Mbps`}
+          {mbps >= 1000 ? `${(mbps/1000).toFixed(1)}Gbps` : `${Math.round(mbps)}Mbps`}
         </text>
       )}
     </g>
@@ -292,6 +339,79 @@ function SvgLineChart({ lines, range }: { lines: LineConfig[]; range: HistoryRan
         );
       })}
     </svg>
+  );
+}
+
+/* ─── Live flow gauges (Tier A, Netdata-style) ────────────── */
+/* Rolling send/recv throughput bars per node. Fed by iperf snapshots today;
+   swap `nodes[].iperf` for a Tier B live bytes/sec feed without touching UI. */
+function LiveFlowGauges({ nodes, onSelect, selectedNode }: any) {
+  const rows = (nodes || [])
+    .map((n: any) => ({
+      id: n.id, label: n.label, emoji: n.emoji, status: n.status,
+      send: n.iperf?.mbpsSend ?? 0, recv: n.iperf?.mbpsRecv ?? 0,
+    }))
+    .sort((a: any, b: any) => Math.max(b.send, b.recv) - Math.max(a.send, a.recv));
+  const peak = Math.max(1, ...rows.map((r: any) => Math.max(r.send, r.recv)));
+  const totalSend = rows.reduce((s: number, r: any) => s + r.send, 0);
+  const totalRecv = rows.reduce((s: number, r: any) => s + r.recv, 0);
+
+  const Bar = ({ value, color }: { value: number; color: string }) => (
+    <div style={{ position: 'relative', height: 7, borderRadius: 6, background: 'rgba(255,255,255,0.05)', overflow: 'hidden' }}>
+      <div style={{
+        position: 'absolute', inset: 0, width: `${Math.min(100, (value / peak) * 100)}%`,
+        borderRadius: 6, background: color,
+        transition: 'width 0.6s ease',
+        boxShadow: value > 0 ? `0 0 8px ${color}` : 'none',
+      }} />
+    </div>
+  );
+
+  return (
+    <div style={{
+      borderRadius: 18, border: '1px solid rgba(103,213,255,0.16)',
+      background: 'linear-gradient(145deg, rgba(13,20,36,0.92), rgba(6,10,20,0.96))',
+      padding: 14,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#67D5FF' }}>
+          Live Flow · Throughput
+        </div>
+        <div style={{ fontSize: 10, color: '#64748B' }}>
+          <span style={{ color: '#7CE8FF' }}>▲ {fmtMbps(totalSend)}</span>
+          <span style={{ margin: '0 6px', color: '#334155' }}>|</span>
+          <span style={{ color: '#A78BFA' }}>▼ {fmtMbps(totalRecv)}</span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {rows.map((r: any) => (
+          <button key={r.id} type="button" onClick={() => onSelect?.(r.id)} style={{
+            textAlign: 'left', cursor: 'pointer',
+            background: selectedNode === r.id ? 'rgba(103,213,255,0.08)' : 'transparent',
+            border: '1px solid ' + (selectedNode === r.id ? 'rgba(103,213,255,0.24)' : 'transparent'),
+            borderRadius: 10, padding: '4px 6px', display: 'grid',
+            gridTemplateColumns: '96px 1fr', alignItems: 'center', gap: 8,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#CBD5E1', fontWeight: 700, minWidth: 0 }}>
+              <span>{r.emoji}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+              <Bar value={r.send} color={r.status === 'offline' ? '#6B7280' : '#7CE8FF'} />
+              <Bar value={r.recv} color={r.status === 'offline' ? '#6B7280' : '#A78BFA'} />
+            </div>
+          </button>
+        ))}
+        {rows.length === 0 && (
+          <div style={{ fontSize: 11, color: '#64748B', padding: '8px 2px' }}>No throughput data yet.</div>
+        )}
+      </div>
+      <div style={{ marginTop: 10, fontSize: 9.5, color: '#475569', display: 'flex', gap: 12 }}>
+        <span><span style={{ color: '#7CE8FF' }}>▲</span> send</span>
+        <span><span style={{ color: '#A78BFA' }}>▼</span> recv</span>
+        <span style={{ marginLeft: 'auto' }}>iperf snapshot · hourly</span>
+      </div>
+    </div>
   );
 }
 
@@ -1070,7 +1190,8 @@ export default function NetworkPage() {
                       color={latencyColor(link.latencyMs)}
                       active={link.active}
                       latencyMs={link.latencyMs}
-                      mbps={link.iperf?.mbpsSend ?? null}
+                      mbps={Math.max(link.iperf?.mbpsSend ?? 0, link.iperf?.mbpsRecv ?? 0) || null}
+                      reverse={(link.direction || '').includes('←')}
                       selected={selectedLink === key}
                       onClick={() => {
                         setSelectedLink(selectedLink === key ? null : key);
@@ -1113,6 +1234,8 @@ export default function NetworkPage() {
               )}
             </div>
 
+            <LiveFlowGauges nodes={nodes} selectedNode={selectedNode}
+              onSelect={(id: string) => { setSelectedNode(selectedNode === id ? null : id); setSelectedLink(null); }} />
             <LayerPanel view={view} nodes={nodes} links={links} nodeMap={nodeMap} measuredAt={data?.measuredAt} setSelectedNode={setSelectedNode} setSelectedLink={setSelectedLink} />
             {view !== 'Timeline' && <EventStrip nodes={nodes} links={links} measuredAt={data?.measuredAt} />}
           </div>
