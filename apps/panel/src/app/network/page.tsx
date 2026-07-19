@@ -353,12 +353,31 @@ function LiveFlowGauges({ nodes, onSelect, selectedNode, live }: any) {
       // Live bytes/sec -> Mbps split across tx(send)/rx(recv); else iperf snapshot.
       const send = lv ? +((lv.txBps * 8) / 1e6).toFixed(2) : (n.iperf?.mbpsSend ?? 0);
       const recv = lv ? +((lv.rxBps * 8) / 1e6).toFixed(2) : (n.iperf?.mbpsRecv ?? 0);
-      return { id: n.id, label: n.label, emoji: n.emoji, status: n.status, send, recv };
+      // Per-server last-checked: live ts if present, else iperf measuredAt.
+      const checkedTs = lv?.ts ?? n.iperf?.measuredAt ?? null;
+      return { id: n.id, label: n.label, emoji: n.emoji, status: n.status, send, recv, checkedTs, isLive: !!lv };
     })
     .sort((a: any, b: any) => Math.max(b.send, b.recv) - Math.max(a.send, a.recv));
   const peak = Math.max(1, ...rows.map((r: any) => Math.max(r.send, r.recv)));
   const totalSend = rows.reduce((s: number, r: any) => s + r.send, 0);
   const totalRecv = rows.reduce((s: number, r: any) => s + r.recv, 0);
+  // Compact 'checked' label: relative for recent, else clock time.
+  const checkedLabel = (ts: string | null): string => {
+    if (!ts) return '—';
+    const t = Date.parse(ts);
+    if (Number.isNaN(t)) return '—';
+    const secs = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (secs < 10) return 'just now';
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+  const isStale = (ts: string | null): boolean => {
+    if (!ts) return true;
+    const t = Date.parse(ts);
+    return Number.isNaN(t) || Date.now() - t > 90_000;
+  };
 
   const Bar = ({ value, color }: { value: number; color: string }) => (
     <div style={{ position: 'relative', height: 7, borderRadius: 6, background: 'rgba(255,255,255,0.05)', overflow: 'hidden' }}>
@@ -394,7 +413,7 @@ function LiveFlowGauges({ nodes, onSelect, selectedNode, live }: any) {
             background: selectedNode === r.id ? 'rgba(103,213,255,0.08)' : 'transparent',
             border: '1px solid ' + (selectedNode === r.id ? 'rgba(103,213,255,0.24)' : 'transparent'),
             borderRadius: 10, padding: '4px 6px', display: 'grid',
-            gridTemplateColumns: '96px 1fr', alignItems: 'center', gap: 8,
+            gridTemplateColumns: '96px 1fr 58px', alignItems: 'center', gap: 8,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#CBD5E1', fontWeight: 700, minWidth: 0 }}>
               <span>{r.emoji}</span>
@@ -403,6 +422,13 @@ function LiveFlowGauges({ nodes, onSelect, selectedNode, live }: any) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
               <Bar value={r.send} color={r.status === 'offline' ? '#6B7280' : '#7CE8FF'} />
               <Bar value={r.recv} color={r.status === 'offline' ? '#6B7280' : '#A78BFA'} />
+            </div>
+            <div
+              title={r.checkedTs ? `Last checked ${new Date(r.checkedTs).toLocaleString()}` : 'No check recorded'}
+              style={{ fontSize: 9, textAlign: 'right', whiteSpace: 'nowrap',
+                color: isStale(r.checkedTs) ? '#F59E0B' : '#64748B', fontWeight: 600 }}>
+              <span style={{ marginRight: 3, color: r.isLive && !isStale(r.checkedTs) ? '#10B981' : '#6B7280' }}>●</span>
+              {checkedLabel(r.checkedTs)}
             </div>
           </button>
         ))}
@@ -413,7 +439,7 @@ function LiveFlowGauges({ nodes, onSelect, selectedNode, live }: any) {
       <div style={{ marginTop: 10, fontSize: 9.5, color: '#475569', display: 'flex', gap: 12 }}>
         <span><span style={{ color: '#7CE8FF' }}>▲</span> send</span>
         <span><span style={{ color: '#A78BFA' }}>▼</span> recv</span>
-        <span style={{ marginLeft: 'auto' }}>iperf snapshot · hourly</span>
+        <span style={{ marginLeft: 'auto' }}>{live ? 'live · bytes/sec' : 'iperf snapshot · hourly'} · ● checked</span>
       </div>
     </div>
   );
