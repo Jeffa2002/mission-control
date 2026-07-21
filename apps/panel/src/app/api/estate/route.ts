@@ -20,7 +20,7 @@ const REPOS: EstateRepo[] = [
   { name: 'Projenta', fullName: 'Jeffa2002/projenta', productionBranch: 'main', smokeUrl: 'https://projenta.io/', owner: 'Projenta' },
   { name: 'Projenta App', fullName: 'Jeffa2002/projenta', productionBranch: 'main', smokeUrl: 'https://app.projenta.io/', owner: 'Projenta' },
   { name: 'VenConX', fullName: 'Jeffa2002/venconx', productionBranch: 'main', smokeUrl: 'https://venconx.effectx.com.au/', owner: 'VenConX' },
-  { name: 'Helix', fullName: 'Jeffa2002/helix', productionBranch: 'main', smokeUrl: 'https://helix.effectx.com.au/', owner: 'Helix' },
+  { name: 'Ordantra', fullName: 'Jeffa2002/ordantra', productionBranch: 'main', smokeUrl: 'https://ordantra.effectx.com.au/', owner: 'Ordantra' },
   { name: 'NurtureRecord', fullName: 'Jeffa2002/nurturerecord', productionBranch: 'main', smokeUrl: 'https://nurturerecord.effectx.com.au/', owner: 'NurtureRecord' },
   { name: 'Crossbench', fullName: 'Jeffa2002/crossbench', productionBranch: 'main', smokeUrl: 'https://crossbench.io/', owner: 'Crossbench' },
 ];
