@@ -72,7 +72,7 @@ const APPS = [
     id: 'ordantra-app',
     name: 'Ordantra App',
     description: 'ITSM ticketing, incidents, and assets',
-    url: 'https://app.ordantra.effectx.com.au',
+    url: 'https://app-ordantra.effectx.com.au',
     healthPath: '/api/auth/providers',
     kind: 'app',
     upstream: '127.0.0.1:3030',
