@@ -43,7 +43,7 @@ export async function GET(req: Request) {
 
     // Check backup server via SSH (bazza key, public IP)
     const backupLastRun = safeExec("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p 2222 root@43.229.63.19 'ls -t /backups/timepulse/*.sql.gz 2>/dev/null | head -1' 2>/dev/null").trim();
-    const backupDbs = safeExec("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p 2222 root@43.229.63.19 'ls /backups/timepulse/ /backups/venconx/ /backups/helix/ /backups/cutline/ /backups/projectxify/ 2>/dev/null | grep -c .sql.gz' 2>/dev/null").trim();
+    const backupDbs = safeExec("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p 2222 root@43.229.63.19 'ls /backups/timepulse/ /backups/venconx/ /backups/ordantra/ /backups/cutline/ /backups/projectxify/ 2>/dev/null | grep -c .sql.gz' 2>/dev/null").trim();
     const backupStatus: Status = backupLastRun ? 'compliant' : 'partial';
     const backupDetail = backupLastRun
       ? `backup-melb (Melbourne): ${backupDbs} DB snapshots; last: ${backupLastRun.split('/').pop()}`
