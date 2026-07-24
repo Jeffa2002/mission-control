@@ -9,6 +9,7 @@ type Country = { code: string; name: string; count: number; active?: boolean };
 type GeoResponse = {
   countries: Country[];
   total: number;
+  unknownCount: number;
   topCountries: Country[];
   activeCountries: Country[];
 };
@@ -48,7 +49,7 @@ function colorForCount(count: number, max: number) {
 }
 
 export function AttackMap() {
-  const [data, setData] = useState<GeoResponse>({ countries: [], total: 0, topCountries: [], activeCountries: [] });
+  const [data, setData] = useState<GeoResponse>({ countries: [], total: 0, unknownCount: 0, topCountries: [], activeCountries: [] });
   const [loading, setLoading] = useState(true);
   const [hovered, setHovered] = useState<Country | null>(null);
   const [world, setWorld] = useState<any>(null);
@@ -100,6 +101,7 @@ export function AttackMap() {
           <div style={{ fontSize: 12, letterSpacing: 2, color: '#9fefff', opacity: 0.9, marginBottom: 6 }}>ATTACK INTELLIGENCE</div>
           <div style={{ fontSize: 32, fontWeight: 800, color: '#fff' }}>{data.total.toLocaleString()} attacks</div>
           <div style={{ color: '#9ca3af', fontSize: 12 }}>Country-level source heatmap from recent SSH authentication activity.</div>
+          {data.unknownCount > 0 && <div style={{ color: '#9ca3af', fontSize: 12 }}>{data.unknownCount.toLocaleString()} source events have unknown or private geo.</div>}
         </div>
       </div>
 
