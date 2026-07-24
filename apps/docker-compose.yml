@@ -25,6 +25,7 @@ services:
       - /root/.ssh/mission_security_telemetry:/root/.ssh/mission_security_telemetry:ro
       - /root/.ssh/prod_deploy_v3:/root/.ssh/prod_deploy_v3:ro
       - /var/log:/host-logs:ro
+      - /usr/share/GeoIP:/usr/share/GeoIP:ro
       - /var/www/mission-control/runtime/auth:/auth-data
     security_opt:
       - no-new-privileges:true

@@ -35,21 +35,23 @@ export async function GET(req: Request) {
     // Extract only the address following "from", then validate it in Node.
     // This accepts both families without mistaking timestamps for IPv6.
     const extract = "sed -nE 's/.* from ([0-9A-Fa-f:.]+)( port [0-9]+)?.*/\\1/p'";
-    const remoteScript = [
-      'grep -E "Failed password|Invalid user" /var/log/auth.log 2>/dev/null',
+    const authScript = [
+      'grep -E "Failed password|Invalid user" /host-logs/auth.log 2>/dev/null',
       extract,
       'sort | uniq -c | sort -rn | head -30',
     ].join(' | ');
 
     const ipCounts = new Map<string, number>();
-    addCounts(runRemote(remoteScript).trim(), ipCounts);
+    addCounts(safeExec(authScript), ipCounts);
 
-    const bazzaScript = [
-      "grep -E 'Failed password|Invalid user' /host-logs/auth.log 2>/dev/null",
-      extract,
-      'sort | uniq -c | sort -rn | head -20',
+    // Security alerts are the primary prod signal and include both IPv4 and IPv6.
+    // Count bounded recent source references so the map reflects what operators see.
+    const alertScript = [
+      'tail -n 2000 /host-logs/security-alert.log 2>/dev/null',
+      "sed -nE 's/^.*Non-AU repeat: ([0-9A-Fa-f:.]+).*/\\1/p'",
+      'sort | uniq -c | sort -rn | head -30',
     ].join(' | ');
-    addCounts(safeExec(bazzaScript), ipCounts);
+    addCounts(safeExec(alertScript), ipCounts);
 
     if (ipCounts.size === 0) {
       return NextResponse.json({ countries: [], total: 0, unknownCount: 0, topCountries: [], activeCountries: [] });
@@ -58,7 +60,7 @@ export async function GET(req: Request) {
     // isIP validation above makes this fixed-character list safe to pass to the shell.
     const ipList = [...ipCounts.keys()].join(' ');
     const geoScript = `for ip in ${ipList}; do case "$ip" in *:*) lookup=geoiplookup6;; *) lookup=geoiplookup;; esac; echo "$ip $($lookup "$ip" 2>/dev/null | head -1)"; done`;
-    const geoRaw = runRemote(geoScript).trim();
+    const geoRaw = safeExec(geoScript).trim() || runRemote(geoScript).trim();
 
     const geo = new Map<string, Country>();
     let unknownCount = 0;

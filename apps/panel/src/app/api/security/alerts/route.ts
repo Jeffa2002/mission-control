@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireSessionAuth } from '../../_session-auth';
-import { runRemote } from '../_security-logs';
+import { readFirstExisting } from '../_security-logs';
 
 type AlertItem = { time: string; type: string; detail: string; severity: 'low' | 'medium' | 'high' };
 
@@ -41,7 +41,10 @@ export async function GET(req: Request) {
   const authErr = requireSessionAuth(req);
   if (authErr) return authErr;
   try {
-    const raw = runRemote('tail -n 2000 /var/log/security-alert.log 2>/dev/null').trim();
+    const raw = (await readFirstExisting([
+      '/host-logs/security-alert.log',
+      '/var/log/security-alert.log',
+    ])).split('\n').slice(-2000).join('\n').trim();
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     const alerts = parseAlerts(raw)
       .filter((x) => {
