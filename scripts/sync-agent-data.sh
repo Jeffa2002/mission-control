@@ -11,6 +11,10 @@ AGENTS_DIR="/root/.openclaw/agents"
 PROD_HOST="root@100.95.166.47"
 PROD_PORT="2222"
 PROD_KEY="/root/.ssh/prod_deploy_v3"
+CONTROL_PATH="/tmp/mission-control-telemetry-%C"
+SSH_OPTIONS=(-i "$PROD_KEY" -p "$PROD_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ControlMaster=auto -o ControlPersist=120 -o "ControlPath=$CONTROL_PATH")
+SCP_OPTIONS=(-i "$PROD_KEY" -P "$PROD_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ControlMaster=auto -o ControlPersist=120 -o "ControlPath=$CONTROL_PATH")
+RSYNC_SSH="ssh -i $PROD_KEY -p $PROD_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes -o ControlMaster=auto -o ControlPersist=120 -o ControlPath=$CONTROL_PATH"
 PROD_AGENT_DATA="/root/.openclaw/agents"
 STATUS_FILE="/tmp/agent-status.json"
 WORKSPACE_STATUS="/root/.openclaw/workspace/agent-status.json"
@@ -26,7 +30,7 @@ cp "$STATUS_FILE" "$MISSION_STATUS"
 
 # ── 2. Rsync session files to prod (fast incremental, skip deleted/reset) ─────
 rsync -az --delete \
-    -e "ssh -i $PROD_KEY -p $PROD_PORT -o StrictHostKeyChecking=no" \
+    -e "$RSYNC_SSH" \
     --exclude="*.reset.*" \
     --exclude="*.deleted.*" \
     --exclude="*.sqlite" \
@@ -44,16 +48,16 @@ rsync -az --delete \
 # ── 4. Write status JSON after rsync (so --delete doesn't wipe it) ────────────
 # Land as a temp file, then chown/chmod so the non-root panel container (uid 100,
 # gid 101) can read it, then atomically move into place.
-scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
+scp "${SCP_OPTIONS[@]}" \
     "$STATUS_FILE" \
     "${PROD_HOST}:${PROD_AGENT_DATA}/agent-status.json.tmp" 2>/dev/null \
-  && ssh -i "$PROD_KEY" -p "$PROD_PORT" -o StrictHostKeyChecking=no "$PROD_HOST" \
+  && ssh "${SSH_OPTIONS[@]}" "$PROD_HOST" \
     "chown 100:101 '${PROD_AGENT_DATA}/agent-status.json.tmp'; chmod 640 '${PROD_AGENT_DATA}/agent-status.json.tmp'; mv '${PROD_AGENT_DATA}/agent-status.json.tmp' '${PROD_AGENT_DATA}/agent-status.json'" 2>/dev/null
 
 # ── 5. Sync iperf-results.json to prod agents dir ──────────────────────────────
 IPERF_SRC="/root/.openclaw/workspace/mission-control/iperf-results.json"
 if [ -f "$IPERF_SRC" ]; then
-  scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
+  scp "${SCP_OPTIONS[@]}" \
       "$IPERF_SRC" \
       "${PROD_HOST}:${PROD_AGENT_DATA}/iperf-results.json" 2>/dev/null
 fi
@@ -144,7 +148,7 @@ with sqlite3.connect(source) as src, sqlite3.connect(destination) as dst:
 os.chmod(destination, 0o644)
 SNAPEOF
   rsync -az \
-      -e "ssh -i $PROD_KEY -p $PROD_PORT -o StrictHostKeyChecking=yes" \
+      -e "$RSYNC_SSH" \
       "$SNAPSHOT" \
       "${PROD_HOST}:${PROD_AGENT_DATA}/network-history.db" 2>/dev/null && true
   rm -f "$SNAPSHOT"
@@ -156,7 +160,10 @@ import subprocess, json, re
 from datetime import datetime, timezone
 
 SSH = ["ssh", "-i", "/root/.ssh/prod_deploy_v3", "-p", "2222",
-       "-o", "StrictHostKeyChecking=no", "root@100.95.166.47"]
+       "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+       "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
+       "-o", "ControlPath=/tmp/mission-control-telemetry-%C",
+       "root@100.95.166.47"]
 
 def run(cmd):
     try:
@@ -217,7 +224,7 @@ SECEOF
 # Sync security data to prod
 if [ -f "/tmp/security-data.json" ]; then
   cp /tmp/security-data.json "$MISSION_SECURITY"
-  scp -i "$PROD_KEY" -P "$PROD_PORT" -o StrictHostKeyChecking=no \
+  scp "${SCP_OPTIONS[@]}" \
       /tmp/security-data.json \
       "${PROD_HOST}:${PROD_AGENT_DATA}/security-data.json" 2>/dev/null
 fi
