@@ -56,6 +56,30 @@ export function parseUsageTranscript(content: string, agent: string): UsageRecor
   return records;
 }
 
+export function parseCodexRollout(content: string, agent: string): UsageRecord[] {
+  const records: UsageRecord[] = [];
+  let model = 'unknown';
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const row = JSON.parse(line);
+      if (row?.type === 'turn_context' && typeof row?.payload?.model === 'string') model = row.payload.model;
+      const usage = row?.type === 'event_msg' && row?.payload?.type === 'token_count' ? row?.payload?.info?.last_token_usage : null;
+      if (!usage) continue;
+      const inputTotal = Number(usage.input_tokens ?? 0);
+      const cacheRead = Number(usage.cached_input_tokens ?? 0);
+      const record: UsageRecord = {
+        ts: row.timestamp ?? new Date(0).toISOString(), agent, provider: 'openai', model,
+        input: Math.max(0, inputTotal - cacheRead), output: Number(usage.output_tokens ?? 0),
+        cacheRead, cacheWrite: 0, total: Number(usage.total_tokens ?? 0), estimatedCost: null,
+      };
+      record.estimatedCost = estimateOpenAiCost(record.model, record);
+      records.push(record);
+    } catch { /* tolerate a partially appended final line */ }
+  }
+  return records;
+}
+
 type CachedFile = { size: number; mtimeMs: number; records: UsageRecord[] };
 const fileCache = new Map<string, CachedFile>();
 const perthDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Perth', year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -72,15 +96,25 @@ function sum(target: any, row: UsageRecord) {
 function bucket(id: string) { return { id, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, estimatedCost: 0, unpricedTokens: 0 }; }
 
 async function discover(root: string) {
-  const found: Array<{ file: string; agent: string }> = [];
+  const found: Array<{ file: string; agent: string; kind: 'openclaw'|'codex' }> = [];
+  async function walkCodex(directory: string, agent: string) {
+    try {
+      for (const item of await readdir(directory, { withFileTypes: true })) {
+        const file = path.join(directory, item.name);
+        if (item.isDirectory()) await walkCodex(file, agent);
+        else if (item.isFile() && item.name.startsWith('rollout-') && item.name.endsWith('.jsonl')) found.push({ file, agent, kind: 'codex' });
+      }
+    } catch { /* Codex session tree is optional */ }
+  }
   for (const entry of await readdir(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const sessions = path.join(root, entry.name, 'sessions');
     try {
       for (const item of await readdir(sessions, { withFileTypes: true })) {
-        if (item.isFile() && transcript(item.name)) found.push({ file: path.join(sessions, item.name), agent: entry.name });
+        if (item.isFile() && transcript(item.name)) found.push({ file: path.join(sessions, item.name), agent: entry.name, kind: 'openclaw' });
       }
     } catch { /* agent has no sessions directory */ }
+    await walkCodex(path.join(root, entry.name, 'agent', 'codex-home', 'sessions'), entry.name);
   }
   return found;
 }
@@ -97,11 +131,12 @@ export async function loadUsage(range: '7d'|'30d'|'90d'|'all' = '30d') {
   const files = await discover(root);
   const live = new Set(files.map(item => item.file));
   for (const key of fileCache.keys()) if (!live.has(key)) fileCache.delete(key);
-  await Promise.all(files.map(async ({ file, agent }) => {
+  await Promise.all(files.map(async ({ file, agent, kind }) => {
     const info = await stat(file);
     const cached = fileCache.get(file);
     if (cached?.size === info.size && cached.mtimeMs === info.mtimeMs) return;
-    fileCache.set(file, { size: info.size, mtimeMs: info.mtimeMs, records: parseUsageTranscript(await readFile(file, 'utf8'), agent) });
+    const content = await readFile(file, 'utf8');
+    fileCache.set(file, { size: info.size, mtimeMs: info.mtimeMs, records: kind === 'codex' ? parseCodexRollout(content, agent) : parseUsageTranscript(content, agent) });
   }));
   const now = Date.now();
   const span = range === 'all' ? Infinity : Number(range.slice(0, -1)) * 86_400_000;
