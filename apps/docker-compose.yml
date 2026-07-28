@@ -12,7 +12,7 @@ services:
       - NETWORK_HISTORY_DB=/workspace/mission-control/network-history.db
       - NETWORK_CACHE_FILE=/tmp/mission-network-cache.json
       - AGENT_TELEMETRY_FILE=/workspace/mission-control/runtime/agent-telemetry.json
-      - USAGE_TELEMETRY_FILE=/workspace/mission-control/runtime/token-usage.json
+      - USAGE_TELEMETRY_FILE=/usage-data/token-usage.json
       - CADVISOR_URL=http://mission-cadvisor:8080
       - DOCKER_HOST=tcp://docker-proxy:2375
       - 'SECURITY_REMOTE_HOSTS=[{"id":"crm8","label":"CRM8","host":"100.112.179.70","port":"2222","user":"root","key":"/root/.ssh/mission_security_telemetry"},{"id":"sec1","label":"Sec1","host":"100.122.8.93","port":"2222","user":"root","key":"/root/.ssh/mission_security_telemetry"},{"id":"secspy-lab01","label":"SecSpy Lab 01","host":"100.87.75.20","port":"22","user":"secspy","key":"/root/.ssh/mission_security_telemetry"},{"id":"backup-melb","label":"Backup Melbourne","host":"100.110.100.97","port":"2222","user":"root","key":"/root/.ssh/mission_security_telemetry"}]'
@@ -20,6 +20,7 @@ services:
       - "127.0.0.1:3020:3020"
     volumes:
       - /root/.openclaw/workspace:/workspace:ro
+      - usage-data:/usage-data:ro
       - /var/www/mission-control/runtime:/workspace/mission-control/runtime
       - /root/.openclaw/agents:/agent-data:ro
       - /root/.openclaw/workspace:/workspace-data:ro
@@ -49,21 +50,19 @@ services:
   usage-collector:
     image: node:22-alpine
     restart: unless-stopped
-    user: "100:101"
+    user: "0:0"
     command: ["node", "--experimental-strip-types", "/collector/usage-writer.mjs"]
     environment:
       - AGENT_DATA_DIR=/agent-data
-      - USAGE_TELEMETRY_OUTPUT=/runtime/token-usage.json
+      - USAGE_TELEMETRY_OUTPUT=/usage-data/token-usage.json
     volumes:
       - /root/.openclaw/agents:/agent-data:ro
-      - /var/www/mission-control/runtime:/runtime
+      - usage-data:/usage-data
       - ./panel/src/app/api/usage:/collector:ro
     network_mode: none
     read_only: true
     cap_drop:
       - ALL
-    cap_add:
-      - DAC_READ_SEARCH
     security_opt:
       - no-new-privileges:true
     tmpfs:
@@ -92,3 +91,6 @@ networks:
   infra_default:
     external: true
     name: infra_default
+
+volumes:
+  usage-data:
