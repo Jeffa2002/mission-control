@@ -6,6 +6,7 @@ export type UsageRecord = {
   agent: string;
   provider: string;
   model: string;
+  session: string;
   input: number;
   output: number;
   cacheRead: number;
@@ -33,7 +34,7 @@ export function estimateOpenAiCost(model: string, usage: Pick<UsageRecord, 'inpu
   return (usage.input * price.input + usage.output * price.output + usage.cacheRead * (price.cached ?? price.input) + usage.cacheWrite * cacheWritePrice) / 1_000_000;
 }
 
-export function parseUsageTranscript(content: string, agent: string): UsageRecord[] {
+export function parseUsageTranscript(content: string, agent: string, session = 'unknown'): UsageRecord[] {
   const records: UsageRecord[] = [];
   for (const line of content.split('\n')) {
     if (!line.trim()) continue;
@@ -43,7 +44,7 @@ export function parseUsageTranscript(content: string, agent: string): UsageRecor
       const usage = message?.role === 'assistant' ? message.usage : null;
       if (!usage) continue;
       const record: UsageRecord = {
-        ts: row.timestamp ?? new Date(0).toISOString(), agent,
+        ts: row.timestamp ?? new Date(0).toISOString(), agent, session,
         provider: message.provider ?? 'unknown', model: message.model ?? 'unknown',
         input: Number(usage.input ?? 0), output: Number(usage.output ?? 0),
         cacheRead: Number(usage.cacheRead ?? 0), cacheWrite: Number(usage.cacheWrite ?? 0),
@@ -56,7 +57,7 @@ export function parseUsageTranscript(content: string, agent: string): UsageRecor
   return records;
 }
 
-export function parseCodexRollout(content: string, agent: string): UsageRecord[] {
+export function parseCodexRollout(content: string, agent: string, session = 'unknown'): UsageRecord[] {
   const records: UsageRecord[] = [];
   let model = 'unknown';
   for (const line of content.split('\n')) {
@@ -69,7 +70,7 @@ export function parseCodexRollout(content: string, agent: string): UsageRecord[]
       const inputTotal = Number(usage.input_tokens ?? 0);
       const cacheRead = Number(usage.cached_input_tokens ?? 0);
       const record: UsageRecord = {
-        ts: row.timestamp ?? new Date(0).toISOString(), agent, provider: 'openai', model,
+        ts: row.timestamp ?? new Date(0).toISOString(), agent, session, provider: 'openai', model,
         input: Math.max(0, inputTotal - cacheRead), output: Number(usage.output_tokens ?? 0),
         cacheRead, cacheWrite: 0, total: Number(usage.total_tokens ?? 0), estimatedCost: null,
       };
@@ -92,8 +93,12 @@ function sum(target: any, row: UsageRecord) {
   target.cacheWrite += row.cacheWrite; target.total += row.total;
   if (row.estimatedCost != null) target.estimatedCost += row.estimatedCost;
   else if (row.total) target.unpricedTokens += row.total;
+  target.calls += 1;
+  target.peakContext = Math.max(target.peakContext, row.input + row.cacheRead + row.cacheWrite);
+  if (!target.firstActivity || row.ts < target.firstActivity) target.firstActivity = row.ts;
+  if (!target.lastActivity || row.ts > target.lastActivity) target.lastActivity = row.ts;
 }
-function bucket(id: string) { return { id, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, estimatedCost: 0, unpricedTokens: 0 }; }
+function bucket(id: string) { return { id, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, estimatedCost: 0, unpricedTokens: 0, calls: 0, peakContext: 0, firstActivity: null as string|null, lastActivity: null as string|null }; }
 
 async function discover(root: string) {
   const found: Array<{ file: string; agent: string; kind: 'openclaw'|'codex' }> = [];
@@ -136,7 +141,8 @@ export async function loadUsage(range: '7d'|'30d'|'90d'|'all' = '30d') {
     const cached = fileCache.get(file);
     if (cached?.size === info.size && cached.mtimeMs === info.mtimeMs) return;
     const content = await readFile(file, 'utf8');
-    fileCache.set(file, { size: info.size, mtimeMs: info.mtimeMs, records: kind === 'codex' ? parseCodexRollout(content, agent) : parseUsageTranscript(content, agent) });
+    const session = path.basename(file).replace(/^rollout-[^-]+-[^-]+-/, '').replace(/\.jsonl.*$/, '');
+    fileCache.set(file, { size: info.size, mtimeMs: info.mtimeMs, records: kind === 'codex' ? parseCodexRollout(content, agent, session) : parseUsageTranscript(content, agent, session) });
   }));
   const now = Date.now();
   const span = range === 'all' ? Infinity : Number(range.slice(0, -1)) * 86_400_000;
@@ -145,6 +151,7 @@ export async function loadUsage(range: '7d'|'30d'|'90d'|'all' = '30d') {
   const agents = new Map<string, ReturnType<typeof bucket>>();
   const models = new Map<string, ReturnType<typeof bucket> & { provider: string }>();
   const days = new Map<string, ReturnType<typeof bucket>>();
+  const sessions = new Map<string, ReturnType<typeof bucket> & { agent: string; model: string }>();
   let recordCount = 0; let lastActivity: string | null = null;
   for (const cached of fileCache.values()) for (const row of cached.records) {
     const time = Date.parse(row.ts); if (Number.isFinite(time) && time < cutoff) continue;
@@ -153,6 +160,9 @@ export async function loadUsage(range: '7d'|'30d'|'90d'|'all' = '30d') {
     const modelKey = `${row.provider}/${row.model}`;
     const model = models.get(modelKey) ?? { ...bucket(modelKey), provider: row.provider }; sum(model, row); models.set(modelKey, model);
     const dayKey = perthDay.format(new Date(row.ts)); const day = days.get(dayKey) ?? bucket(dayKey); sum(day, row); days.set(dayKey, day);
+    const sessionKey = `${row.agent}/${row.session}`;
+    const session = sessions.get(sessionKey) ?? { ...bucket(sessionKey), agent: row.agent, model: row.model };
+    sum(session, row); sessions.set(sessionKey, session);
     if (!lastActivity || row.ts > lastActivity) lastActivity = row.ts;
   }
   const sortTotal = <T extends { total: number }>(values: T[]) => values.sort((a,b) => b.total-a.total);
@@ -160,6 +170,7 @@ export async function loadUsage(range: '7d'|'30d'|'90d'|'all' = '30d') {
     ok: true, generatedAt: new Date().toISOString(), timezone: 'Australia/Perth', range,
     source: { root, transcriptCount: files.length, recordCount, lastActivity }, totals,
     agents: sortTotal([...agents.values()]), models: sortTotal([...models.values()]),
+    sessions: [...sessions.values()].sort((a,b) => b.estimatedCost-a.estimatedCost).slice(0, 50),
     days: [...days.values()].sort((a,b) => a.id.localeCompare(b.id)),
     pricing: { currency: 'USD', mode: 'estimated-standard', checkedAt: '2026-07-28', sourceUrl: 'https://developers.openai.com/api/docs/pricing', note: 'OpenAI Standard token pricing; long-context rates apply when request context exceeds 272K tokens.' },
   };
