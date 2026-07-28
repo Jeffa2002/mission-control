@@ -86,6 +86,13 @@ async function discover(root: string) {
 }
 
 export async function loadUsage(range: '7d'|'30d'|'90d'|'all' = '30d') {
+  const telemetryFile = process.env.USAGE_TELEMETRY_FILE;
+  if (telemetryFile) {
+    const snapshot = JSON.parse(await readFile(telemetryFile, 'utf8'));
+    const payload = snapshot?.ranges?.[range];
+    if (!payload?.ok) throw new Error('Token usage telemetry is unavailable');
+    return payload;
+  }
   const root = process.env.AGENT_DATA_DIR ?? '/agent-data';
   const files = await discover(root);
   const live = new Set(files.map(item => item.file));
