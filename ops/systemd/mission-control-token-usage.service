@@ -7,12 +7,15 @@ Type=simple
 WorkingDirectory=/root/.openclaw/workspace/mission-control
 Environment=AGENT_DATA_DIR=/root/.openclaw/agents
 Environment=USAGE_TELEMETRY_OUTPUT=/root/.openclaw/workspace/mission-control/runtime/token-usage.json
+EnvironmentFile=-/root/.config/mission-control/openai-admin.env
+Environment=OPENAI_BILLING_START_TIME=1780272000
 ExecStart=/usr/bin/node --experimental-strip-types /root/.openclaw/workspace/mission-control/apps/panel/src/app/api/usage/usage-writer.mjs
 Restart=always
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+ReadOnlyPaths=/root/.config/mission-control/openai-admin.env
 ReadWritePaths=/root/.openclaw/workspace/mission-control/runtime
 
 [Install]
