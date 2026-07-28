@@ -58,6 +58,8 @@ WantedBy=multi-user.target
 
 The panel reads `runtime/agent-telemetry.json`, serves it only behind the existing Mission Control session cookie, and emits authenticated SSE updates. `/office` falls back to the existing one-minute `agent-status.json` snapshot whenever collector health is stale or unknown.
 
+Token usage is aggregated on Bazza so production reflects the authoritative agent store. Install `ops/systemd/mission-control-token-usage.service`, then restart `mission-control-agent-telemetry.service`; the existing sync loop copies the aggregate-only `runtime/token-usage.json` atomically to production. Raw transcripts never leave Bazza through this path.
+
 ## GitHub Actions Path
 
 `.github/workflows/deploy-mission-control.yml` is ready for the intended flow:

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SOURCE=${AGENT_TELEMETRY_FILE:-/root/.openclaw/workspace/mission-control/runtime/agent-telemetry.json}
+USAGE_SOURCE=${TOKEN_USAGE_TELEMETRY_FILE:-/root/.openclaw/workspace/mission-control/runtime/token-usage.json}
 PROD_HOST=${PROD_HOST:-root@100.95.166.47}
 PROD_PORT=${PROD_PORT:-2222}
 PROD_KEY=${PROD_KEY:-/root/.ssh/prod_deploy_v3}
@@ -37,6 +38,7 @@ reconcile_snapshot() {
 }
 next_reconcile=0
 last_source_hash=
+last_usage_hash=
 while true; do
   if [[ -s "$SOURCE" ]]; then
     source_hash=$(sha256sum "$SOURCE" | awk '{print $1}')
@@ -45,6 +47,15 @@ while true; do
         && rsync -az --chown=100:101 --chmod=F640 -e "$RSYNC_SSH" "$SOURCE" "$PROD_HOST:$REMOTE_DIR/agent-telemetry.json.tmp" \
         && ssh "${SSH_OPTIONS[@]}" "$PROD_HOST" "chown 100:101 '$REMOTE_DIR/agent-telemetry.json.tmp'; chmod 640 '$REMOTE_DIR/agent-telemetry.json.tmp'; mv '$REMOTE_DIR/agent-telemetry.json.tmp' '$REMOTE_DIR/agent-telemetry.json'" \
         && last_source_hash=$source_hash
+    fi
+  fi
+  if [[ -s "$USAGE_SOURCE" ]]; then
+    usage_hash=$(sha256sum "$USAGE_SOURCE" | awk '{print $1}')
+    if [[ "$usage_hash" != "$last_usage_hash" ]]; then
+      ssh "${SSH_OPTIONS[@]}" "$PROD_HOST" "install -d -m 750 -o 100 -g 101 '$REMOTE_DIR'" \
+        && rsync -az --chown=100:101 --chmod=F640 -e "$RSYNC_SSH" "$USAGE_SOURCE" "$PROD_HOST:$REMOTE_DIR/token-usage.json.tmp" \
+        && ssh "${SSH_OPTIONS[@]}" "$PROD_HOST" "chown 100:101 '$REMOTE_DIR/token-usage.json.tmp'; chmod 640 '$REMOTE_DIR/token-usage.json.tmp'; mv '$REMOTE_DIR/token-usage.json.tmp' '$REMOTE_DIR/token-usage.json'" \
+        && last_usage_hash=$usage_hash
     fi
   fi
   now=$(date +%s)
