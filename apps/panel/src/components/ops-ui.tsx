@@ -146,6 +146,7 @@ export const ROUTES: Route[] = [
   // MONITOR group
   { href: '/', label: 'Overview', icon: 'overview', group: 'MONITOR' },
   { href: '/activity', label: 'Activity', icon: 'activity', group: 'MONITOR' },
+  { href: '/agent-activity', label: 'Agent Log', icon: 'agents', group: 'MONITOR' },
   { href: '/usage', label: 'Token Usage', icon: 'activity', group: 'MONITOR' },
   { href: '/apps', label: 'App Health', icon: 'agents', group: 'MONITOR' },
   { href: '/estate', label: 'Estate', icon: 'systems', group: 'MONITOR' },
