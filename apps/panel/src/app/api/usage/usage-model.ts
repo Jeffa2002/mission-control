@@ -124,7 +124,7 @@ async function discover(root: string) {
   return found;
 }
 
-export async function loadUsage(range: '1h'|'7d'|'30d'|'90d'|'all' = '30d') {
+export async function loadUsage(range: '1h'|'24h'|'7d'|'30d'|'90d'|'all' = '30d') {
   const telemetryFile = process.env.USAGE_TELEMETRY_FILE;
   if (telemetryFile) {
     const snapshot = JSON.parse(await readFile(telemetryFile, 'utf8'));
