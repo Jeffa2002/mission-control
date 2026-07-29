@@ -124,7 +124,7 @@ async function discover(root: string) {
   return found;
 }
 
-export async function loadUsage(range: '7d'|'30d'|'90d'|'all' = '30d') {
+export async function loadUsage(range: '1h'|'7d'|'30d'|'90d'|'all' = '30d') {
   const telemetryFile = process.env.USAGE_TELEMETRY_FILE;
   if (telemetryFile) {
     const snapshot = JSON.parse(await readFile(telemetryFile, 'utf8'));
@@ -145,7 +145,7 @@ export async function loadUsage(range: '7d'|'30d'|'90d'|'all' = '30d') {
     fileCache.set(file, { size: info.size, mtimeMs: info.mtimeMs, records: kind === 'codex' ? parseCodexRollout(content, agent, session) : parseUsageTranscript(content, agent, session) });
   }));
   const now = Date.now();
-  const span = range === 'all' ? Infinity : Number(range.slice(0, -1)) * 86_400_000;
+  const span = range === 'all' ? Infinity : Number(range.slice(0, -1)) * (range.endsWith('h') ? 3_600_000 : 86_400_000);
   const cutoff = now - span;
   const totals = bucket('total');
   const agents = new Map<string, ReturnType<typeof bucket>>();

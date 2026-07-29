@@ -22,10 +22,10 @@ async function collect() {
   running = true;
   try {
     const ranges = {};
-    for (const range of ['7d', '30d', '90d', 'all']) ranges[range] = await loadUsage(range);
+    for (const range of ['1h', '7d', '30d', '90d', 'all']) ranges[range] = await loadUsage(range);
     try {
       const currentBilling = await loadBilling();
-      if (currentBilling) for (const range of Object.keys(ranges)) ranges[range].billing = billingForRange(currentBilling, range);
+      if (currentBilling) for (const range of Object.keys(ranges)) if (range !== '1h') ranges[range].billing = billingForRange(currentBilling, range);
     } catch (error) {
       console.error('billing collector failed:', error instanceof Error ? error.message : String(error));
     }
