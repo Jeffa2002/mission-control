@@ -25,6 +25,19 @@ export const OPENAI_PRICES: Record<string, Price> = {
   'gpt-5.5': { input: 5, cached: .5, cacheWrite: null, output: 30, long: { input: 10, cached: 1, cacheWrite: null, output: 45 } },
 };
 
+// Source: https://platform.claude.com/docs/en/about-claude/pricing
+// Checked 2026-08-06. Anthropic transcript telemetry exposes aggregate cache-write
+// tokens but not their 5m/1h split, so estimates conservatively apply the 1h rate.
+const ANTHROPIC_PRICES: Array<[RegExp, Price]> = [
+  [/claude-(?:fable|mythos)-5/, { input: 10, cached: 1, cacheWrite: 20, output: 50 }],
+  [/claude-opus-(?:5|4-[5-8])/, { input: 5, cached: .5, cacheWrite: 10, output: 25 }],
+  [/claude-opus-4(?:-1)?/, { input: 15, cached: 1.5, cacheWrite: 30, output: 75 }],
+  [/claude-sonnet-5/, { input: 2, cached: .2, cacheWrite: 4, output: 10 }],
+  [/claude-sonnet-4(?:-[56])?/, { input: 3, cached: .3, cacheWrite: 6, output: 15 }],
+  [/claude-haiku-4-5/, { input: 1, cached: .1, cacheWrite: 2, output: 5 }],
+  [/claude-haiku-3-5/, { input: .8, cached: .08, cacheWrite: 1.6, output: 4 }],
+];
+
 export function estimateOpenAiCost(model: string, usage: Pick<UsageRecord, 'input'|'output'|'cacheRead'|'cacheWrite'>) {
   const base = OPENAI_PRICES[model];
   if (!base) return null;
@@ -32,6 +45,12 @@ export function estimateOpenAiCost(model: string, usage: Pick<UsageRecord, 'inpu
   const price = context > 272_000 && base.long ? base.long : base;
   const cacheWritePrice = price.cacheWrite ?? price.input;
   return (usage.input * price.input + usage.output * price.output + usage.cacheRead * (price.cached ?? price.input) + usage.cacheWrite * cacheWritePrice) / 1_000_000;
+}
+
+export function estimateAnthropicCost(model: string, usage: Pick<UsageRecord, 'input'|'output'|'cacheRead'|'cacheWrite'>) {
+  const price = ANTHROPIC_PRICES.find(([pattern]) => pattern.test(model))?.[1];
+  if (!price) return null;
+  return (usage.input * price.input + usage.output * price.output + usage.cacheRead * (price.cached ?? price.input) + usage.cacheWrite * (price.cacheWrite ?? price.input)) / 1_000_000;
 }
 
 export function parseUsageTranscript(content: string, agent: string, session = 'unknown'): UsageRecord[] {
@@ -50,7 +69,8 @@ export function parseUsageTranscript(content: string, agent: string, session = '
         cacheRead: Number(usage.cacheRead ?? 0), cacheWrite: Number(usage.cacheWrite ?? 0),
         total: Number(usage.totalTokens ?? 0), estimatedCost: null,
       };
-      record.estimatedCost = record.provider === 'openai' ? estimateOpenAiCost(record.model, record) : null;
+      record.estimatedCost = record.provider === 'openai' ? estimateOpenAiCost(record.model, record)
+        : record.provider === 'anthropic' ? estimateAnthropicCost(record.model, record) : null;
       records.push(record);
     } catch { /* tolerate a partially appended final line */ }
   }
@@ -172,7 +192,7 @@ export async function loadUsage(range: '1h'|'24h'|'7d'|'30d'|'90d'|'all' = '30d'
     agents: sortTotal([...agents.values()]), models: sortTotal([...models.values()]),
     sessions: [...sessions.values()].sort((a,b) => b.estimatedCost-a.estimatedCost).slice(0, 50),
     days: [...days.values()].sort((a,b) => a.id.localeCompare(b.id)),
-    pricing: { currency: 'USD', mode: 'estimated-standard', checkedAt: '2026-07-28', sourceUrl: 'https://developers.openai.com/api/docs/pricing', note: 'OpenAI Standard token pricing; long-context rates apply when request context exceeds 272K tokens.' },
+    pricing: { currency: 'USD', mode: 'estimated-standard', checkedAt: '2026-08-06', sourceUrl: 'https://developers.openai.com/api/docs/pricing', note: 'OpenAI and Anthropic standard token pricing. Anthropic aggregate cache writes use the conservative 1-hour rate.' },
   };
 }
 

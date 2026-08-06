@@ -2,6 +2,7 @@ export type BillingDay = { id: string; actualCost: number };
 export type BillingLineItem = { id: string; actualCost: number };
 export type BillingSnapshot = {
   ok: true;
+  provider?: 'openai' | 'anthropic';
   generatedAt: string;
   currency: 'USD';
   timezone: 'UTC';
@@ -52,7 +53,61 @@ export async function fetchOpenAiBilling(apiKey: string, startTime: number, endT
     const body = await response.json() as CostPage;
     pages.push(body);
   }
-  return summarizeCostPages(pages);
+  return { ...summarizeCostPages(pages), provider: 'openai' };
+}
+
+type AnthropicCostResult = { amount?: string; currency?: string; description?: string | null; cost_type?: string | null };
+type AnthropicCostBucket = { starting_at?: string; results?: AnthropicCostResult[] };
+type AnthropicCostPage = { data?: AnthropicCostBucket[]; has_more?: boolean; next_page?: string | null };
+
+export function summarizeAnthropicCostPages(pages: AnthropicCostPage[], generatedAt = new Date().toISOString()): BillingSnapshot {
+  const days = new Map<string, number>();
+  const lineItems = new Map<string, number>();
+  for (const page of pages) for (const bucket of page.data ?? []) {
+    if (!bucket.starting_at) continue;
+    const id = bucket.starting_at.slice(0, 10);
+    let dayCost = 0;
+    for (const result of bucket.results ?? []) {
+      // Anthropic reports amounts in the currency's lowest unit (USD cents).
+      const value = Number(result.amount ?? 0) / 100;
+      if (!Number.isFinite(value)) continue;
+      dayCost += value;
+      const lineItem = result.description || result.cost_type || 'Other';
+      lineItems.set(lineItem, (lineItems.get(lineItem) ?? 0) + value);
+    }
+    days.set(id, (days.get(id) ?? 0) + dayCost);
+  }
+  return {
+    ok: true, provider: 'anthropic', generatedAt, currency: 'USD', timezone: 'UTC',
+    days: [...days].map(([id, actualCost]) => ({ id, actualCost })).sort((a, b) => a.id.localeCompare(b.id)),
+    lineItems: [...lineItems].map(([id, actualCost]) => ({ id, actualCost })).sort((a, b) => b.actualCost - a.actualCost),
+  };
+}
+
+export async function fetchAnthropicBilling(apiKey: string, startTime: number, endTime = Math.floor(Date.now() / 1000)): Promise<BillingSnapshot> {
+  const pages: AnthropicCostPage[] = [];
+  for (let windowStart = startTime; windowStart < endTime; windowStart += 31 * 86_400) {
+    const windowEnd = Math.min(endTime, windowStart + 31 * 86_400);
+    let page: string | undefined;
+    do {
+      const query = new URLSearchParams({
+        starting_at: new Date(windowStart * 1000).toISOString(),
+        ending_at: new Date(windowEnd * 1000).toISOString(), bucket_width: '1d', limit: '31',
+      });
+      query.append('group_by[]', 'description');
+      if (page) query.set('page', page);
+      const response = await fetch(`https://api.anthropic.com/v1/organizations/cost_report?${query}`, {
+        headers: { 'anthropic-version': '2023-06-01', 'x-api-key': apiKey },
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(`Anthropic Cost Report API returned ${response.status}: ${detail?.error?.message ?? 'unknown error'}`);
+      }
+      const body = await response.json() as AnthropicCostPage;
+      pages.push(body); page = body.has_more && body.next_page ? body.next_page : undefined;
+    } while (page);
+  }
+  return summarizeAnthropicCostPages(pages);
 }
 
 export function billingForRange(snapshot: BillingSnapshot, range: string, now = Date.now()) {
