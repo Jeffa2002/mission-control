@@ -16,6 +16,7 @@ security_html="$("${curl_auth[@]}" "$BASE_URL/security")"
 office_html="$("${curl_auth[@]}" "$BASE_URL/office")"
 teams_html="$("${curl_auth[@]}" "$BASE_URL/teams")"
 deploys_html="$("${curl_auth[@]}" "$BASE_URL/deploys")"
+project_reviews_html="$("${curl_auth[@]}" "$BASE_URL/project-reviews")"
 
 grep -qi "live operations" <<<"$dashboard_html"
 grep -q "Needs action" <<<"$dashboard_html"
@@ -23,5 +24,6 @@ grep -q "Security Threat Surface" <<<"$security_html"
 grep -qi "active roster" <<<"$office_html"
 grep -q "Team Directory" <<<"$teams_html"
 grep -q "Release Impact Console" <<<"$deploys_html"
+grep -q "What should we do next" <<<"$project_reviews_html"
 "${curl_auth[@]}" "$BASE_URL/api/deploys" | grep -q '"source"'
 "${curl_auth[@]}" "$BASE_URL/activity" >/dev/null
