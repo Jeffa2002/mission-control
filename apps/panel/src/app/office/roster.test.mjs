@@ -13,9 +13,10 @@ test('canonical aliases deduplicate while archie-pro stays separate', () => {
     agent('designer'), agent('nova', { lastSeen: '2026-07-13T07:56:00.000Z' }),
     agent('research'), agent('scout', { lastSeen: '2026-07-13T07:56:00.000Z' }),
     agent('sec'), agent('secspy', { lastSeen: '2026-07-13T07:56:00.000Z' }),
+    agent('product'), agent('piper', { lastSeen: '2026-07-13T07:56:00.000Z' }),
     agent('archie-pro'), agent('custom'),
   ], snapshot, now);
-  assert.deepEqual(result.agents.map((item) => item.canonicalId).sort(), ['archie', 'archie-pro', 'custom', 'nova', 'scout', 'secspy']);
+  assert.deepEqual(result.agents.map((item) => item.canonicalId).sort(), ['archie', 'archie-pro', 'custom', 'nova', 'piper', 'scout', 'secspy']);
   const archie = result.agents.find((item) => item.canonicalId === 'archie');
   assert.equal(archie?.sourceId, 'main');
   assert.deepEqual(archie?.suppressedSourceIds, ['archie']);
@@ -41,7 +42,7 @@ test('active thresholds downgrade aged working and exclude stale or offline entr
     agent('travel', { status: 'Idle', lastSeen: '2026-07-13T07:39:59.000Z' }),
     agent('offline', { status: 'Offline', lastSeen: '2026-07-13T07:59:59.000Z' }),
   ], snapshot, now);
-  assert.deepEqual(result.agents.map(({ canonicalId, status }) => [canonicalId, status]), [['dev', 'Working'], ['writer', 'Idle'], ['qa', 'Idle']]);
+  assert.deepEqual(result.agents.map(({ canonicalId, status }) => [canonicalId, status]), [['dev', 'Working'], ['quin', 'Idle'], ['qa', 'Idle']]);
 });
 
 test('stale snapshots suppress the default roster', () => {
@@ -81,10 +82,10 @@ test('team role directory is stable and overlays inactive canonical identities',
     agent('designer', { status: 'Offline', lastSeen: '2026-07-13T07:59:00.000Z' }),
     agent('writer', { status: 'Idle', lastSeen: '2026-07-13T07:20:00.000Z' }),
   ], snapshot, now);
-  assert.deepEqual(result.roles.map((entry) => entry.canonicalId), ['archie', 'nova', 'scout', 'secspy', 'dev', 'writer', 'travel']);
+  assert.deepEqual(result.roles.map((entry) => entry.canonicalId), ['archie', 'nova', 'scout', 'secspy', 'dev', 'quin', 'piper', 'rook', 'bazza-travel']);
   assert.equal(result.roles.find((entry) => entry.canonicalId === 'archie')?.availability, 'Working');
   assert.equal(result.roles.find((entry) => entry.canonicalId === 'nova')?.availability, 'Inactive');
-  assert.equal(result.roles.find((entry) => entry.canonicalId === 'writer')?.availability, 'Inactive');
+  assert.equal(result.roles.find((entry) => entry.canonicalId === 'quin')?.availability, 'Inactive');
   assert.equal(result.roles.find((entry) => entry.canonicalId === 'scout')?.identity, null);
   assert.equal(result.roles.find((entry) => entry.canonicalId === 'scout')?.availability, 'Inactive');
 });
@@ -98,16 +99,16 @@ test('active unassigned identities remain distinct and aliases stay in history',
     agent('unknown-agent', { status: 'Idle', lastSeen: '2026-07-13T07:58:00.000Z' }),
     agent('writer', { status: 'Idle', lastSeen: '2026-07-13T07:57:00.000Z' }),
   ], snapshot, now);
-  assert.deepEqual(result.unassignedActive.map((item) => item.canonicalId), ['archie-pro', 'quin', 'unknown-agent']);
-  assert.ok(!result.unassignedActive.some((item) => item.canonicalId === 'writer'));
-  assert.deepEqual(result.aliasHistory.map(({ sourceId, canonicalId }) => [sourceId, canonicalId]), [['main', 'archie']]);
+  assert.deepEqual(result.unassignedActive.map((item) => item.canonicalId), ['archie-pro', 'unknown-agent']);
+  assert.ok(!result.unassignedActive.some((item) => item.canonicalId === 'quin'));
+  assert.deepEqual(result.aliasHistory.map(({ sourceId, canonicalId }) => [sourceId, canonicalId]), [['main', 'archie'], ['writer', 'quin']]);
 });
 
 test('stale snapshots keep roles visible with unconfirmed availability', () => {
   const result = buildTeamDirectory([agent('dev', { status: 'Working', lastSeen: '2026-07-13T07:59:00.000Z' })], '2026-07-13T07:57:00.000Z', now);
   assert.equal(result.health.state, 'stale');
   assert.equal(result.active.length, 0);
-  assert.equal(result.roles.length, 7);
+  assert.equal(result.roles.length, 9);
   assert.ok(result.roles.every((entry) => entry.availability === 'Unconfirmed'));
 });
 
