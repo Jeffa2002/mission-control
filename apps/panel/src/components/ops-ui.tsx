@@ -159,6 +159,7 @@ export const ROUTES: Route[] = [
   { href: '/teams', label: 'Team', icon: 'teams', group: 'OPS' },
   { href: '/memory', label: 'Memory', icon: 'memory', group: 'OPS' },
   { href: '/deploys', label: 'Deploys', icon: 'agents', group: 'OPS' },
+  { href: '/project-reviews', label: 'Project Reviews', icon: 'audit', group: 'OPS' },
   { href: '/actions', label: 'Audit Log', icon: 'audit', group: 'OPS' },
 ];
 
