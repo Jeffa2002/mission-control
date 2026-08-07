@@ -1,6 +1,7 @@
 export const CANONICAL_AGENT_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   main: 'archie', archie: 'archie', designer: 'nova', nova: 'nova', research: 'scout', scout: 'scout',
-  sec: 'secspy', secspy: 'secspy', 'archie-pro': 'archie-pro',
+  sec: 'secspy', secspy: 'secspy', product: 'piper', piper: 'piper', writer: 'quin', quin: 'quin',
+  travel: 'bazza-travel', 'bazza-travel': 'bazza-travel', rook: 'rook', dev: 'dev', 'archie-pro': 'archie-pro',
 });
 
 export const TEAM_ROLE_DIRECTORY = Object.freeze([
@@ -9,8 +10,10 @@ export const TEAM_ROLE_DIRECTORY = Object.freeze([
   { canonicalId: 'scout', role: 'Research', name: 'Scout', emoji: '🔍' },
   { canonicalId: 'secspy', role: 'Security', name: 'SecSpy', emoji: '🕵️' },
   { canonicalId: 'dev', role: 'Developer', name: 'Dev', emoji: '👨‍💻' },
-  { canonicalId: 'writer', role: 'Writer', name: 'Writer', emoji: '✍️' },
-  { canonicalId: 'travel', role: 'Travel Assistant', name: 'Travel', emoji: '🧳' },
+  { canonicalId: 'quin', role: 'Writer', name: 'Quin', emoji: '✍️' },
+  { canonicalId: 'piper', role: 'Product & Growth', name: 'Piper', emoji: '📈' },
+  { canonicalId: 'rook', role: 'Reliability', name: 'Rook', emoji: '🏰' },
+  { canonicalId: 'bazza-travel', role: 'Travel Assistant', name: 'Bazza-Travel', emoji: '🧳' },
 ] as const);
 
 export const SNAPSHOT_FRESH_MS = 2 * 60_000;

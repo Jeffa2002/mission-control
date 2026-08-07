@@ -9,7 +9,8 @@
  * Refreshes from authenticated SSE, with the one-minute snapshot poll retained.
  */
 
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppShell, SectionTitle, StatusBadge, card, card2, muted } from '../../components/ops-ui';
 import { buildActiveRoster, type RawAgentStatus, type RosterHealth } from './roster';
 import type { SafeWorkProjection } from '../api/agents/status/safe-work-model';
@@ -30,6 +31,24 @@ interface AgentStatus {
   currentTask: string | null;
   sessionId: string | null;
   work: SafeWorkProjection | null;
+}
+
+interface LiveAgentEvent {
+  schemaVersion: 1;
+  eventId: string;
+  occurredAt: string;
+  agentId: string;
+  workId: string;
+  parentWorkId: string | null;
+  kind: string;
+  phase: string;
+  status: string;
+  toolCategory: string | null;
+  outcome: string | null;
+  blockerCategory: string | null;
+  artifactRef: string | null;
+  retryCount: number | null;
+  summary: string;
 }
 
 // ─── Colour + theme helpers ───────────────────────────────────────────────────
@@ -228,13 +247,17 @@ function MonitorSVG({ active }: { active: boolean }) {
 
 // ─── Agent Desk Card ──────────────────────────────────────────────────────────
 
-function DeskCard({ agent }: { agent: AgentStatus }) {
+function DeskCard({ agent, selected, onSelect }: { agent: AgentStatus; selected: boolean; onSelect: () => void }) {
   const color  = STATUS_COLORS[agent.status] ?? '#667799';
   const bg     = STATUS_BG[agent.status]     ?? 'rgba(40,50,70,0.08)';
   const border = STATUS_BORDER[agent.status] ?? 'rgba(80,100,140,0.18)';
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      aria-label={`Open live window for ${agent.label}`}
       style={{
         borderRadius: 18,
         border: `1px solid ${border}`,
@@ -246,6 +269,12 @@ function DeskCard({ agent }: { agent: AgentStatus }) {
         display: 'flex',
         flexDirection: 'column',
         transition: 'box-shadow 0.4s ease, transform 0.2s ease, border-color 0.2s ease',
+        color: 'inherit',
+        textAlign: 'left',
+        cursor: 'pointer',
+        outline: selected ? `2px solid ${color}` : undefined,
+        outlineOffset: selected ? 2 : undefined,
+        width: '100%',
       }}
     >
       {/* Header: avatar + name + status badge */}
@@ -313,7 +342,65 @@ function DeskCard({ agent }: { agent: AgentStatus }) {
       >
         {agent.lastSeen ? `Last seen ${fmtRelative(agent.lastSeen)}` : 'No activity'}
       </div>
-    </div>
+    </button>
+  );
+}
+
+function eventTone(kind: string, outcome: string | null) {
+  if (kind.includes('failed') || outcome === 'failure') return '#ff7f8e';
+  if (kind.includes('approval') || kind.includes('blocker')) return '#ffd060';
+  if (kind.includes('completed') || kind.includes('produced')) return '#75e7b3';
+  return '#8eb9ec';
+}
+
+function LiveWindow({ agent, events, streamConnected }: { agent: AgentStatus; events: LiveAgentEvent[]; streamConnected: boolean }) {
+  const [filter, setFilter] = useState<'all' | 'tools' | 'lifecycle'>('all');
+  const [follow, setFollow] = useState(true);
+  const consoleRef = useRef<HTMLDivElement>(null);
+  const agentEvents = useMemo(() => events
+    .filter((event) => event.agentId === agent.sourceId || event.agentId === agent.id || event.agentId === agent.canonicalId)
+    .filter((event) => filter === 'all' || (filter === 'tools' ? event.kind.startsWith('tool.') : !event.kind.startsWith('tool.')))
+    .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt)), [agent, events, filter]);
+
+  useEffect(() => {
+    if (follow) consoleRef.current?.scrollTo({ top: consoleRef.current.scrollHeight, behavior: 'smooth' });
+  }, [agentEvents.length, follow]);
+
+  return (
+    <section className={card + ' overflow-hidden'} aria-labelledby="agent-window-title">
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[rgba(124,232,255,0.12)] px-5 py-4">
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl border border-[rgba(124,232,255,0.16)] bg-white/[0.03] text-2xl">{agent.emoji}</span>
+          <div><div className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300/60">Agent window</div><h2 id="agent-window-title" className="mt-1 text-base font-extrabold text-slate-100">{agent.label} live console</h2></div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge label={streamConnected ? 'stream live' : 'snapshot mode'} status={streamConnected ? 'healthy' : 'warning'} pulse={streamConnected} />
+          <Link className="rounded-lg border border-cyan-300/20 px-3 py-2 text-[10px] font-bold text-cyan-200 no-underline hover:bg-cyan-300/10" href={`/agents/${encodeURIComponent(agent.id)}`}>Full profile →</Link>
+        </div>
+      </header>
+      <div className="grid lg:grid-cols-[minmax(220px,0.34fr)_minmax(0,1fr)]">
+        <aside className="border-b border-[rgba(124,232,255,0.10)] p-5 lg:border-b-0 lg:border-r">
+          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Current assignment</div>
+          <p className="mt-3 text-sm font-semibold leading-6 text-cyan-50">{agent.work?.title || agent.work?.goal || agent.currentTask || 'No declared task available'}</p>
+          <dl className="mt-5 grid grid-cols-2 gap-3 text-[10px]">
+            <div><dt className="text-slate-500">Phase</dt><dd className="mt-1 font-bold text-slate-200">{agent.work?.phase ?? 'unknown'}</dd></div>
+            <div><dt className="text-slate-500">State</dt><dd className="mt-1 font-bold text-slate-200">{agent.work?.status ?? agent.status}</dd></div>
+            <div><dt className="text-slate-500">Elapsed</dt><dd className="mt-1 font-bold text-slate-200">{fmtDuration(agent.work?.elapsedMs ?? null)}</dd></div>
+            <div><dt className="text-slate-500">Children</dt><dd className="mt-1 font-bold text-slate-200">{agent.work?.childCount ?? 0}</dd></div>
+          </dl>
+          <div className="mt-5 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] p-3 text-[10px] leading-5 text-slate-400">Sanitized event output only. Prompts, reasoning, messages, commands, tool payloads, credentials and transcripts never reach this view.</div>
+        </aside>
+        <div className="min-w-0 bg-[#05090d]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
+            <div className="flex gap-1">{(['all', 'tools', 'lifecycle'] as const).map((value) => <button key={value} type="button" onClick={() => setFilter(value)} className={`rounded-md px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider ${filter === value ? 'bg-cyan-300/15 text-cyan-200' : 'text-slate-500 hover:text-slate-300'}`}>{value}</button>)}</div>
+            <label className="flex cursor-pointer items-center gap-2 text-[9px] font-bold uppercase tracking-wider text-slate-500"><input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} /> Auto-follow</label>
+          </div>
+          <div ref={consoleRef} className="h-[320px] overflow-y-auto px-4 py-3 font-mono text-[11px] leading-5" aria-live="polite">
+            {agentEvents.length ? agentEvents.map((event) => <div key={event.eventId} className="grid grid-cols-[72px_10px_minmax(0,1fr)] gap-2 border-b border-white/[0.035] py-1.5"><time className="text-slate-600">{new Date(event.occurredAt).toLocaleTimeString([], { hour12: false })}</time><span style={{ color: eventTone(event.kind, event.outcome) }}>●</span><span className="min-w-0"><strong style={{ color: eventTone(event.kind, event.outcome) }} className="font-semibold">{event.kind}</strong><span className="text-slate-400"> — {event.summary}</span>{event.toolCategory ? <span className="ml-2 text-slate-600">[{event.toolCategory}]</span> : null}</span></div>) : <div className="grid h-full place-items-center text-center text-slate-600"><span>No sanitized events in the current telemetry window.<br />The current-work panel remains available from the snapshot.</span></div>}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -389,6 +476,8 @@ export default function OfficePage() {
   const [loading, setLoading] = useState(true);
   const [collectorState, setCollectorState] = useState<'healthy' | 'stale' | 'unknown'>('unknown');
   const [streamConnected, setStreamConnected] = useState(false);
+  const [events, setEvents] = useState<LiveAgentEvent[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   async function fetchStatus() {
     try {
@@ -409,15 +498,31 @@ export default function OfficePage() {
     }
   }
 
+  async function fetchLiveEvents() {
+    try {
+      const response = await fetch('/api/agents/live', { cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json();
+      setEvents(Array.isArray(data.events) ? data.events.slice(-250) : []);
+    } catch { /* snapshot fallback remains visible */ }
+  }
+
   useEffect(() => {
-    void fetchStatus();
-    const fallback = setInterval(() => void fetchStatus(), 60_000);
+    void Promise.all([fetchStatus(), fetchLiveEvents()]);
+    const fallback = setInterval(() => void Promise.all([fetchStatus(), fetchLiveEvents()]), 60_000);
     const stream = new EventSource('/api/agents/live/stream');
-    stream.addEventListener('telemetry', () => { setStreamConnected(true); void fetchStatus(); });
+    stream.addEventListener('telemetry', () => { setStreamConnected(true); void Promise.all([fetchStatus(), fetchLiveEvents()]); });
     stream.onopen = () => setStreamConnected(true);
     stream.onerror = () => setStreamConnected(false);
     return () => { clearInterval(fallback); stream.close(); };
   }, []);
+
+  useEffect(() => {
+    if (!agents.length) setSelectedAgentId(null);
+    else if (!selectedAgentId || !agents.some((agent) => agent.id === selectedAgentId)) setSelectedAgentId(agents[0].id);
+  }, [agents, selectedAgentId]);
+
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
 
   return (
     <AppShell>
@@ -428,7 +533,7 @@ export default function OfficePage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <SectionTitle
             title="Digital Office"
-            subtitle="Canonical active roster with allowlisted live work state. No prompts, transcripts, reasoning, or tool payloads."
+            subtitle="Select any desk to open a near-real-time window into current work and sanitized event output."
           />
           <div className="flex flex-col items-end gap-2 text-xs text-slate-400">
             <StatusBadge
@@ -468,7 +573,7 @@ export default function OfficePage() {
         {/* Agent grid */}
         <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
           {agents.map((agent) => (
-            <DeskCard key={agent.id} agent={agent} />
+            <DeskCard key={agent.id} agent={agent} selected={agent.id === selectedAgentId} onSelect={() => setSelectedAgentId(agent.id)} />
           ))}
 
           {/* Empty state */}
@@ -478,6 +583,8 @@ export default function OfficePage() {
             </div>
           )}
         </div>
+
+        {selectedAgent ? <LiveWindow agent={selectedAgent} events={events} streamConnected={streamConnected} /> : null}
 
         <div className={card2 + ' flex flex-wrap gap-4 p-3 text-xs text-slate-400'}>
           <span><span style={{ color: '#33ffcc' }}>Working</span>: supported task metadata reports active work</span>
