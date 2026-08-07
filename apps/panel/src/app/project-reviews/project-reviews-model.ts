@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { PROJECTS } from '../../lib/project-registry.mjs';
+import reviewStoreData from './reviews.v1.json' with { type: 'json' };
 
 export type Project = import('../../lib/project-registry.mjs').Project;
 
@@ -119,9 +119,7 @@ export function parseReviewStore(input: unknown): ReviewStore {
 }
 
 export function loadReviewStore() {
-  const source = readFileSync(new URL('./reviews.v1.json', import.meta.url));
-  if (source.byteLength > MAX_STORE_BYTES) throw new Error('Review store exceeds size limit');
-  return parseReviewStore(JSON.parse(source.toString('utf8')));
+  return parseReviewStore(reviewStoreData);
 }
 
 export function freshness(review: ProjectReview | null, now = Date.now()): ProjectReviewSummary['freshness'] {
