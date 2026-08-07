@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "reviews": [
+    {
+      "id": "secspy-nurturerecord-a72cf875",
+      "projectId": "nurturerecord",
+      "reviewedAt": "2026-08-07T08:53:00.000Z",
+      "commitSha": "a72cf875",
+      "branch": "main",
+      "reviewer": "SecSpy",
+      "status": "complete",
+      "coverage": ["authentication", "authorization", "security", "dependencies"],
+      "summary": "Authentication and onboarding review found two medium abuse-control gaps plus a low-risk build-time dependency chain.",
+      "findings": [
+        {
+          "id": "nr-auth-bruteforce",
+          "category": "authentication",
+          "severity": "medium",
+          "confidence": "confirmed",
+          "title": "Password brute-force protection absent",
+          "description": "Password verification is performed without a shared persistent attempt limit.",
+          "evidence": ["app/api/auth/login/route.ts:7-20"],
+          "recommendation": "Add persistent rate limiting by IP and normalized account identifier, progressive backoff, Retry-After, and security-event logging.",
+          "status": "open",
+          "effort": null
+        },
+        {
+          "id": "nr-onboarding-abuse",
+          "category": "authorization",
+          "severity": "medium",
+          "confidence": "confirmed",
+          "title": "Unrestricted privileged tenant onboarding",
+          "description": "Public onboarding creates an active organisation and privileged roles without abuse controls; duplicate responses disclose registered emails.",
+          "evidence": ["app/api/onboard/route.ts:15-68", "app/api/onboard/route.ts:34-37"],
+          "recommendation": "Rate limit onboarding, require a verified email or invitation, return generic duplicate-account responses, and add abuse monitoring.",
+          "status": "open",
+          "effort": null
+        },
+        {
+          "id": "nr-build-dependencies",
+          "category": "dependencies",
+          "severity": "low",
+          "confidence": "confirmed",
+          "title": "Vulnerable build-time dependency chains",
+          "description": "npm audit reported five high-rated advisories, currently entering through development tooling rather than a confirmed runtime path.",
+          "evidence": ["npm audit: 5 high-rated advisories", "Chains reviewed through ESLint, Prisma development tooling, Jest or ts-jest"],
+          "recommendation": "Refresh lockfiles and overrides, run test/build verification, and retain effective severity as Low unless a runtime path is established.",
+          "status": "open",
+          "effort": null
+        }
+      ]
+    },
+    {
+      "id": "secspy-crossbench-1f4d314b",
+      "projectId": "crossbench",
+      "reviewedAt": "2026-08-07T08:53:00.000Z",
+      "commitSha": "1f4d314b",
+      "branch": "main",
+      "reviewer": "SecSpy",
+      "status": "complete",
+      "coverage": ["authentication", "security", "dependencies"],
+      "summary": "Admin authentication can silently fall back to a shared password, and development dependency advisories remain.",
+      "findings": [
+        {
+          "id": "cb-admin-mfa-downgrade",
+          "category": "authentication",
+          "severity": "medium",
+          "confidence": "confirmed",
+          "title": "Admin MFA can silently downgrade to shared password",
+          "description": "Password-only bootstrap authentication is enabled whenever no AdminUser records exist.",
+          "evidence": ["src/app/api/admin/login/route.ts:65-84"],
+          "recommendation": "Disable fallback in production after initial provisioning, fail closed if accounts disappear, and alert on fallback activation.",
+          "status": "open",
+          "effort": null
+        },
+        {
+          "id": "cb-build-dependencies",
+          "category": "dependencies",
+          "severity": "low",
+          "confidence": "confirmed",
+          "title": "Vulnerable build-time dependency chains",
+          "description": "npm audit reported three high-rated advisories, currently entering through development tooling rather than a confirmed runtime path.",
+          "evidence": ["npm audit: 3 high-rated advisories", "Chains reviewed through ESLint, Prisma development tooling, Jest or ts-jest"],
+          "recommendation": "Refresh lockfiles and overrides, run test/build verification, and retain effective severity as Low unless a runtime path is established.",
+          "status": "open",
+          "effort": null
+        }
+      ]
+    },
+    {
+      "id": "secspy-timepulse-f93ebaa6",
+      "projectId": "timepulse",
+      "reviewedAt": "2026-08-07T08:53:00.000Z",
+      "commitSha": "f93ebaa6",
+      "branch": "main",
+      "reviewer": "SecSpy",
+      "status": "complete",
+      "coverage": ["authentication", "security", "dependencies"],
+      "summary": "The credential callback bypasses the preparation endpoint throttle; one low-risk development dependency advisory remains.",
+      "findings": [
+        {
+          "id": "tp-login-throttle-bypass",
+          "category": "authentication",
+          "severity": "medium",
+          "confidence": "confirmed",
+          "title": "Login throttle bypass",
+          "description": "Only the preparation endpoint is rate limited; credentials are independently verified without throttling and can be submitted directly to the NextAuth callback.",
+          "evidence": ["src/app/api/auth/login/prepare/route.ts:7-10", "src/lib/auth.ts:20-31"],
+          "recommendation": "Enforce throttling inside authorize() or at middleware/proxy level covering every credential submission.",
+          "status": "open",
+          "effort": null
+        },
+        {
+          "id": "tp-build-dependencies",
+          "category": "dependencies",
+          "severity": "low",
+          "confidence": "confirmed",
+          "title": "Vulnerable build-time dependency chains",
+          "description": "npm audit reported one high-rated advisory, currently entering through development tooling rather than a confirmed runtime path.",
+          "evidence": ["npm audit: 1 high-rated advisory", "Chains reviewed through ESLint, Prisma development tooling, Jest or ts-jest"],
+          "recommendation": "Refresh lockfiles and overrides, run test/build verification, and retain effective severity as Low unless a runtime path is established.",
+          "status": "open",
+          "effort": null
+        }
+      ]
+    },
+    {
+      "id": "rook-venconx-20260807", "projectId": "venconx", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "Live service, off-host backup, runner and TLS checks passed; authenticated monitoring and restore evidence were not tested.",
+      "findings": [{"id":"venconx-resilience-evidence","category":"observability","severity":"medium","confidence":"confirmed","title":"Authenticated synthetic and restore evidence absent","description":"The service was active with zero restarts, its database was present in the successful encrypted off-host backup, and TLS had 85 days remaining; no authenticated synthetic, alert target, or restore drill was evidenced.","evidence":["HTTPS 200 to auth login in 0.08s","Service active; 0 restarts since 2026-07-30","Nightly encrypted off-host DB backup succeeded; runner active; TLS 85d"],"recommendation":"Add a DB-backed health synthetic and quarterly restore proof, and document RPO/RTO.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-queuem8-20260807", "projectId": "queuem8", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "App and marketing services were healthy with off-host backup and runner coverage; end-to-end and restore proof remain gaps.",
+      "findings": [{"id":"queuem8-end-to-end-coverage","category":"observability","severity":"medium","confidence":"confirmed","title":"Frontend-only checks do not prove DB-backed operation","description":"Both hosts returned 200 and both units had zero restarts; the database was backed up off-host, but a DB-backed synthetic and restore proof were not evidenced.","evidence":["App and marketing hosts returned 200","Both units active; 0 restarts since 2026-07-29","Off-host DB backup succeeded; runner active; TLS 70d"],"recommendation":"Monitor both frontends and a DB-backed path, then record quarterly restore proof.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-projenta-20260807", "projectId": "projenta", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "App and marketing services, backup, and runner were healthy; expiry, DB-backed synthetic, and restore coverage remain incomplete.",
+      "findings": [{"id":"projenta-resilience-coverage","category":"observability","severity":"medium","confidence":"confirmed","title":"Expiry and DB-backed resilience checks are incomplete","description":"Both endpoints returned 200 and units had zero restarts, while certificate validity was 42–43 days; no DB-backed synthetic or restore drill was evidenced.","evidence":["App and marketing hosts returned 200","Units active; 0 restarts since 2026-08-03","Off-host DB backup succeeded; runner active; TLS 42/43d"],"recommendation":"Add certificate-expiry alerting, a DB-backed synthetic, and a recorded restore drill.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-timepulse-20260807", "projectId": "timepulse", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "Production and staging were live and the historical 502 was not current; environment-specific monitoring remains incomplete.",
+      "findings": [{"id":"timepulse-environment-monitoring","category":"observability","severity":"medium","confidence":"confirmed","title":"Production and staging need separate restart monitoring","description":"Production returned 200 to login with zero restarts and staging was active; the database backup and runner were healthy.","evidence":["Production login returned 200","Production service active; 0 restarts since 2026-08-05; staging active","Off-host DB backup succeeded; runner active; TLS 85d"],"recommendation":"Monitor production and staging separately, alert on restart loops, and document the prior credential-failure fix.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-mission-control-20260807", "projectId": "mission-control", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "The panel and runner were live, but self-monitoring, state-backup classification, and near-term certificate renewal need explicit controls.",
+      "findings": [
+        {"id":"mission-control-self-monitoring","category":"observability","severity":"medium","confidence":"confirmed","title":"No external watchdog for Mission Control","description":"The panel was healthy behind nginx, but monitoring from the same system leaves a self-monitoring blind spot.","evidence":["Login returned 200","mission-panel container Up 31h behind nginx","GitHub runner active"],"recommendation":"Add an external watchdog that alerts independently of Mission Control.","status":"open","effort":null},
+        {"id":"mission-control-state-and-cert","category":"backups","severity":"medium","confidence":"confirmed","title":"State backup classification and certificate renewal need confirmation","description":"Mission Control was not visible in the DB backup manifest and its certificate had 30 days remaining.","evidence":["No Mission Control datastore in observed DB backup manifest","mission.effectx.com.au TLS 30d; expiry 2026-09-07"],"recommendation":"Confirm state is disposable or externally persisted, otherwise add it to backup coverage; verify renewal before 2026-09-07.","status":"open","effort":null}
+      ]
+    },
+    {
+      "id": "rook-ordantra-20260807", "projectId": "ordantra", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "backups", "observability"],
+      "summary": "Application, public, support, backup, and scheduled services were live; job outcome age and recovery proof remain gaps.",
+      "findings": [{"id":"ordantra-job-and-recovery-evidence","category":"observability","severity":"medium","confidence":"confirmed","title":"Timer activity does not prove job outcome or recovery","description":"App, site, support, and remote-support services were healthy and the core encrypted backup succeeded, but job result age and restore behavior were not tested.","evidence":["App/login, public and support hosts returned 200","App/web active with 0 restarts; remote-support Up 7d","Report/Entra timers running; core off-host DB backup succeeded; TLS 82d"],"recommendation":"Monitor job result and age, perform a restore drill, and add dependency checks.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-crm8-20260807", "projectId": "crm8", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "backups", "observability"],
+      "summary": "Edge policy and encrypted backup were verified, but the protected backend was not exercised end to end.",
+      "findings": [{"id":"crm8-allowlisted-synthetic","category":"observability","severity":"medium","confidence":"confirmed","title":"CRM8 needs an allowlisted end-to-end synthetic","description":"A 403 from the non-allowlisted source proves edge policy only, not backend or dependency health.","evidence":["Edge returned expected 403 from non-allowlisted source","Nightly encrypted DB backup succeeded","TLS 53d"],"recommendation":"Add an allowlisted synthetic that exercises the backend and monitor the backend-host and Tailscale recovery path.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-crossbench-20260807", "projectId": "crossbench", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "Serving, backup and deployment runner were healthy; restart history, renewal, and restore evidence need follow-up.",
+      "findings": [{"id":"crossbench-restarts-renewal","category":"operations","severity":"medium","confidence":"confirmed","title":"Restart history and 30-day certificate require follow-up","description":"PM2 was online with four lifetime restarts and two days uptime; the certificate had 30 days remaining.","evidence":["HTTPS returned 200","PM2 online; 4 lifetime restarts; uptime 2d","Off-host DB backup succeeded; runner active; TLS expires 2026-09-07"],"recommendation":"Investigate and document restarts, alert on restart rate, verify renewal before 2026-09-07, and perform a restore drill.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-nurturerecord-20260807", "projectId": "nurturerecord", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "Serving, process, backup, and runner checks passed; DB-backed monitoring and recovery proof remain incomplete.",
+      "findings": [{"id":"nurturerecord-resilience-evidence","category":"observability","severity":"medium","confidence":"confirmed","title":"DB-backed synthetic and restore evidence absent","description":"PM2 was stable and the encrypted backup succeeded, but the operational review did not evidence a DB-backed synthetic or restore drill.","evidence":["HTTPS returned 200","PM2 online; 0 restarts; uptime 7d","Off-host DB backup succeeded; runner active; TLS 40d"],"recommendation":"Add a DB-backed synthetic, certificate-expiry alert, and quarterly restore proof.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-abea-ndh-20260807", "projectId": "abea-ndh", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "Serving and process state were healthy, but ABEA has the portfolio's highest confirmed backup gap.",
+      "findings": [{"id":"abea-offhost-backup","category":"backups","severity":"high","confidence":"confirmed","title":"No scheduled encrypted off-host ABEA database backup","description":"Only an ad-hoc 2026-07-17 SQL backup was found; ABEA was absent from the nightly off-host manifest and active runner set.","evidence":["HTTPS returned 200","PM2 online; 0 restarts; uptime 9d; TLS 38d","Ad-hoc 2026-07-17 SQL backup only; absent from nightly off-host manifest and runner set"],"recommendation":"Establish scheduled encrypted off-host backup with retention and restore testing; verify deployment workflow and add certificate alerting.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-counseldesk-20260807", "projectId": "counseldesk", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "backups", "observability"],
+      "summary": "Serving and local backup were healthy, but observed backup archives were not off-host.",
+      "findings": [{"id":"counseldesk-offhost-backup","category":"backups","severity":"medium","confidence":"confirmed","title":"CounselDesk backups remain local-only","description":"The daily local backup completed, but observed archives were absent from the encrypted off-host manifest.","evidence":["HTTPS returned 200","Latest local daily backup completed 03:28","Observed archives absent from encrypted off-host manifest"],"recommendation":"Encrypt and copy backups off-host, monitor freshness and size, and perform a restore test.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-effectx-site-20260807", "projectId": "effectx-site", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "observability"],
+      "summary": "The static site was healthy, but deployment remains manual and lacks auditable smoke and rollback controls.",
+      "findings": [{"id":"effectx-deploy-automation","category":"deployment","severity":"medium","confidence":"confirmed","title":"EffectX deployment is manual and unaudited","description":"The site was served as a static nginx export and deployment documentation described a manual pull/build path.","evidence":["Site returned 200","Static nginx export","TLS 82d; deploy documented as manual pull/build"],"recommendation":"Add an auditable GitHub deployment with smoke verification and rollback, and confirm the repository is authoritative.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-yielddock-20260807", "projectId": "yielddock", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "The service was live, but persistence, backup, deployment provenance, and health coverage were not inventoried.",
+      "findings": [{"id":"yielddock-inventory-gap","category":"operations","severity":"high","confidence":"confirmed","title":"Persistence and recovery coverage are not inventoried","description":"The endpoint and PM2 process were healthy, but the project was absent from the nightly DB manifest and runner list.","evidence":["Endpoint returned 200","PM2 online; 0 restarts; uptime 7d","Absent from nightly DB manifest and active runner list"],"recommendation":"Inventory persistence and repository ownership, record deploy provenance, add project health monitoring, and back up any stateful data.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-orgcharts-20260807", "projectId": "orgcharts", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "The process was live, but persistence, backup, deploy provenance, and project health evidence were incomplete.",
+      "findings": [{"id":"orgcharts-inventory-gap","category":"operations","severity":"high","confidence":"confirmed","title":"Persistence and recovery coverage are not inventoried","description":"PM2 was healthy, but OrgCharts was absent from the nightly DB manifest and runner list.","evidence":["Endpoint returned 200","PM2 online; 0 restarts; uptime 7d","Absent from nightly DB manifest and active runner list"],"recommendation":"Inventory persistence, add health and deploy provenance, and establish backup coverage where stateful.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-hearth-20260807", "projectId": "hearth", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "Hearth Command was live, but its local-only repository and persistence/recovery coverage need inventory.",
+      "findings": [{"id":"hearth-inventory-gap","category":"operations","severity":"high","confidence":"confirmed","title":"Local-only service lacks persistence and recovery inventory","description":"The endpoint and PM2 process were healthy, but no remote, runner, or nightly DB-manifest evidence was found.","evidence":["Endpoint returned 200","PM2 online; 0 restarts; uptime 7d","Absent from nightly DB manifest and active runner list; local-only repository"],"recommendation":"Establish repository ownership, inventory persistence, record deploy provenance, add health monitoring, and back up any stateful data.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-transparent-cause-draw-20260807", "projectId": "transparent-cause-draw", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "Its PM2 process was live, but the public endpoint, owner, persistence, backup and deploy path were not mapped.",
+      "findings": [{"id":"transparent-cause-draw-inventory-gap","category":"operations","severity":"high","confidence":"confirmed","title":"Public endpoint and operational ownership are unmapped","description":"PM2 was online, but the project was absent from nightly backup and runner evidence and its public endpoint was not mapped.","evidence":["PM2 online; 0 restarts; uptime 7d","Absent from nightly DB manifest and active runner list","Public endpoint and operational owner not mapped"],"recommendation":"Map the public endpoint and owner, inventory persistence, record deploy provenance, and add backup where stateful.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-fuel-price-monitor-20260807", "projectId": "fuel-price-monitor", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "backups", "observability"],
+      "summary": "Serving, scheduled collection and encrypted SQLite backup were present; job freshness and restore behavior were not monitored.",
+      "findings": [{"id":"fuel-collector-monitoring","category":"observability","severity":"medium","confidence":"confirmed","title":"Collector freshness and failure are not structured signals","description":"The daily collector was flock-protected and SQLite was backed up, but collection exit/freshness and stale-price alerting were not evidenced.","evidence":["Endpoint returned 200","Daily 07:00 flock-protected collector cron","SQLite included in nightly encrypted backup; TLS 37d"],"recommendation":"Alert on collector exit, collection freshness, and stale prices; add structured job monitoring and an SQLite restore test.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-equim8-site-20260807", "projectId": "equim8-site", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "backups", "observability"],
+      "summary": "The site and certificate were healthy, but statefulness, ownership, deployment and backup coverage were unknown.",
+      "findings": [{"id":"equim8-state-inventory","category":"operations","severity":"medium","confidence":"confirmed","title":"Statefulness and deployment ownership are unknown","description":"The site was reachable, but no dedicated backup or runner evidence was observed and static versus stateful operation was not established.","evidence":["Site returned 200","TLS 84d","No dedicated backup or active-runner evidence observed"],"recommendation":"Map owner and repository, classify the service as static or stateful, and add deploy provenance and monitoring.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-jeffa-net-20260807", "projectId": "jeffa-net", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "observability"],
+      "summary": "The website was serving normally, but its analytics systemd unit was failed.",
+      "findings": [{"id":"jeffa-analytics-failed","category":"operations","severity":"medium","confidence":"confirmed","title":"jeffa-analytics.service is failed","description":"The public site remained healthy while its analytics unit was in a failed state.","evidence":["Site returned 200","TLS 78d","jeffa-analytics.service failed"],"recommendation":"Repair the analytics unit or explicitly retire it, and assign alert ownership.","status":"open","effort":null}]
+    },
+    {
+      "id": "rook-spacecadet-cloud-20260807", "projectId": "spacecadet-cloud", "reviewedAt": "2026-08-07T08:55:00Z", "commitSha": null, "branch": "production", "reviewer": "Rook", "status": "partial",
+      "coverage": ["operations", "deployment", "observability"],
+      "summary": "The website was serving normally, but its analytics unit was failed and deploy provenance was not established.",
+      "findings": [{"id":"spacecadet-analytics-failed","category":"operations","severity":"medium","confidence":"confirmed","title":"spacecadet-analytics.service is failed","description":"The public site remained healthy while its analytics unit was in a failed state.","evidence":["Site returned 200","TLS 77d","spacecadet-analytics.service failed"],"recommendation":"Repair or explicitly retire the analytics unit and establish auditable deploy provenance.","status":"open","effort":null}]
+    }
+  ]
+}
