@@ -97,13 +97,14 @@ jobs:
           . /var/www/mission-control/apps/panel/.env
           set +a
           for attempt in $(seq 1 20); do
-            if /var/www/mission-control/scripts/smoke-test-panel.sh http://127.0.0.1:3020; then
-              exit 0
+            if curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null http://127.0.0.1:3020/login; then
+              break
             fi
             echo "Waiting for panel restart ($attempt/20)..."
             sleep 3
           done
-          exit 1
+          curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null http://127.0.0.1:3020/login
+          /var/www/mission-control/scripts/smoke-test-panel.sh http://127.0.0.1:3020
 
       - name: Roll back failed release
         if: failure()
@@ -120,14 +121,14 @@ jobs:
           . /var/www/mission-control/apps/panel/.env
           set +a
           for attempt in $(seq 1 20); do
-            if /var/www/mission-control/scripts/smoke-test-panel.sh http://127.0.0.1:3020; then
-              echo "Previous panel image restored and verified"
-              exit 0
+            if curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null http://127.0.0.1:3020/login; then
+              break
             fi
             sleep 3
           done
-          echo "Rollback image did not become healthy" >&2
-          exit 1
+          curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null http://127.0.0.1:3020/login
+          /var/www/mission-control/scripts/smoke-test-panel.sh http://127.0.0.1:3020
+          echo "Previous panel image restored and verified"
 
       - name: Prune stale Docker artifacts
         if: success()

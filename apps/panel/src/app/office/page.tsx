@@ -533,7 +533,7 @@ export default function OfficePage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <SectionTitle
             title="Digital Office"
-            subtitle="Select any desk to open a near-real-time window into current work and sanitized event output."
+            subtitle="Canonical active roster. Select any desk to open a near-real-time window into current work and sanitized event output."
           />
           <div className="flex flex-col items-end gap-2 text-xs text-slate-400">
             <StatusBadge
