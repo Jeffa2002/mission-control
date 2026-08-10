@@ -10,13 +10,13 @@
     "test": "node --test $(find src -name '*.test.mjs' -type f -print)"
   },
   "dependencies": {
-    "@tailwindcss/postcss": "^4.3.2",
+    "@tailwindcss/postcss": "^4.3.3",
     "d3-geo": "^3.1.1",
     "jszip": "^3.10.1",
-    "next": "^16.2.11",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "tailwindcss": "^4.3.2",
+    "next": "^16.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2"
   },
