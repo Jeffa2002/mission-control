@@ -151,6 +151,7 @@ export const ROUTES: Route[] = [
   { href: '/apps', label: 'App Health', icon: 'agents', group: 'MONITOR' },
   { href: '/fleet-health', label: 'Fleet Health', icon: 'network', group: 'MONITOR' },
   { href: '/estate', label: 'Estate', icon: 'systems', group: 'MONITOR' },
+  { href: '/portfolio', label: 'Portfolio', icon: 'systems', group: 'MONITOR' },
   { href: '/systems', label: 'Systems', icon: 'systems', group: 'MONITOR' },
   { href: '/network', label: 'Network', icon: 'network', group: 'MONITOR' },
   { href: '/security', label: 'Security', icon: 'security', group: 'MONITOR' },

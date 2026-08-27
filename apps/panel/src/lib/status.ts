@@ -26,22 +26,31 @@ export type Status =
   | 'watch' // security baseline: needs attention → warning
   | 'alert' // security baseline: active alert → critical
   | 'stale' // security baseline / health card: no fresh telemetry → neutral
-  | 'degraded'; // health card: degraded → warning
+  | 'degraded' // health card: degraded → warning
+  // Portfolio rollup tones (derived server-side), mapped onto the palette.
+  | 'nominal' // portfolio: all present signals healthy → healthy
+  | 'attention' // portfolio: needs attention → warning
+  | 'incident' // portfolio: confirmed outage/breakage → critical
+  | 'unknown'; // portfolio: no live telemetry → neutral
 
 const STATUS_TOKENS: Record<Status, string> = {
   healthy: 'var(--sev-healthy)',
   working: 'var(--sev-healthy)',
   normal: 'var(--sev-healthy)',
+  nominal: 'var(--sev-healthy)',
   warning: 'var(--sev-warning)',
   idle: 'var(--sev-warning)',
   watch: 'var(--sev-warning)',
   degraded: 'var(--sev-warning)',
+  attention: 'var(--sev-warning)',
   critical: 'var(--sev-critical)',
   alert: 'var(--sev-critical)',
+  incident: 'var(--sev-critical)',
   info: 'var(--sev-info)',
   neutral: 'var(--sev-neutral)',
   offline: 'var(--sev-neutral)',
   stale: 'var(--sev-neutral)',
+  unknown: 'var(--sev-neutral)',
 };
 
 /** Returns the CSS custom property (`var(--sev-*)`) for a status. */
