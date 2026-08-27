@@ -78,6 +78,7 @@ actions.runner.Jeffa2002-mission-control.per-web-mission-control.service
 ```
 
 The workflow deploys automatically on panel/deploy changes pushed to `master`.
+The runner is intentionally executed as `root` with `RUNNER_ALLOW_RUNASROOT=1` in `/opt/actions-runner/mission-control/.env`, because the workflow rebuilds Docker images, writes `/var/www/mission-control`, and manages the production container locally. Register or remove the runner with a non-root runner user if `config.sh` refuses root, then restore the systemd service to `User=root` before validating a deploy.
 
 This path does not SSH from GitHub to prod. It runs locally on the prod self-hosted runner, so it has no public deploy hop.
 

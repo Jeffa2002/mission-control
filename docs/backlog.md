@@ -1,6 +1,6 @@
 # Mission Control Backlog
 
-Last updated: 2026-05-23.
+Last updated: 2026-08-27.
 
 This is the working backlog after the `/systems`, `/deploys`, and live `/security` telemetry fixes. Priorities are ordered by risk and operational value.
 
@@ -33,7 +33,7 @@ This is the working backlog after the `/systems`, `/deploys`, and live `/securit
 
 ## P1 - Product Value
 
-6. `[todo]` Make incident controls real and persistent.
+6. `[published]` Make incident controls real and persistent.
    - Why: Incidents have Ack/Assign/Close buttons, but they are inert and incident state is rebuilt from live signals every refresh.
    - Do: add `/api/incidents` with persisted state for ack, owner, close, silence-until, and notes; merge persisted state into the incident builder; audit each action.
    - Files: `apps/panel/src/app/incidents/page.tsx`, new `apps/panel/src/app/api/incidents/route.ts`.
@@ -70,19 +70,24 @@ This is the working backlog after the `/systems`, `/deploys`, and live `/securit
    - Do: use the existing SSH config/known-host aliases; fail closed with `BatchMode=yes` and explicit known-host handling.
    - Files: `scripts/deploy-prod.sh`, `apps/panel/src/app/api/security/_security-logs.ts`.
 
-13. `[todo]` Add a working verification gate before deploy.
+13. `[published]` Add a working verification gate before deploy.
     - Why: `next lint` is obsolete here and there are no route contract/security checks.
     - Do: add route smoke tests for auth coverage and API shape; run build plus smoke tests in GitHub Actions before restarting prod.
     - Files: `apps/panel/package.json`, `.github/workflows/deploy-mission-control.yml`, new test scripts.
 
+14. `[published]` Add telemetry freshness dead-man switch.
+    - Why: The Bazza-to-prod telemetry sync died silently from 2026-08-10 to 2026-08-27 after an OpenClaw gateway auth lockout blocked the optional cron snapshot step.
+    - Do: make optional OpenClaw metadata sources non-fatal, rotate the sync log, keep downstream file/network/security syncs running when one source is degraded, and alert when source or prod telemetry files go stale.
+    - Files: `scripts/collect-agent-observability.py`, `scripts/sync-agent-data.sh`, `scripts/telemetry-freshness-check.sh`.
+
 ## P2 - Repo Hygiene
 
-14. `[todo]` Clean generated/runtime artifacts out of Git.
+15. `[todo]` Clean generated/runtime artifacts out of Git.
     - Why: `agent-status.json`, `iperf-results.json`, `network-history.db`, and `tsconfig.tsbuildinfo` cause noisy diffs and risk accidental runtime-data commits.
     - Do: update `.gitignore`; intentionally untrack generated files after confirming prod/deploy expectations; document runtime source-of-truth paths.
     - Files: `.gitignore`, `agent-status.json`, `iperf-results.json`, `network-history.db`, `apps/panel/tsconfig.tsbuildinfo`.
 
-15. `[todo]` Split shared data helpers for deploys, agents, systems, and activity.
+16. `[todo]` Split shared data helpers for deploys, agents, systems, and activity.
     - Why: API routes duplicate file paths and parsing logic, which is how `/deploys` and `/activity` diverged.
     - Do: create small server-only helper modules for deploy events, agent status, system health, and activity aggregation; keep route files thin.
     - Files: `apps/panel/src/app/api/_*.ts`, `apps/panel/src/app/api/activity/route.ts`.
