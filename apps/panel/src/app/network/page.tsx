@@ -51,12 +51,12 @@ type HistoryRange = typeof HISTORY_RANGES[number];
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 function latencyColor(ms: number | null) {
   if (ms === null) return '#6B7280';
-  if (ms < 20)  return '#10B981';
+  if (ms < 20)  return 'var(--sev-healthy)';
   if (ms < 50)  return '#F59E0B';
   return '#EF4444';
 }
 function statusColor(s: string) {
-  if (s === 'online')   return '#10B981';
+  if (s === 'online')   return 'var(--sev-healthy)';
   if (s === 'degraded') return '#F59E0B';
   return '#EF4444';
 }
@@ -427,7 +427,7 @@ function LiveFlowGauges({ nodes, onSelect, selectedNode, live }: any) {
               title={r.checkedTs ? `Last checked ${new Date(r.checkedTs).toLocaleString()}` : 'No check recorded'}
               style={{ fontSize: 9, textAlign: 'right', whiteSpace: 'nowrap',
                 color: isStale(r.checkedTs) ? '#F59E0B' : '#64748B', fontWeight: 600 }}>
-              <span style={{ marginRight: 3, color: r.isLive && !isStale(r.checkedTs) ? '#10B981' : '#6B7280' }}>●</span>
+              <span style={{ marginRight: 3, color: r.isLive && !isStale(r.checkedTs) ? 'var(--sev-healthy)' : '#6B7280' }}>●</span>
               {checkedLabel(r.checkedTs)}
             </div>
           </button>
@@ -676,7 +676,7 @@ function routeQuality(link: LinkData) {
   if (!link.active) return { label: 'Down', status: 'critical', score: 0, color: '#EF4444' };
   if ((link.packetLoss ?? 0) > 0 || (link.latencyMs ?? 999) > 50) return { label: 'Poor', status: 'critical', score: 42, color: '#EF4444' };
   if ((link.latencyMs ?? 999) > 20 || (link.iperf?.retransmits ?? 0) > 0) return { label: 'Watch', status: 'warning', score: 76, color: '#F59E0B' };
-  return { label: 'Excellent', status: 'healthy', score: 98, color: '#22C55E' };
+  return { label: 'Excellent', status: 'healthy', score: 98, color: 'var(--sev-healthy)' };
 }
 
 function StatTile({ label, value, hint, tone = 'info' }: { label: string; value: string; hint: string; tone?: 'healthy' | 'warning' | 'critical' | 'info' }) {
@@ -766,7 +766,7 @@ function InspectorCard({ selectedNodeData, selectedLinkData, nodeMap, totals, st
           <DetailRow k="Location" v={selectedNodeData.location} />
           <DetailRow k="Role" v={selectedNodeData.role} />
           <DetailRow k="Latency" v={fmtMs(selectedNodeData.latencyMs)} color={latencyColor(selectedNodeData.latencyMs)} />
-          <DetailRow k="Last seen" v={selectedNodeData.latencyMs === null ? 'unreachable' : 'current scan'} color={selectedNodeData.latencyMs === null ? '#EF4444' : '#22C55E'} />
+          <DetailRow k="Last seen" v={selectedNodeData.latencyMs === null ? 'unreachable' : 'current scan'} color={selectedNodeData.latencyMs === null ? '#EF4444' : 'var(--sev-healthy)'} />
 
           {selectedNodeData?.iperf && (
             <div style={{ marginTop: 12, padding: '11px 12px', borderRadius: 11, background: 'rgba(103,213,255,0.07)', border: '1px solid rgba(103,213,255,0.16)' }}>
@@ -810,9 +810,9 @@ function InspectorCard({ selectedNodeData, selectedLinkData, nodeMap, totals, st
                 <div style={{ fontSize: 11, color: '#67D5FF', marginBottom: 10, fontWeight: 800 }}>{selectedLinkData.label}</div>
                 <DetailRow k="Direction" v={selectedLinkData.direction} />
                 <DetailRow k="Latency" v={fmtMs(selectedLinkData.latencyMs)} color={latencyColor(selectedLinkData.latencyMs)} />
-                <DetailRow k="Packet loss" v={`${selectedLinkData.packetLoss}%`} color={selectedLinkData.packetLoss > 0 ? '#EF4444' : '#22C55E'} />
+                <DetailRow k="Packet loss" v={`${selectedLinkData.packetLoss}%`} color={selectedLinkData.packetLoss > 0 ? '#EF4444' : 'var(--sev-healthy)'} />
                 <DetailRow k="Quality score" v={`${quality.score}/100`} color={quality.color} />
-                <DetailRow k="Status" v={selectedLinkData.active ? 'ACTIVE' : 'DOWN'} color={selectedLinkData.active ? '#22C55E' : '#EF4444'} />
+                <DetailRow k="Status" v={selectedLinkData.active ? 'ACTIVE' : 'DOWN'} color={selectedLinkData.active ? 'var(--sev-healthy)' : '#EF4444'} />
 
                 {selectedLinkData?.iperf && (
                   <div style={{ marginTop: 12, padding: '11px 12px', borderRadius: 11, background: 'rgba(103,213,255,0.07)', border: '1px solid rgba(103,213,255,0.16)' }}>
@@ -1268,7 +1268,7 @@ export default function NetworkPage() {
                 ))}
 
                 {[
-                  { color: '#22C55E', label: 'excellent' },
+                  { color: 'var(--sev-healthy)', label: 'excellent' },
                   { color: '#F59E0B', label: 'watch' },
                   { color: '#EF4444', label: 'poor/down' },
                   { color: '#6B7280', label: 'offline' },
