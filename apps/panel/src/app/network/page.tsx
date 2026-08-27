@@ -52,13 +52,13 @@ type HistoryRange = typeof HISTORY_RANGES[number];
 function latencyColor(ms: number | null) {
   if (ms === null) return '#6B7280';
   if (ms < 20)  return 'var(--sev-healthy)';
-  if (ms < 50)  return '#F59E0B';
-  return '#EF4444';
+  if (ms < 50)  return 'var(--sev-warning)';
+  return 'var(--sev-critical)';
 }
 function statusColor(s: string) {
   if (s === 'online')   return 'var(--sev-healthy)';
-  if (s === 'degraded') return '#F59E0B';
-  return '#EF4444';
+  if (s === 'degraded') return 'var(--sev-warning)';
+  return 'var(--sev-critical)';
 }
 function fmtMs(ms: number | null) { return ms === null ? '—' : `${ms.toFixed(1)}ms`; }
 
@@ -426,7 +426,7 @@ function LiveFlowGauges({ nodes, onSelect, selectedNode, live }: any) {
             <div
               title={r.checkedTs ? `Last checked ${new Date(r.checkedTs).toLocaleString()}` : 'No check recorded'}
               style={{ fontSize: 9, textAlign: 'right', whiteSpace: 'nowrap',
-                color: isStale(r.checkedTs) ? '#F59E0B' : '#64748B', fontWeight: 600 }}>
+                color: isStale(r.checkedTs) ? 'var(--sev-warning)' : '#64748B', fontWeight: 600 }}>
               <span style={{ marginRight: 3, color: r.isLive && !isStale(r.checkedTs) ? 'var(--sev-healthy)' : '#6B7280' }}>●</span>
               {checkedLabel(r.checkedTs)}
             </div>
@@ -673,19 +673,19 @@ function fmtMbps(v?: number | null) {
 }
 
 function routeQuality(link: LinkData) {
-  if (!link.active) return { label: 'Down', status: 'critical', score: 0, color: '#EF4444' };
-  if ((link.packetLoss ?? 0) > 0 || (link.latencyMs ?? 999) > 50) return { label: 'Poor', status: 'critical', score: 42, color: '#EF4444' };
-  if ((link.latencyMs ?? 999) > 20 || (link.iperf?.retransmits ?? 0) > 0) return { label: 'Watch', status: 'warning', score: 76, color: '#F59E0B' };
+  if (!link.active) return { label: 'Down', status: 'critical', score: 0, color: 'var(--sev-critical)' };
+  if ((link.packetLoss ?? 0) > 0 || (link.latencyMs ?? 999) > 50) return { label: 'Poor', status: 'critical', score: 42, color: 'var(--sev-critical)' };
+  if ((link.latencyMs ?? 999) > 20 || (link.iperf?.retransmits ?? 0) > 0) return { label: 'Watch', status: 'warning', score: 76, color: 'var(--sev-warning)' };
   return { label: 'Excellent', status: 'healthy', score: 98, color: 'var(--sev-healthy)' };
 }
 
 function StatTile({ label, value, hint, tone = 'info' }: { label: string; value: string; hint: string; tone?: 'healthy' | 'warning' | 'critical' | 'info' }) {
-  const color = tone === 'healthy' ? '#22C55E' : tone === 'warning' ? '#F59E0B' : tone === 'critical' ? '#EF4444' : '#67D5FF';
+  const color = tone === 'healthy' ? 'var(--sev-healthy)' : tone === 'warning' ? 'var(--sev-warning)' : tone === 'critical' ? 'var(--sev-critical)' : 'var(--sev-info)';
   return (
     <div style={{
       position: 'relative', overflow: 'hidden', minHeight: 96, padding: '14px 16px', borderRadius: 14,
-      border: `1px solid ${color}33`,
-      background: `linear-gradient(145deg, ${color}14, rgba(10,16,31,0.86) 48%, rgba(255,255,255,0.035))`,
+      border: `1px solid color-mix(in srgb, ${color} 20%, transparent)`,
+      background: `linear-gradient(145deg, color-mix(in srgb, ${color} 8%, transparent), rgba(10,16,31,0.86) 48%, rgba(255,255,255,0.035))`,
       boxShadow: `inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 40px rgba(0,0,0,0.22)`,
     }}>
       <div style={{ position: 'absolute', inset: '0 0 auto 0', height: 1, background: `linear-gradient(90deg, transparent, ${color}, transparent)`, opacity: 0.65 }} />
@@ -766,7 +766,7 @@ function InspectorCard({ selectedNodeData, selectedLinkData, nodeMap, totals, st
           <DetailRow k="Location" v={selectedNodeData.location} />
           <DetailRow k="Role" v={selectedNodeData.role} />
           <DetailRow k="Latency" v={fmtMs(selectedNodeData.latencyMs)} color={latencyColor(selectedNodeData.latencyMs)} />
-          <DetailRow k="Last seen" v={selectedNodeData.latencyMs === null ? 'unreachable' : 'current scan'} color={selectedNodeData.latencyMs === null ? '#EF4444' : 'var(--sev-healthy)'} />
+          <DetailRow k="Last seen" v={selectedNodeData.latencyMs === null ? 'unreachable' : 'current scan'} color={selectedNodeData.latencyMs === null ? 'var(--sev-critical)' : 'var(--sev-healthy)'} />
 
           {selectedNodeData?.iperf && (
             <div style={{ marginTop: 12, padding: '11px 12px', borderRadius: 11, background: 'rgba(103,213,255,0.07)', border: '1px solid rgba(103,213,255,0.16)' }}>
@@ -810,9 +810,9 @@ function InspectorCard({ selectedNodeData, selectedLinkData, nodeMap, totals, st
                 <div style={{ fontSize: 11, color: '#67D5FF', marginBottom: 10, fontWeight: 800 }}>{selectedLinkData.label}</div>
                 <DetailRow k="Direction" v={selectedLinkData.direction} />
                 <DetailRow k="Latency" v={fmtMs(selectedLinkData.latencyMs)} color={latencyColor(selectedLinkData.latencyMs)} />
-                <DetailRow k="Packet loss" v={`${selectedLinkData.packetLoss}%`} color={selectedLinkData.packetLoss > 0 ? '#EF4444' : 'var(--sev-healthy)'} />
+                <DetailRow k="Packet loss" v={`${selectedLinkData.packetLoss}%`} color={selectedLinkData.packetLoss > 0 ? 'var(--sev-critical)' : 'var(--sev-healthy)'} />
                 <DetailRow k="Quality score" v={`${quality.score}/100`} color={quality.color} />
-                <DetailRow k="Status" v={selectedLinkData.active ? 'ACTIVE' : 'DOWN'} color={selectedLinkData.active ? 'var(--sev-healthy)' : '#EF4444'} />
+                <DetailRow k="Status" v={selectedLinkData.active ? 'ACTIVE' : 'DOWN'} color={selectedLinkData.active ? 'var(--sev-healthy)' : 'var(--sev-critical)'} />
 
                 {selectedLinkData?.iperf && (
                   <div style={{ marginTop: 12, padding: '11px 12px', borderRadius: 11, background: 'rgba(103,213,255,0.07)', border: '1px solid rgba(103,213,255,0.16)' }}>
@@ -878,15 +878,15 @@ function EventStrip({ nodes, links, measuredAt }: { nodes: NodeData[]; links: Li
   const events = [
     ...nodes
       .filter(n => n.status !== 'online')
-      .map(n => ({ tone: n.status === 'degraded' ? '#F59E0B' : '#EF4444', title: `${n.label} ${n.status}`, body: n.latencyMs === null ? 'No ping response from latest scan.' : `RTT is ${fmtMs(n.latencyMs)}.` })),
+      .map(n => ({ tone: n.status === 'degraded' ? 'var(--sev-warning)' : 'var(--sev-critical)', title: `${n.label} ${n.status}`, body: n.latencyMs === null ? 'No ping response from latest scan.' : `RTT is ${fmtMs(n.latencyMs)}.` })),
     ...links
       .filter(l => !l.active || l.packetLoss > 0 || (l.latencyMs ?? 0) > 50)
-      .map(l => ({ tone: !l.active ? '#EF4444' : '#F59E0B', title: `${l.from} → ${l.to}`, body: !l.active ? 'One or both endpoints did not respond.' : `Average endpoint RTT is ${fmtMs(l.latencyMs)}; this is not a route measurement.` })),
+      .map(l => ({ tone: !l.active ? 'var(--sev-critical)' : 'var(--sev-warning)', title: `${l.from} → ${l.to}`, body: !l.active ? 'One or both endpoints did not respond.' : `Average endpoint RTT is ${fmtMs(l.latencyMs)}; this is not a route measurement.` })),
   ].slice(0, 5);
 
   const visibleEvents = events.length ? events : [
-    { tone: '#22C55E', title: 'Tailnet healthy', body: 'All observed nodes responded in the latest scan.' },
-    { tone: '#67D5FF', title: 'Telemetry loop active', body: measuredAt ? `Snapshot received ${new Date(measuredAt).toLocaleTimeString()}.` : 'Waiting for first live snapshot.' },
+    { tone: 'var(--sev-healthy)', title: 'Tailnet healthy', body: 'All observed nodes responded in the latest scan.' },
+    { tone: 'var(--sev-info)', title: 'Telemetry loop active', body: measuredAt ? `Snapshot received ${new Date(measuredAt).toLocaleTimeString()}.` : 'Waiting for first live snapshot.' },
   ];
 
   return (
@@ -894,7 +894,7 @@ function EventStrip({ nodes, links, measuredAt }: { nodes: NodeData[]; links: Li
       <PanelTitle eyebrow="Incident Strip" title="What changed / what matters" />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
         {visibleEvents.map((e, i) => (
-          <div key={`${e.title}-${i}`} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 10, padding: 11, borderRadius: 11, border: `1px solid ${e.tone}25`, background: `linear-gradient(145deg, ${e.tone}12, rgba(255,255,255,0.025))` }}>
+          <div key={`${e.title}-${i}`} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 10, padding: 11, borderRadius: 11, border: `1px solid color-mix(in srgb, ${e.tone} 15%, transparent)`, background: `linear-gradient(145deg, color-mix(in srgb, ${e.tone} 7%, transparent), rgba(255,255,255,0.025))` }}>
             <div style={{ width: 8, height: 8, marginTop: 4, borderRadius: 99, background: e.tone, boxShadow: `0 0 16px ${e.tone}` }} />
             <div>
               <div style={{ fontSize: 12, fontWeight: 900, color: '#F3F7FF' }}>{e.title}</div>
@@ -928,7 +928,7 @@ function HistoricalTimeline() {
     return () => { cancelled = true; };
   }, [range]);
 
-  const colors: Record<string, string> = { critical: '#EF4444', warning: '#F59E0B', healthy: '#22C55E', info: '#67D5FF' };
+  const colors: Record<string, string> = { critical: 'var(--sev-critical)', warning: 'var(--sev-warning)', healthy: 'var(--sev-healthy)', info: 'var(--sev-info)' };
   const labels: Record<HistoryRange, string> = { day: '24h', week: '7d', month: '31d', year: '1y' };
 
   return (
@@ -947,15 +947,15 @@ function HistoricalTimeline() {
         </div>
       </div>
       <div style={{ marginTop: 4, fontSize: 11, color: '#64748B' }}>Persistent reachability transitions and iperf measurements from the network archive.</div>
-      {error && <div role="status" style={{ marginTop: 12, color: '#EF4444', fontSize: 11 }}>{error}</div>}
+      {error && <div role="status" style={{ marginTop: 12, color: 'var(--sev-critical)', fontSize: 11 }}>{error}</div>}
       {loading && <div style={{ padding: 24, color: '#64748B', fontSize: 11, textAlign: 'center' }}>Loading retained events…</div>}
       {!loading && !error && events.length === 0 && <div style={{ padding: 24, color: '#64748B', fontSize: 11, textAlign: 'center' }}>No events recorded in this period.</div>}
       {!loading && events.length > 0 && (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 430, overflowY: 'auto', paddingRight: 3 }}>
           {events.map((event, index) => {
-            const color = colors[event.severity] ?? '#67D5FF';
+            const color = colors[event.severity] ?? 'var(--sev-info)';
             return (
-              <div key={`${event.ts}-${event.node}-${index}`} style={{ display: 'grid', gridTemplateColumns: '110px 10px minmax(0,1fr)', gap: 9, alignItems: 'start', padding: '9px 10px', borderRadius: 10, border: `1px solid ${color}22`, background: `${color}09` }}>
+              <div key={`${event.ts}-${event.node}-${index}`} style={{ display: 'grid', gridTemplateColumns: '110px 10px minmax(0,1fr)', gap: 9, alignItems: 'start', padding: '9px 10px', borderRadius: 10, border: `1px solid color-mix(in srgb, ${color} 13%, transparent)`, background: `color-mix(in srgb, ${color} 4%, transparent)` }}>
                 <time dateTime={event.ts} style={{ fontSize: 10, color: '#64748B', fontVariantNumeric: 'tabular-nums' }}>{new Date(event.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time>
                 <span style={{ width: 8, height: 8, marginTop: 2, borderRadius: 99, background: color, boxShadow: `0 0 10px ${color}` }} />
                 <div style={{ minWidth: 0 }}>
@@ -1002,12 +1002,12 @@ function LayerPanel({ view, nodes, links, nodeMap, measuredAt, setSelectedNode, 
         <PanelTitle eyebrow="Exposure Layer" title="External, tailnet, and backup zones" />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
           {[
-            ['Public HTTPS edge', 'prod / per-web', '#F59E0B', 'Cloudflare + nginx routes'],
+            ['Public HTTPS edge', 'prod / per-web', 'var(--sev-warning)', 'Cloudflare + nginx routes'],
             ['Tailnet control', `${nodes.length || '—'} observed hosts`, '#67D5FF', 'private admin and telemetry'],
-            ['Backup plane', 'backup-melb', '#22C55E', 'recovery and replication paths'],
+            ['Backup plane', 'backup-melb', 'var(--sev-healthy)', 'recovery and replication paths'],
             ['Unknown devices', '0 observed', '#94A3B8', 'no unknowns in current source'],
           ].map(([k, v, color, hint]) => (
-            <div key={k} style={{ padding: 12, borderRadius: 12, border: `1px solid ${color}26`, background: `${color}10` }}>
+            <div key={k} style={{ padding: 12, borderRadius: 12, border: `1px solid color-mix(in srgb, ${color} 15%, transparent)`, background: `color-mix(in srgb, ${color} 6%, transparent)` }}>
               <div style={{ fontSize: 10, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 900 }}>{k}</div>
               <div style={{ marginTop: 5, fontSize: 14, color, fontWeight: 900 }}>{v}</div>
               <div style={{ marginTop: 4, fontSize: 11, color: '#8B96AA' }}>{hint}</div>
@@ -1030,7 +1030,7 @@ function LayerPanel({ view, nodes, links, nodeMap, measuredAt, setSelectedNode, 
           const key = `${link.from}-${link.to}`;
           const quality = routeQuality(link);
           return (
-            <button type="button" key={key} onClick={() => { setSelectedLink(key); setSelectedNode(null); }} style={{ width: '100%', padding: 11, borderRadius: 12, cursor: 'pointer', textAlign: 'left', color: 'inherit', border: `1px solid ${quality.color}26`, background: `linear-gradient(145deg, ${quality.color}10, rgba(255,255,255,0.025))` }}>
+            <button type="button" key={key} onClick={() => { setSelectedLink(key); setSelectedNode(null); }} style={{ width: '100%', padding: 11, borderRadius: 12, cursor: 'pointer', textAlign: 'left', color: 'inherit', border: `1px solid color-mix(in srgb, ${quality.color} 15%, transparent)`, background: `linear-gradient(145deg, color-mix(in srgb, ${quality.color} 6%, transparent), rgba(255,255,255,0.025))` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: '#F3F7FF', fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1155,7 +1155,7 @@ export default function NetworkPage() {
               <div style={{ marginTop: 5, fontSize: 12, color: '#8B96AA' }}>
                 Tailscale mesh · prod-origin ping telemetry · refresh 15s
                 {lastUpdated && <span style={{ color: '#64748B', marginLeft: 12 }}>last scan {lastUpdated}</span>}
-                {data?.stale && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 11 }}>refreshing cache</span>}
+                {data?.stale && <span style={{ color: 'var(--sev-warning)', marginLeft: 8, fontSize: 11 }}>refreshing cache</span>}
               </div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
@@ -1269,8 +1269,8 @@ export default function NetworkPage() {
 
                 {[
                   { color: 'var(--sev-healthy)', label: 'excellent' },
-                  { color: '#F59E0B', label: 'watch' },
-                  { color: '#EF4444', label: 'poor/down' },
+                  { color: 'var(--sev-warning)', label: 'watch' },
+                  { color: 'var(--sev-critical)', label: 'poor/down' },
                   { color: '#6B7280', label: 'offline' },
                 ].map(({ color, label }, i) => (
                   <g key={label} transform={`translate(${12 + i * 82}, 320)`}>
@@ -1309,12 +1309,12 @@ export default function NetworkPage() {
               <PanelTitle eyebrow="Exposure" title="Reachability zones" />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {[
-                  ['Public edge', 'prod', '#F59E0B'],
+                  ['Public edge', 'prod', 'var(--sev-warning)'],
                   ['Tailnet', `${totalNodes} hosts`, '#67D5FF'],
-                  ['Backups', 'Melbourne', '#22C55E'],
+                  ['Backups', 'Melbourne', 'var(--sev-healthy)'],
                   ['Unknown', '0 seen', '#94A3B8'],
                 ].map(([k, v, color]) => (
-                  <div key={k} style={{ padding: 10, borderRadius: 10, border: `1px solid ${color}26`, background: `${color}10` }}>
+                  <div key={k} style={{ padding: 10, borderRadius: 10, border: `1px solid color-mix(in srgb, ${color} 15%, transparent)`, background: `color-mix(in srgb, ${color} 6%, transparent)` }}>
                     <div style={{ fontSize: 10, color: '#64748B' }}>{k}</div>
                     <div style={{ marginTop: 3, fontSize: 12, color, fontWeight: 900 }}>{v}</div>
                   </div>

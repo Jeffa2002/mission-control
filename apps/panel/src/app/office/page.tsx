@@ -341,10 +341,10 @@ function DeskCard({ agent, selected, onSelect }: { agent: AgentStatus; selected:
 }
 
 function eventTone(kind: string, outcome: string | null) {
-  if (kind.includes('failed') || outcome === 'failure') return '#ff7f8e';
-  if (kind.includes('approval') || kind.includes('blocker')) return '#ffd060';
-  if (kind.includes('completed') || kind.includes('produced')) return '#75e7b3';
-  return '#8eb9ec';
+  if (kind.includes('failed') || outcome === 'failure') return statusColor('critical');
+  if (kind.includes('approval') || kind.includes('blocker')) return statusColor('warning');
+  if (kind.includes('completed') || kind.includes('produced')) return statusColor('healthy');
+  return statusColor('info');
 }
 
 function LiveWindow({ agent, events, streamConnected }: { agent: AgentStatus; events: LiveAgentEvent[]; streamConnected: boolean }) {
