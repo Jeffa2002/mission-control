@@ -7,6 +7,11 @@ set -euo pipefail
 exec 9>/tmp/mission-control-agent-sync.lock
 flock -n 9 || exit 0
 
+# Keep the cron log bounded (it reached 3.7MB during the Aug 10-27 failure loop).
+if [ -f /tmp/agent-sync.log ] && [ "$(stat -c%s /tmp/agent-sync.log 2>/dev/null || echo 0)" -gt 1048576 ]; then
+  tail -n 500 /tmp/agent-sync.log > /tmp/agent-sync.log.tmp && mv /tmp/agent-sync.log.tmp /tmp/agent-sync.log
+fi
+
 AGENTS_DIR="/root/.openclaw/agents"
 PROD_HOST="root@100.95.166.47"
 PROD_PORT="2222"
@@ -22,11 +27,14 @@ MISSION_STATUS="/root/.openclaw/workspace/mission-control/agent-status.json"
 MISSION_SECURITY="/root/.openclaw/workspace/mission-control/security-data.json"
 
 # ── 1. Build an allowlisted snapshot from supported OpenClaw metadata only ────
-python3 "$(dirname "$0")/collect-agent-observability.py" --output "$STATUS_FILE"
-
-
-cp "$STATUS_FILE" "$WORKSPACE_STATUS"
-cp "$STATUS_FILE" "$MISSION_STATUS"
+# Non-fatal: agent metadata must never block the rest of the telemetry sync.
+# (A hard failure here froze ALL downstream telemetry for 17 days, 2026-08-10..27.)
+if python3 "$(dirname "$0")/collect-agent-observability.py" --output "$STATUS_FILE"; then
+  cp "$STATUS_FILE" "$WORKSPACE_STATUS"
+  cp "$STATUS_FILE" "$MISSION_STATUS"
+else
+  echo "WARNING: agent snapshot failed; continuing with remaining telemetry" >&2
+fi
 
 # ── 2. Rsync session files to prod (fast incremental, skip deleted/reset) ─────
 rsync -az --delete \

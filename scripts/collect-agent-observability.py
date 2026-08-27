@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -24,15 +25,40 @@ STATUS_MAP = {
 }
 
 
+AUTH_LOCKOUT_MARKERS = ("too many failed authentication", "unauthorized")
+
+
 def cli_json(*args):
+    """Run an openclaw CLI command and return parsed JSON, or None on failure.
+
+    Never raises: telemetry collection must degrade, not die. Retries are
+    capped and auth-lockout errors fail fast, because retrying a locked-out
+    gateway re-triggers the lockout window (that loop silently killed the
+    bazza->prod telemetry sync for 17 days starting 2026-08-10).
+    """
     last_error = None
-    for attempt in range(5):
-        result = subprocess.run(["openclaw", *args], capture_output=True, text=True, timeout=30)
+    for attempt in range(2):
+        try:
+            result = subprocess.run(["openclaw", *args], capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            last_error = "timeout after 30s"
+            break
         if result.returncode == 0:
-            return json.loads(result.stdout)
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                last_error = f"invalid JSON ({exc})"
+                break
         last_error = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
-        time.sleep(attempt + 1)
-    raise RuntimeError(f"openclaw {' '.join(args)} failed after retries: {last_error}")
+        if any(marker in last_error.lower() for marker in AUTH_LOCKOUT_MARKERS):
+            break  # retrying would re-trigger the gateway lockout
+        if attempt == 0:
+            time.sleep(2)
+    print(
+        f"WARNING: openclaw {' '.join(args)} unavailable: {last_error[:200]}",
+        file=sys.stderr, flush=True,
+    )
+    return None
 
 
 def iso(milliseconds):
@@ -173,15 +199,24 @@ def main():
     parser.add_argument("--output", default="/tmp/agent-status.json")
     args = parser.parse_args()
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    sessions_payload = cli_json("sessions", "--all-agents", "--active", "240", "--json")
+    tasks_payload = cli_json("tasks", "list", "--json")
+    cron_payload = cli_json("cron", "list", "--json")
     snapshot = build_snapshot(
-        cli_json("sessions", "--all-agents", "--active", "240", "--json"),
-        cli_json("tasks", "list", "--json"),
-        cli_json("cron", "list", "--json"),
+        sessions_payload or {},
+        tasks_payload or {},
+        cron_payload or {},
         now_ms,
     )
+    degraded = [name for name, payload in (
+        ("sessions", sessions_payload), ("tasks", tasks_payload), ("cron", cron_payload),
+    ) if payload is None]
+    if degraded:
+        snapshot["degradedSources"] = degraded
     with open(args.output, "w", encoding="utf-8") as handle:
         json.dump(snapshot, handle, separators=(",", ":"))
-    print(f"Generated safe status for {len(snapshot['agents'])} agents")
+    detail = f" (degraded: {', '.join(degraded)})" if degraded else ""
+    print(f"Generated safe status for {len(snapshot['agents'])} agents{detail}")
 
 
 if __name__ == "__main__":
