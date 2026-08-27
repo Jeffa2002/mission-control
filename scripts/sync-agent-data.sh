@@ -7,9 +7,11 @@ set -euo pipefail
 exec 9>/tmp/mission-control-agent-sync.lock
 flock -n 9 || exit 0
 
+LOG=/tmp/agent-sync.log
+
 # Keep the cron log bounded (it reached 3.7MB during the Aug 10-27 failure loop).
-if [ -f /tmp/agent-sync.log ] && [ "$(stat -c%s /tmp/agent-sync.log 2>/dev/null || echo 0)" -gt 1048576 ]; then
-  tail -n 500 /tmp/agent-sync.log > /tmp/agent-sync.log.tmp && mv /tmp/agent-sync.log.tmp /tmp/agent-sync.log
+if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+  tail -n 500 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
 fi
 
 AGENTS_DIR="/root/.openclaw/agents"
@@ -51,23 +53,29 @@ rsync -az --delete \
     --exclude="iperf-results.json" \
     --exclude="network-history.db" \
     "$AGENTS_DIR/" \
-    "${PROD_HOST}:${PROD_AGENT_DATA}/" 2>/dev/null
+    "${PROD_HOST}:${PROD_AGENT_DATA}/" 2>>"$LOG" \
+  || echo "WARN: agents-dir rsync failed at $(date)"
 
 # ── 4. Write status JSON after rsync (so --delete doesn't wipe it) ────────────
 # Land as a temp file, then chown/chmod so the non-root panel container (uid 100,
 # gid 101) can read it, then atomically move into place.
-scp "${SCP_OPTIONS[@]}" \
+if scp "${SCP_OPTIONS[@]}" \
     "$STATUS_FILE" \
-    "${PROD_HOST}:${PROD_AGENT_DATA}/agent-status.json.tmp" 2>/dev/null \
+    "${PROD_HOST}:${PROD_AGENT_DATA}/agent-status.json.tmp" 2>>"$LOG" \
   && ssh "${SSH_OPTIONS[@]}" "$PROD_HOST" \
-    "chown 100:101 '${PROD_AGENT_DATA}/agent-status.json.tmp'; chmod 640 '${PROD_AGENT_DATA}/agent-status.json.tmp'; mv '${PROD_AGENT_DATA}/agent-status.json.tmp' '${PROD_AGENT_DATA}/agent-status.json'" 2>/dev/null
+    "chown 100:101 '${PROD_AGENT_DATA}/agent-status.json.tmp'; chmod 640 '${PROD_AGENT_DATA}/agent-status.json.tmp'; mv '${PROD_AGENT_DATA}/agent-status.json.tmp' '${PROD_AGENT_DATA}/agent-status.json'" 2>>"$LOG"; then
+  :
+else
+  echo "WARN: agent-status.json transfer failed at $(date)"
+fi
 
 # ── 5. Sync iperf-results.json to prod agents dir ──────────────────────────────
 IPERF_SRC="/root/.openclaw/workspace/mission-control/iperf-results.json"
 if [ -f "$IPERF_SRC" ]; then
   scp "${SCP_OPTIONS[@]}" \
       "$IPERF_SRC" \
-      "${PROD_HOST}:${PROD_AGENT_DATA}/iperf-results.json" 2>/dev/null
+      "${PROD_HOST}:${PROD_AGENT_DATA}/iperf-results.json" 2>>"$LOG" \
+    || echo "WARN: iperf-results.json transfer failed at $(date)"
 fi
 
 # ── 6b. Collect ping history and append to network-history.db ────────────────
@@ -158,7 +166,8 @@ SNAPEOF
   rsync -az \
       -e "$RSYNC_SSH" \
       "$SNAPSHOT" \
-      "${PROD_HOST}:${PROD_AGENT_DATA}/network-history.db" 2>/dev/null && true
+      "${PROD_HOST}:${PROD_AGENT_DATA}/network-history.db" 2>>"$LOG" \
+    || echo "WARN: network-history.db transfer failed at $(date)"
   rm -f "$SNAPSHOT"
 fi
 
@@ -234,7 +243,8 @@ if [ -f "/tmp/security-data.json" ]; then
   cp /tmp/security-data.json "$MISSION_SECURITY"
   scp "${SCP_OPTIONS[@]}" \
       /tmp/security-data.json \
-      "${PROD_HOST}:${PROD_AGENT_DATA}/security-data.json" 2>/dev/null
+      "${PROD_HOST}:${PROD_AGENT_DATA}/security-data.json" 2>>"$LOG" \
+    || echo "WARN: security-data.json transfer failed at $(date)"
 fi
 
 echo "Sync complete at $(date)"
