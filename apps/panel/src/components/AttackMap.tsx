@@ -21,7 +21,7 @@ const COLORS = {
   low: '#7c2d12',
   medium: '#dc2626',
   high: '#ef4444',
-  veryHigh: '#fbbf24',
+  veryHigh: 'var(--sev-critical)',
   border: 'rgba(255,255,255,0.08)',
 };
 
@@ -166,7 +166,7 @@ export function AttackMap() {
                     <span style={{ color: '#fca5a5', fontWeight: 700 }}>{c.count.toLocaleString()}</span>
                   </div>
                   <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', borderRadius: 999, background: 'linear-gradient(90deg, #7c2d12, #ef4444, #fbbf24)' }} />
+                    <div style={{ width: `${pct}%`, height: '100%', borderRadius: 999, background: 'linear-gradient(90deg, #7c2d12, var(--sev-critical))' }} />
                   </div>
                 </div>
               );

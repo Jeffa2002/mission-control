@@ -1,11 +1,19 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { statusColor } from '../lib/status';
 import { card, card2, cn, hostPill, pill, sevPill } from './ops-ui';
 
 export function BaselineIndicator({ state, reason }: { state: 'normal' | 'watch' | 'alert' | 'stale'; reason: string }) {
-  const cls = state === 'normal' ? 'text-[#22c55e] border-[#22c55e]/30 bg-[#22c55e]/10' : state === 'watch' ? 'text-[#f59e0b] border-[#f59e0b]/30 bg-[#f59e0b]/10' : state === 'alert' ? 'text-[#ef4444] border-[#ef4444]/30 bg-[#ef4444]/10' : 'text-slate-300 border-white/10 bg-white/5';
-  return <div className={cn('inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px]', cls)}><span className="font-semibold uppercase">{state}</span><span className="text-slate-300">{reason}</span></div>;
+  const color = statusColor(state);
+  return (
+    <div
+      className={cn('inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px]')}
+      style={{ color, borderColor: `color-mix(in srgb, ${color} 30%, transparent)`, background: `color-mix(in srgb, ${color} 10%, transparent)` }}
+    >
+      <span className="font-semibold uppercase">{state}</span><span className="text-slate-300">{reason}</span>
+    </div>
+  );
 }
 
 export function LogViewer({ rows }: { rows: Array<{ ts: string; host: string; source: string; actor: string; action: string; outcome: string; detail: string }> }) {

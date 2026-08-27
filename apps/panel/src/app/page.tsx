@@ -453,45 +453,6 @@ function buildChanges(data: BriefData): ChangeItem[] {
     .slice(0, 5);
 }
 
-function SignalRibbon({ changes, currentTone }: { changes: ChangeItem[]; currentTone: Tone }) {
-  const now = Date.now();
-  const bins = Array.from({ length: 24 }, (_, index) => {
-    const start = now - (23 - index) * 3_600_000;
-    const end = start + 3_600_000;
-    const events = changes.filter((change) => {
-      const time = new Date(change.ts).getTime();
-      return time >= start && time < end;
-    });
-    let tone: Tone = 'unknown';
-    if (events.some((event) => event.tone === 'incident')) tone = 'incident';
-    else if (events.some((event) => event.tone === 'attention')) tone = 'attention';
-    else if (events.length > 0) tone = 'nominal';
-    if (index === 23 && currentTone !== 'unknown' && tone === 'unknown') tone = currentTone;
-    return { tone, count: events.length, start };
-  });
-  const eventCount = bins.reduce((sum, bin) => sum + bin.count, 0);
-
-  return (
-    <section className={styles.ribbonPanel} aria-labelledby="signal-title">
-      <div className={styles.ribbonIntro}>
-        <p className={styles.eyebrow}>Last 24 hours</p>
-        <h2 id="signal-title">Signal ribbon</h2>
-        <p>{eventCount ? `${eventCount} recorded operational changes` : 'No timestamped changes in the loaded activity window'}</p>
-      </div>
-      <div className={styles.ribbon} role="img" aria-label={`Twenty-four hour operational signal ribbon with ${eventCount} recorded changes`}>
-        {bins.map((bin, index) => (
-          <span
-            key={bin.start}
-            data-tone={bin.tone}
-            title={`${new Date(bin.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}: ${bin.count ? `${bin.count} recorded change${bin.count === 1 ? '' : 's'}` : index === 23 && bin.tone !== 'unknown' ? `current state ${toneLabel(bin.tone)}` : 'no recorded change'}`}
-          />
-        ))}
-      </div>
-      <div className={styles.ribbonScale} aria-hidden="true"><span>24h ago</span><span>12h</span><span>Now</span></div>
-    </section>
-  );
-}
-
 function Inspector({ item, onClose }: { item: InspectorItem | null; onClose: () => void }) {
   const [actionState, setActionState] = useState<'idle' | 'busy'>('idle');
   const [actionMessage, setActionMessage] = useState('');
@@ -596,39 +557,6 @@ function Changes({ items }: { items: ChangeItem[] }) {
   );
 }
 
-function Constellation({ data, selectedKey, onSelect }: { data: BriefData; selectedKey?: string; onSelect: (item: InspectorItem) => void }) {
-  const groups = [
-    { label: 'Applications', items: data.apps.slice(0, 8).map(makeAppInspector) },
-    { label: 'Hosts', items: [makeHostInspector('bazza', data.bazza), makeHostInspector('shazza', data.shazza)] },
-    { label: 'Agent mesh', items: data.agents.map(makeAgentInspector) },
-  ];
-
-  return (
-    <section className={`${styles.panel} ${styles.constellation}`} aria-labelledby="constellation-title">
-      <SectionHeading eyebrow="Estate" title="Service constellation" copy="Live applications, hosts, and agents. Select a node to inspect its evidence." action={<Link href="/estate">Full estate →</Link>} />
-      <div className={styles.constellationLegend} aria-label="State legend"><ToneBadge tone="nominal" /><ToneBadge tone="attention" /><ToneBadge tone="incident" /><ToneBadge tone="unknown" /></div>
-      <div className={styles.constellationMap}>
-        {groups.map((group, groupIndex) => (
-          <div className={styles.constellationColumn} key={group.label}>
-            <h3>{group.label}<span>{group.items.length}</span></h3>
-            <ul>
-              {group.items.length ? group.items.map((item) => (
-                <li key={item.key}>
-                  <button type="button" data-tone={item.tone} data-selected={selectedKey === item.key} onClick={() => onSelect(item)} aria-label={`Inspect ${item.title}, ${item.state}`}>
-                    <span className={styles.nodeMark} aria-hidden="true">{item.title.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span>
-                    <span><strong>{item.title}</strong><small>{item.state}</small></span>
-                  </button>
-                </li>
-              )) : <li className={styles.noNodes}>No live records</li>}
-            </ul>
-            {groupIndex < groups.length - 1 ? <span className={styles.connector} aria-hidden="true" /> : null}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 async function fetchJson(path: string) {
   const response = await fetch(path, { cache: 'no-store' });
   if (!response.ok) throw new Error(`${path} returned ${response.status}`);
@@ -638,14 +566,9 @@ async function fetchJson(path: string) {
 export default function Home() {
   const [data, setData] = useState<BriefData>(EMPTY_DATA);
   const [selected, setSelected] = useState<InspectorItem | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [now, setNow] = useState(Date.now());
 
-  const load = useCallback(async (background = false) => {
-    if (background) setRefreshing(true);
+  const load = useCallback(async () => {
     const requests = [
       ['health', '/api/health'], ['agents', '/api/agents/status'], ['apps', '/api/effectx'],
       ['deploys', '/api/deploys'], ['activity', '/api/activity?limit=24'], ['alerts', '/api/alerts'],
@@ -673,16 +596,12 @@ export default function Home() {
     });
     setData((current) => ({ ...current, ...next }));
     setErrors(failures);
-    if (results.some((result) => result.status === 'fulfilled')) setUpdatedAt(new Date());
-    setLoading(false);
-    setRefreshing(false);
   }, []);
 
   useEffect(() => {
     load();
-    const refreshTimer = window.setInterval(() => load(true), 30_000);
-    const clockTimer = window.setInterval(() => setNow(Date.now()), 15_000);
-    return () => { window.clearInterval(refreshTimer); window.clearInterval(clockTimer); };
+    const refreshTimer = window.setInterval(() => load(), 30_000);
+    return () => { window.clearInterval(refreshTimer); };
   }, [load]);
 
   const queue = useMemo(() => buildQueue(data), [data]);
@@ -696,7 +615,6 @@ export default function Home() {
   const activeAgents = data.agents.filter((agent) => ['working', 'idle'].includes((agent.status ?? '').toLowerCase())).length;
   const onlineNodes = data.network?.nodes.filter((node) => node.status === 'online').length ?? 0;
   const successfulDeploys = data.deploys.filter((deploy) => deploy.status === 'success').length;
-  const stale = updatedAt ? now - updatedAt.getTime() > 90_000 : false;
   const postureTitle = postureTone === 'incident' ? 'Incident active' : postureTone === 'attention' ? 'Needs attention' : postureTone === 'nominal' ? 'Estate stable' : 'Awaiting telemetry';
   const postureCopy = postureTone === 'incident'
     ? `${incidentCount} confirmed high-priority condition${incidentCount === 1 ? '' : 's'} require operator review.`
@@ -713,10 +631,6 @@ export default function Home() {
       <div className={styles.dashboard} data-posture={postureTone}>
         <header className={styles.briefHeader}>
           <div><p className={styles.eyebrow}>Live operations</p><h1>Mission Control</h1><p>What needs attention, what changed, and where to act.</p></div>
-          <div className={styles.freshness} data-stale={stale}>
-            <span>{loading ? 'Loading live telemetry…' : stale ? 'Telemetry is stale' : updatedAt ? `Updated ${relativeTime(updatedAt.toISOString())}` : 'No telemetry loaded'}</span>
-            <button type="button" onClick={() => load(true)} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
-          </div>
         </header>
 
         {errors.length ? <div className={styles.errorBanner} role="status"><strong>Partial data</strong><span>{errors.length} endpoint{errors.length === 1 ? '' : 's'} failed; the brief retains the last successful values.</span><details><summary>Details</summary><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></details></div> : null}

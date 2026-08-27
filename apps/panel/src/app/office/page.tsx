@@ -12,6 +12,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppShell, SectionTitle, StatusBadge, card, card2, muted } from '../../components/ops-ui';
+import { statusColor } from '../../lib/status';
 import { buildActiveRoster, type RawAgentStatus, type RosterHealth } from './roster';
 import type { SafeWorkProjection } from '../api/agents/status/safe-work-model';
 
@@ -53,23 +54,16 @@ interface LiveAgentEvent {
 
 // ─── Colour + theme helpers ───────────────────────────────────────────────────
 
-const STATUS_COLORS: Record<string, string> = {
-  Working: '#33ffcc',
-  Idle:    '#ffd060',
-  Offline: '#667799',
+const STATUS_COLORS: Record<AgentStatus['status'], string> = {
+  Working: statusColor('working'),
+  Idle:    statusColor('idle'),
+  Offline: statusColor('offline'),
 };
 
-const STATUS_BG: Record<string, string> = {
-  Working: 'rgba(51,255,204,0.10)',
-  Idle:    'rgba(255,208,96,0.08)',
-  Offline: 'rgba(80,100,140,0.08)',
-};
-
-const STATUS_BORDER: Record<string, string> = {
-  Working: 'rgba(51,255,204,0.30)',
-  Idle:    'rgba(255,208,96,0.22)',
-  Offline: 'rgba(80,100,140,0.18)',
-};
+/** Alpha-tint a status token colour without breaking CSS variable composition. */
+function tint(color: string, pct: number): string {
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+}
 
 function fmtRelative(iso: string | null): string {
   if (!iso) return 'never';
@@ -94,7 +88,7 @@ function fmtDuration(milliseconds: number | null): string {
 // ─── Avatar SVG ───────────────────────────────────────────────────────────────
 
 function AgentAvatar({ emoji, status, busy }: { emoji: string; status: string; busy: boolean }) {
-  const color = STATUS_COLORS[status] ?? '#667799';
+  const color = STATUS_COLORS[status as AgentStatus['status']] ?? statusColor('neutral');
   const isWorking = status === 'Working';
   const isOffline = status === 'Offline';
 
@@ -108,9 +102,9 @@ function AgentAvatar({ emoji, status, busy }: { emoji: string; status: string; b
           borderRadius: '50%',
           background: isOffline
             ? 'rgba(40,50,70,0.6)'
-            : `radial-gradient(circle at 35% 35%, ${color}22, ${color}08)`,
-          border: `2px solid ${isOffline ? 'rgba(80,100,140,0.3)' : color}`,
-          boxShadow: isWorking ? `0 0 20px ${color}55` : undefined,
+            : `radial-gradient(circle at 35% 35%, ${tint(color, 13)}, ${tint(color, 3)})`,
+          border: `2px solid ${isOffline ? tint(color, 30) : color}`,
+          boxShadow: isWorking ? `0 0 20px ${tint(color, 33)}` : undefined,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -169,7 +163,7 @@ function WorkArea({ agent }: { agent: AgentStatus }) {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           {isOffline && !work ? (
-            <div style={{ color: '#667799', fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>
+            <div style={{ color: statusColor('offline'), fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>
               No recent activity
             </div>
           ) : (
@@ -177,7 +171,7 @@ function WorkArea({ agent }: { agent: AgentStatus }) {
               <div
                 style={{
                   fontSize: 11,
-                  color: isWorking ? '#33ffcc' : '#ffd060',
+                  color: isWorking ? statusColor('working') : statusColor('idle'),
                   fontWeight: 700,
                   display: 'flex',
                   alignItems: 'center',
@@ -248,9 +242,9 @@ function MonitorSVG({ active }: { active: boolean }) {
 // ─── Agent Desk Card ──────────────────────────────────────────────────────────
 
 function DeskCard({ agent, selected, onSelect }: { agent: AgentStatus; selected: boolean; onSelect: () => void }) {
-  const color  = STATUS_COLORS[agent.status] ?? '#667799';
-  const bg     = STATUS_BG[agent.status]     ?? 'rgba(40,50,70,0.08)';
-  const border = STATUS_BORDER[agent.status] ?? 'rgba(80,100,140,0.18)';
+  const color  = STATUS_COLORS[agent.status] ?? statusColor('neutral');
+  const bg     = tint(color, 10);
+  const border = tint(color, 25);
 
   return (
     <button
@@ -263,7 +257,7 @@ function DeskCard({ agent, selected, onSelect }: { agent: AgentStatus; selected:
         border: `1px solid ${border}`,
         background: `linear-gradient(160deg, ${bg}, rgba(255,255,255,0.015))`,
         boxShadow: agent.status === 'Working'
-          ? `0 0 0 1px rgba(0,0,0,0.3), 0 0 40px ${color}18`
+          ? `0 0 0 1px rgba(0,0,0,0.3), 0 0 40px ${tint(color, 9)}`
           : '0 0 0 1px rgba(0,0,0,0.3)',
         padding: 16,
         display: 'flex',
@@ -302,8 +296,8 @@ function DeskCard({ agent, selected, onSelect }: { agent: AgentStatus; selected:
               gap: 5,
               padding: '3px 9px',
               borderRadius: 999,
-              background: `${color}18`,
-              border: `1px solid ${color}55`,
+              background: tint(color, 9),
+              border: `1px solid ${tint(color, 33)}`,
               fontSize: 11,
               fontWeight: 700,
               color,
@@ -587,8 +581,8 @@ export default function OfficePage() {
         {selectedAgent ? <LiveWindow agent={selectedAgent} events={events} streamConnected={streamConnected} /> : null}
 
         <div className={card2 + ' flex flex-wrap gap-4 p-3 text-xs text-slate-400'}>
-          <span><span style={{ color: '#33ffcc' }}>Working</span>: supported task metadata reports active work</span>
-          <span><span style={{ color: '#ffd060' }}>Idle</span>: recent metadata heartbeat, no confirmed active task</span>
+          <span><span style={{ color: statusColor('working') }}>Working</span>: supported task metadata reports active work</span>
+          <span><span style={{ color: statusColor('idle') }}>Idle</span>: recent metadata heartbeat, no confirmed active task</span>
           {suppressedCount > 0 && <span>{suppressedCount} older alias representation{suppressedCount === 1 ? '' : 's'} suppressed</span>}
           <span className="ml-auto">Source: sanitized OpenClaw events + one-minute snapshot fallback</span>
         </div>
