@@ -31,8 +31,14 @@ check_local() {
 
 check_prod() {
   local file="$1" max_age_min="$2" label="$3"
-  local mtime
-  mtime=$(ssh "${SSH_OPTS[@]}" "$PROD_HOST" "stat -c %Y '$file' 2>/dev/null" 2>/dev/null)
+  local mtime attempt
+  for attempt in 1 2; do
+    mtime=$(ssh "${SSH_OPTS[@]}" "$PROD_HOST" "stat -c %Y '$file' 2>/dev/null" 2>/dev/null)
+    [ -n "$mtime" ] && break
+    # Transient SSH blips (e.g. colliding with the sync cron's connection)
+    # must not page Jeff; retry once before declaring the source stale.
+    [ "$attempt" -eq 1 ] && sleep 5
+  done
   if [ -z "$mtime" ]; then
     STALE+=("$label: unreachable or missing ($file)")
     return
