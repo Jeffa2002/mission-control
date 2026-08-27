@@ -557,45 +557,33 @@ function Changes({ items }: { items: ChangeItem[] }) {
   );
 }
 
-async function fetchJson(path: string) {
-  const response = await fetch(path, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`${path} returned ${response.status}`);
-  return response.json();
-}
-
 export default function Home() {
   const [data, setData] = useState<BriefData>(EMPTY_DATA);
   const [selected, setSelected] = useState<InspectorItem | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
 
   const load = useCallback(async () => {
-    const requests = [
-      ['health', '/api/health'], ['agents', '/api/agents/status'], ['apps', '/api/effectx'],
-      ['deploys', '/api/deploys'], ['activity', '/api/activity?limit=24'], ['alerts', '/api/alerts'],
-      ['bazza', '/api/bazza'], ['shazza', '/api/shazza'], ['network', '/api/network'],
-    ] as const;
-    const results = await Promise.allSettled(requests.map(([, path]) => fetchJson(path)));
-    const failures: string[] = [];
-    const next: Partial<BriefData> = {};
-    results.forEach((result, index) => {
-      const [key] = requests[index];
-      if (result.status === 'rejected') {
-        failures.push(`${key}: ${result.reason instanceof Error ? result.reason.message : 'request failed'}`);
-        return;
-      }
-      const value = result.value;
-      if (key === 'health') next.health = value;
-      if (key === 'agents') next.agents = value.agents ?? [];
-      if (key === 'apps') next.apps = value.apps ?? [];
-      if (key === 'deploys') next.deploys = value.deploys ?? [];
-      if (key === 'activity') next.activity = value.items ?? [];
-      if (key === 'alerts') next.alerts = value.data?.alerts ?? [];
-      if (key === 'bazza') next.bazza = value;
-      if (key === 'shazza') next.shazza = value;
-      if (key === 'network') next.network = value;
-    });
-    setData((current) => ({ ...current, ...next }));
-    setErrors(failures);
+    try {
+      const response = await fetch('/api/overview', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`/api/overview returned ${response.status}`);
+      const payload = await response.json();
+      const source = (payload.data ?? {}) as Record<string, unknown>;
+      const next: Partial<BriefData> = {};
+      // Null means that source failed upstream; retain the last good value.
+      if (source.health != null) next.health = source.health as BriefData['health'];
+      if (source.agents != null) next.agents = source.agents as BriefData['agents'];
+      if (source.apps != null) next.apps = source.apps as BriefData['apps'];
+      if (source.deploys != null) next.deploys = source.deploys as BriefData['deploys'];
+      if (source.activity != null) next.activity = source.activity as BriefData['activity'];
+      if (source.alerts != null) next.alerts = source.alerts as BriefData['alerts'];
+      if (source.bazza != null) next.bazza = source.bazza as BriefData['bazza'];
+      if (source.shazza != null) next.shazza = source.shazza as BriefData['shazza'];
+      if (source.network != null) next.network = source.network as BriefData['network'];
+      setData((current) => ({ ...current, ...next }));
+      setErrors(Array.isArray(payload.failures) ? payload.failures : []);
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : 'overview request failed']);
+    }
   }, []);
 
   useEffect(() => {
