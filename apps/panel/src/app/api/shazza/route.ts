@@ -27,7 +27,7 @@ export async function GET(req: Request) {
     });
   }
 
-  const result = await probeSystemHealth(system);
+  const result = await probeSystemHealth({ ...system, timeoutMs: 1_500 });
   if (result.ok) {
     return NextResponse.json({
       ...result.data,

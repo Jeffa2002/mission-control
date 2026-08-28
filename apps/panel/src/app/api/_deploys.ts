@@ -5,6 +5,9 @@ export const DEPLOY_LOG = process.env.DEPLOY_LOG_FILE ?? '/agent-data/deploy-log
 export const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? 'Jeffa2002/mission-control';
 const GITHUB_RUNS_URL = `https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs?per_page=50`;
 export const MAX_DEPLOY_ENTRIES = 50;
+const DEPLOY_FEED_CACHE_TTL_MS = 60_000;
+
+let deployFeedCache: { ts: number; feed: DeployFeed } | null = null;
 
 export interface Deploy {
   id: string;
@@ -83,7 +86,7 @@ export async function readGithubDeployRuns(): Promise<Deploy[]> {
   const res = await fetch(GITHUB_RUNS_URL, {
     headers,
     cache: 'no-store',
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(3_000),
   });
 
   if (!res.ok) {
@@ -96,6 +99,8 @@ export async function readGithubDeployRuns(): Promise<Deploy[]> {
 }
 
 export async function readDeployFeed(): Promise<DeployFeed> {
+  if (deployFeedCache && Date.now() - deployFeedCache.ts < DEPLOY_FEED_CACHE_TTL_MS) return deployFeedCache.feed;
+
   const localDeploys = await readDeployLog();
   try {
     const githubDeploys = await readGithubDeployRuns();
@@ -110,11 +115,13 @@ export async function readDeployFeed(): Promise<DeployFeed> {
         return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
       })
       .slice(0, MAX_DEPLOY_ENTRIES);
-    return { ok: true, source: 'github-actions', count: deploys.length, deploys };
+    const feed = { ok: true, source: 'github-actions' as const, count: deploys.length, deploys };
+    deployFeedCache = { ts: Date.now(), feed };
+    return feed;
   } catch (err: any) {
-    return {
+    const feed = {
       ok: localDeploys.length > 0,
-      source: 'deploy-log',
+      source: 'deploy-log' as const,
       count: localDeploys.length,
       deploys: [...localDeploys]
         .sort((left, right) => {
@@ -125,6 +132,8 @@ export async function readDeployFeed(): Promise<DeployFeed> {
         .slice(0, MAX_DEPLOY_ENTRIES),
       warning: String(err?.message || err),
     };
+    deployFeedCache = { ts: Date.now(), feed };
+    return feed;
   }
 }
 

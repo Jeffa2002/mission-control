@@ -3,14 +3,14 @@ import { getPanicLatch } from '../_util';
 import { requireSessionAuth } from '../_session-auth';
 
 const SHAZZA_URL = process.env.SHAZZA_HEALTH_URL || 'https://shazza.taile9fed9.ts.net/health';
-const TIMEOUT_MS = 5_000;
+const TIMEOUT_MS = 1_500;
 
 async function getShazzaTemp(): Promise<number | null> {
   try {
-    const res = await Promise.race([
-      fetch(SHAZZA_URL, { cache: 'no-store' }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS)),
-    ]);
+    const res = await fetch(SHAZZA_URL, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
     if (!res.ok) return null;
     const data = await res.json();
     return data?.temperature?.celsius ?? null;
