@@ -5,7 +5,7 @@ import { requireSessionAuth } from '../_session-auth';
 import { getSystemDefinition, probeSystemHealth } from '../_system-health';
 
 const CADVISOR = process.env.CADVISOR_URL ?? 'http://mission-cadvisor:8080';
-const TIMEOUT_MS = 8_000;
+const TIMEOUT_MS = 1_000;
 
 async function cadvisor(path: string) {
   const res = await fetch(`${CADVISOR}${path}`, {
@@ -108,8 +108,7 @@ export async function GET(req: Request) {
     const system = getSystemDefinition('bazza');
     if (!system) throw new Error('Bazza is not registered');
 
-    const health = await probeSystemHealth({ ...system, timeoutMs: 1_000 });
-    if (!health.ok) throw new Error(health.error || 'Bazza health probe failed');
+    const healthPromise = probeSystemHealth({ ...system, timeoutMs: 1_000 });
 
     let machine: any = null;
     let hostData: any = null;
@@ -125,6 +124,7 @@ export async function GET(req: Request) {
       machine = { num_cores: fallback.cpu.cores, memory_capacity: fallback.memory.totalMb * 1e6 };
       hostData = { stats: [] };
     }
+    const health = await healthPromise;
 
     const stats: any[] = hostData.stats ?? [];
     const latest = stats[stats.length - 1];
