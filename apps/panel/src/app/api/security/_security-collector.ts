@@ -1,5 +1,6 @@
-import { execFileSync } from 'node:child_process';
-import { escapeShell, readFirstExisting, safeExec } from './_security-logs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { escapeShell, readFirstExisting } from './_security-logs';
 import { SYSTEM_REGISTRY } from '../_system-health';
 
 type SecurityHostKind = 'local' | 'ssh';
@@ -85,6 +86,12 @@ type Fail2BanState = {
 const FIREWALL_SAMPLE_LIMIT = 500;
 const EVIDENCE_LIMIT = 25;
 const SIGNAL_SAMPLE_LIMIT = 500;
+const COMMAND_TIMEOUT_MS = 6_000;
+const CACHE_TTL_MS = 30_000;
+
+const execFileAsync = promisify(execFile);
+let cache: { ts: number; data: Awaited<ReturnType<typeof buildSecurityData>> } | null = null;
+let inFlight: Promise<Awaited<ReturnType<typeof buildSecurityData>>> | null = null;
 
 const LOCAL_HOST: SecurityHostConfig = {
   id: process.env.SECURITY_LOCAL_HOST_ID || 'prod',
@@ -148,27 +155,40 @@ export function getRegisteredHostCoverage(configuredHosts = getSecurityHosts()) 
   }));
 }
 
-function runHostCommand(host: SecurityHostConfig, command: string): string {
-  if (host.kind === 'local') return safeExec(command);
+async function runCommand(bin: string, args: string[], timeoutMs = COMMAND_TIMEOUT_MS): Promise<string> {
+  try {
+    const { stdout, stderr } = await execFileAsync(bin, args, {
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      maxBuffer: 1024 * 1024,
+    });
+    return stdout || stderr || '';
+  } catch (e: unknown) {
+    const err = e as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
+    const stdout = err.stdout?.toString() || '';
+    if (stdout.trim()) return stdout;
+    const detail = [stdout, err.stderr?.toString() || '', err.message || ''].filter(Boolean).join('\n');
+    return `__SECURITY_COMMAND_ERROR__ ${detail}`;
+  }
+}
+
+function shell(command: string, timeoutMs = COMMAND_TIMEOUT_MS) {
+  return runCommand('sh', ['-lc', command], timeoutMs);
+}
+
+async function runHostCommand(host: SecurityHostConfig, command: string): Promise<string> {
+  if (host.kind === 'local') return shell(command);
   if (!host.host) return '';
 
   const args = [
     '-o', 'BatchMode=yes',
-    '-o', 'ConnectTimeout=5',
+    '-o', 'ConnectTimeout=3',
     '-p', host.port || '22',
   ];
   if (host.key) args.push('-i', host.key);
   args.push(`${host.user || 'root'}@${host.host}`, `bash -lc ${escapeShell(command)}`);
 
-  try {
-    return execFileSync('ssh', args, { encoding: 'utf8', timeout: 12_000, stdio: ['ignore', 'pipe', 'pipe'] });
-  } catch (e: unknown) {
-    const err = e as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
-    const stdout = err.stdout?.toString() || '';
-    if (stdout.trim()) return stdout;
-    const detail = [err.stdout?.toString() || '', err.stderr?.toString() || '', err.message || ''].filter(Boolean).join('\n');
-    return `__SECURITY_COMMAND_ERROR__ ${detail}`;
-  }
+  return runCommand('ssh', args);
 }
 
 function tsFromSyslog(prefix: string): string {
@@ -301,7 +321,7 @@ function parseFail2Ban(raw: string): Fail2BanState {
 }
 
 async function readLocalFail2Ban() {
-  const client = safeExec('fail2ban-client status sshd 2>/dev/null || fail2ban-client status ssh 2>/dev/null || true');
+  const client = await shell('fail2ban-client status sshd 2>/dev/null || fail2ban-client status ssh 2>/dev/null || true');
   if (/Status for the jail|Currently banned|Total failed/i.test(client)) return client;
 
   const log = await readFirstExisting(['/host-logs/fail2ban.log', '/var/log/fail2ban.log']);
@@ -318,7 +338,7 @@ function commandFailed(raw: string) {
 
 async function readLocalAuth() {
   const file = await readFirstExisting(['/host-logs/auth.log', '/var/log/auth.log']);
-  return file || safeExec('journalctl -u ssh -u sshd --since "24 hours ago" --no-pager 2>/dev/null');
+  return file || shell('journalctl -u ssh -u sshd --since "24 hours ago" --no-pager 2>/dev/null');
 }
 
 async function readLocalNginx() {
@@ -332,7 +352,7 @@ async function readLocalNginxError() {
 async function readLocalFirewall() {
   const file = await readFirstExisting(['/host-logs/kern.log', '/host-logs/syslog', '/var/log/kern.log', '/var/log/syslog']);
   if (file) return file.split('\n').filter((line) => line.includes('UFW BLOCK')).join('\n');
-  return safeExec(`tmp=$(mktemp); journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" > "$tmp" || true; printf "__FIREWALL_TOTAL__ %s\\n" "$(wc -l < "$tmp" | tr -d " ")"; tail -n ${FIREWALL_SAMPLE_LIMIT} "$tmp"; rm -f "$tmp"`);
+  return shell(`tmp=$(mktemp); journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" > "$tmp" || true; printf "__FIREWALL_TOTAL__ %s\\n" "$(wc -l < "$tmp" | tr -d " ")"; tail -n ${FIREWALL_SAMPLE_LIMIT} "$tmp"; rm -f "$tmp"`);
 }
 
 async function readLocalKernelIssues() {
@@ -344,7 +364,7 @@ async function readLocalKernelIssues() {
       .slice(-SIGNAL_SAMPLE_LIMIT)
       .join('\n');
   }
-  return safeExec(`journalctl -k -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`);
+  return shell(`journalctl -k -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`);
 }
 
 async function readLocalSystemIssues() {
@@ -355,8 +375,8 @@ async function readLocalSystemIssues() {
         .filter((line) => /(systemd|kernel|docker|containerd|nginx|fail2ban|cron|sudo).*?(error|fail|warn|critical|denied|timeout|unreachable)/i.test(line))
         .slice(-SIGNAL_SAMPLE_LIMIT)
         .join('\n')
-    : safeExec(`journalctl -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`);
-  const failedUnits = safeExec("systemctl --failed --no-legend --plain 2>/dev/null | sed 's/^/__FAILED_UNIT__ /' || true");
+    : await shell(`journalctl -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`);
+  const failedUnits = await shell("systemctl --failed --no-legend --plain 2>/dev/null | sed 's/^/__FAILED_UNIT__ /' || true");
   return [syslog, failedUnits].filter(Boolean).join('\n');
 }
 
@@ -409,27 +429,29 @@ function formatSignal(event: HostSignalEvent) {
 async function collectHost(host: SecurityHostConfig) {
   const checkedAt = new Date().toISOString();
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  const authRaw = host.kind === 'local'
-    ? await readLocalAuth()
-    : runHostCommand(host, 'journalctl -u ssh -u sshd --since "24 hours ago" --no-pager 2>/dev/null || tail -n 2000 /var/log/auth.log 2>/dev/null');
-  const nginxRaw = host.kind === 'local'
-    ? await readLocalNginx()
-    : runHostCommand(host, 'tail -n 1000 /var/log/nginx/access.log /var/log/nginx/*access.log 2>/dev/null');
-  const nginxErrorRaw = host.kind === 'local'
-    ? await readLocalNginxError()
-    : runHostCommand(host, `tail -n ${SIGNAL_SAMPLE_LIMIT} /var/log/nginx/error.log /var/log/nginx/*error.log 2>/dev/null`);
-  const firewallRaw = host.kind === 'local'
-    ? await readLocalFirewall()
-    : runHostCommand(host, `tmp=$(mktemp); journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" > "$tmp" || true; printf "__FIREWALL_TOTAL__ %s\\n" "$(wc -l < "$tmp" | tr -d " ")"; tail -n ${FIREWALL_SAMPLE_LIMIT} "$tmp"; rm -f "$tmp"`);
-  const fail2banRaw = host.kind === 'local'
-    ? await readLocalFail2Ban()
-    : runHostCommand(host, 'fail2ban-client status sshd 2>/dev/null || fail2ban-client status ssh 2>/dev/null || true');
-  const kernelRaw = host.kind === 'local'
-    ? await readLocalKernelIssues()
-    : runHostCommand(host, `journalctl -k -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`);
-  const systemRaw = host.kind === 'local'
-    ? await readLocalSystemIssues()
-    : runHostCommand(host, `journalctl -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}; systemctl --failed --no-legend --plain 2>/dev/null | sed 's/^/__FAILED_UNIT__ /' || true`);
+  const [authRaw, nginxRaw, nginxErrorRaw, firewallRaw, fail2banRaw, kernelRaw, systemRaw] = await Promise.all([
+    host.kind === 'local'
+      ? readLocalAuth()
+      : runHostCommand(host, 'journalctl -u ssh -u sshd --since "24 hours ago" --no-pager 2>/dev/null || tail -n 2000 /var/log/auth.log 2>/dev/null'),
+    host.kind === 'local'
+      ? readLocalNginx()
+      : runHostCommand(host, 'tail -n 1000 /var/log/nginx/access.log /var/log/nginx/*access.log 2>/dev/null'),
+    host.kind === 'local'
+      ? readLocalNginxError()
+      : runHostCommand(host, `tail -n ${SIGNAL_SAMPLE_LIMIT} /var/log/nginx/error.log /var/log/nginx/*error.log 2>/dev/null`),
+    host.kind === 'local'
+      ? readLocalFirewall()
+      : runHostCommand(host, `tmp=$(mktemp); journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" > "$tmp" || true; printf "__FIREWALL_TOTAL__ %s\\n" "$(wc -l < "$tmp" | tr -d " ")"; tail -n ${FIREWALL_SAMPLE_LIMIT} "$tmp"; rm -f "$tmp"`),
+    host.kind === 'local'
+      ? readLocalFail2Ban()
+      : runHostCommand(host, 'fail2ban-client status sshd 2>/dev/null || fail2ban-client status ssh 2>/dev/null || true'),
+    host.kind === 'local'
+      ? readLocalKernelIssues()
+      : runHostCommand(host, `journalctl -k -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}`),
+    host.kind === 'local'
+      ? readLocalSystemIssues()
+      : runHostCommand(host, `journalctl -p warning..alert --since "24 hours ago" --no-pager 2>/dev/null | tail -n ${SIGNAL_SAMPLE_LIMIT}; systemctl --failed --no-legend --plain 2>/dev/null | sed 's/^/__FAILED_UNIT__ /' || true`),
+  ]);
 
   const auth = authRaw.split('\n').map((line) => parseAuthLine(line, host.id)).filter((event): event is AuthEvent => Boolean(event)).filter((event) => +new Date(event.ts) >= cutoff);
   const nginx = nginxRaw.split('\n').map((line) => parseNginxLine(line, host.id)).filter((event): event is WebEvent => Boolean(event)).filter((event) => +new Date(event.ts) >= cutoff);
@@ -472,7 +494,7 @@ async function collectHost(host: SecurityHostConfig) {
   return { host: status, auth, nginx, nginxError, firewall, firewallTotal, firewallSampled: firewallTotal > firewall.length, fail2ban, kernel, system };
 }
 
-export async function collectSecurityData() {
+async function buildSecurityData() {
   const checkedAt = new Date().toISOString();
   const hosts = getSecurityHosts();
   const results = await Promise.all(hosts.map(collectHost));
@@ -566,4 +588,16 @@ export async function collectSecurityData() {
         .map((event) => event.line),
     },
   };
+}
+
+export async function collectSecurityData() {
+  if (cache && Date.now() - cache.ts < CACHE_TTL_MS) return cache.data;
+  if (inFlight) return inFlight;
+  inFlight = buildSecurityData()
+    .then((data) => {
+      cache = { ts: Date.now(), data };
+      return data;
+    })
+    .finally(() => { inFlight = null; });
+  return inFlight;
 }
