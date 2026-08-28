@@ -108,7 +108,7 @@ export async function GET(req: Request) {
     const system = getSystemDefinition('bazza');
     if (!system) throw new Error('Bazza is not registered');
 
-    const health = await probeSystemHealth(system);
+    const health = await probeSystemHealth({ ...system, timeoutMs: 1_000 });
     if (!health.ok) throw new Error(health.error || 'Bazza health probe failed');
 
     let machine: any = null;

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readFirstExisting, runRemote, safeExec } from '../_security-logs';
+import { runRemoteAsync, safeExecAsync, tailFirstExisting } from '../_security-logs';
 import { requireSessionAuth } from '../../_session-auth';
 
 type Event = { ts: string; src: string; dst: string; dpt: string; proto: string };
@@ -22,11 +22,12 @@ export async function GET(req: Request) {
   try {
     const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
       if (host === 'bazza') {
-        let raw = await readFirstExisting(['/host-logs/kern.log', '/var/log/kern.log']);
-        if (!raw) raw = safeExec('journalctl -k --no-pager -n 4000 2>/dev/null');
+        let raw = await tailFirstExisting(['/host-logs/kern.log', '/var/log/kern.log'], 4000);
+        if (!raw) raw = await safeExecAsync('journalctl -k --no-pager -n 4000 2>/dev/null');
         return raw;
       }
-      return runRemote('journalctl -k --since "1 hour ago" --no-pager 2>/dev/null | grep "UFW BLOCK"');
+      if (process.env.SECURITY_INCLUDE_LEGACY_PROD_SSH !== '1') return '';
+      return runRemoteAsync('journalctl -k --since "1 hour ago" --no-pager 2>/dev/null | grep "UFW BLOCK"', 2500);
     };
 
     const [bazzaRaw, prodRaw] = await Promise.all([fetchRaw('bazza'), fetchRaw('prod')]);

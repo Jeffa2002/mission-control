@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readdirSync } from 'node:fs';
-import { readFirstExisting, readGlobbed, runRemote } from '../_security-logs';
+import { readGlobbed, runRemoteAsync, tailFirstExisting } from '../_security-logs';
 import { requireSessionAuth } from '../../_session-auth';
 
 type Item = { ts: string; ip: string; method: string; path: string; status: number; bytes: number };
@@ -20,14 +19,15 @@ export async function GET(req: Request) {
   try {
     const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
       if (host === 'bazza') {
-        let raw = await readFirstExisting(['/host-logs/nginx/access.log', '/var/log/nginx/access.log']);
+        let raw = await tailFirstExisting(['/host-logs/nginx/access.log', '/var/log/nginx/access.log'], 1000);
         if (!raw) {
           const patterns = ['/workspace-data/*/logs/nginx*.log', '/host-logs/**/nginx*.log', '/var/log/**/nginx*.log'];
           raw = await readGlobbed(patterns);
         }
         return raw;
       }
-      return runRemote('tail -200 /var/log/nginx/access.log 2>/dev/null');
+      if (process.env.SECURITY_INCLUDE_LEGACY_PROD_SSH !== '1') return '';
+      return runRemoteAsync('tail -200 /var/log/nginx/access.log 2>/dev/null', 2500);
     };
 
     const [bazzaRaw, prodRaw] = await Promise.all([fetchRaw('bazza'), fetchRaw('prod')]);

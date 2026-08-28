@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireSessionAuth } from '../_session-auth';
 
 const PROM = 'http://mission-prometheus:9090';
-const TIMEOUT_MS = 3_000;
+const TIMEOUT_MS = 1_000;
 
 export async function GET(req: Request) {
   const authErr = requireSessionAuth(req);

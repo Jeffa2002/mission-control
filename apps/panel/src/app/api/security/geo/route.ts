@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 import { NextResponse } from 'next/server';
 import { requireSessionAuth } from '../../_session-auth';
-import { runRemote, safeExec } from '../_security-logs';
+import { runRemoteAsync, safeExecAsync } from '../_security-logs';
 
 type Country = { code: string; name: string; count: number; active?: boolean };
 
@@ -36,13 +36,12 @@ export async function GET(req: Request) {
     // This accepts both families without mistaking timestamps for IPv6.
     const extract = "sed -nE 's/.* from ([0-9A-Fa-f:.]+)( port [0-9]+)?.*/\\1/p'";
     const authScript = [
-      'grep -E "Failed password|Invalid user" /host-logs/auth.log 2>/dev/null',
+      'tail -n 2000 /host-logs/auth.log 2>/dev/null | grep -E "Failed password|Invalid user"',
       extract,
       'sort | uniq -c | sort -rn | head -30',
     ].join(' | ');
 
     const ipCounts = new Map<string, number>();
-    addCounts(safeExec(authScript), ipCounts);
 
     // Security alerts are the primary prod signal and include both IPv4 and IPv6.
     // Count bounded recent source references so the map reflects what operators see.
@@ -51,7 +50,12 @@ export async function GET(req: Request) {
       "sed -nE 's/^.*Non-AU repeat: ([0-9A-Fa-f:.]+).*/\\1/p'",
       'sort | uniq -c | sort -rn | head -30',
     ].join(' | ');
-    addCounts(safeExec(alertScript), ipCounts);
+    const [authRaw, alertRaw] = await Promise.all([
+      safeExecAsync(authScript),
+      safeExecAsync(alertScript),
+    ]);
+    addCounts(authRaw, ipCounts);
+    addCounts(alertRaw, ipCounts);
 
     if (ipCounts.size === 0) {
       return NextResponse.json({ countries: [], total: 0, unknownCount: 0, topCountries: [], activeCountries: [] });
@@ -60,7 +64,7 @@ export async function GET(req: Request) {
     // isIP validation above makes this fixed-character list safe to pass to the shell.
     const ipList = [...ipCounts.keys()].join(' ');
     const geoScript = `for ip in ${ipList}; do case "$ip" in *:*) lookup=geoiplookup6;; *) lookup=geoiplookup;; esac; echo "$ip $($lookup "$ip" 2>/dev/null | head -1)"; done`;
-    const geoRaw = safeExec(geoScript).trim() || runRemote(geoScript).trim();
+    const geoRaw = (await safeExecAsync(geoScript)).trim() || (await runRemoteAsync(geoScript)).trim();
 
     const geo = new Map<string, Country>();
     let unknownCount = 0;
