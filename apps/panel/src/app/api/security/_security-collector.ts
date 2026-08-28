@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { escapeShell, readFirstExisting } from './_security-logs';
+import { escapeShell, readFirstExisting, tailFirstExisting } from './_security-logs';
 import { SYSTEM_REGISTRY } from '../_system-health';
 
 type SecurityHostKind = 'local' | 'ssh';
@@ -324,7 +324,7 @@ async function readLocalFail2Ban() {
   const client = await shell('fail2ban-client status sshd 2>/dev/null || fail2ban-client status ssh 2>/dev/null || true');
   if (/Status for the jail|Currently banned|Total failed/i.test(client)) return client;
 
-  const log = await readFirstExisting(['/host-logs/fail2ban.log', '/var/log/fail2ban.log']);
+  const log = await tailFirstExisting(['/host-logs/fail2ban.log', '/var/log/fail2ban.log'], 2000);
   return log
     .split('\n')
     .filter((line) => line.includes('fail2ban') && /\[(?:sshd|ssh)\]/.test(line))
@@ -337,26 +337,26 @@ function commandFailed(raw: string) {
 }
 
 async function readLocalAuth() {
-  const file = await readFirstExisting(['/host-logs/auth.log', '/var/log/auth.log']);
+  const file = await tailFirstExisting(['/host-logs/auth.log', '/var/log/auth.log'], 4000);
   return file || shell('journalctl -u ssh -u sshd --since "24 hours ago" --no-pager 2>/dev/null');
 }
 
 async function readLocalNginx() {
-  return await readFirstExisting(['/host-logs/nginx/access.log', '/var/log/nginx/access.log']);
+  return await tailFirstExisting(['/host-logs/nginx/access.log', '/var/log/nginx/access.log'], 2000);
 }
 
 async function readLocalNginxError() {
-  return await readFirstExisting(['/host-logs/nginx/error.log', '/var/log/nginx/error.log']);
+  return await tailFirstExisting(['/host-logs/nginx/error.log', '/var/log/nginx/error.log'], SIGNAL_SAMPLE_LIMIT);
 }
 
 async function readLocalFirewall() {
-  const file = await readFirstExisting(['/host-logs/kern.log', '/host-logs/syslog', '/var/log/kern.log', '/var/log/syslog']);
+  const file = await tailFirstExisting(['/host-logs/kern.log', '/host-logs/syslog', '/var/log/kern.log', '/var/log/syslog'], 5000);
   if (file) return file.split('\n').filter((line) => line.includes('UFW BLOCK')).join('\n');
   return shell(`tmp=$(mktemp); journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep "UFW BLOCK" > "$tmp" || true; printf "__FIREWALL_TOTAL__ %s\\n" "$(wc -l < "$tmp" | tr -d " ")"; tail -n ${FIREWALL_SAMPLE_LIMIT} "$tmp"; rm -f "$tmp"`);
 }
 
 async function readLocalKernelIssues() {
-  const file = await readFirstExisting(['/host-logs/kern.log', '/host-logs/syslog', '/var/log/kern.log', '/var/log/syslog']);
+  const file = await tailFirstExisting(['/host-logs/kern.log', '/host-logs/syslog', '/var/log/kern.log', '/var/log/syslog'], 5000);
   if (file) {
     return file
       .split('\n')
@@ -368,7 +368,7 @@ async function readLocalKernelIssues() {
 }
 
 async function readLocalSystemIssues() {
-  const file = await readFirstExisting(['/host-logs/syslog', '/var/log/syslog']);
+  const file = await tailFirstExisting(['/host-logs/syslog', '/var/log/syslog'], 5000);
   const syslog = file
     ? file
         .split('\n')
