@@ -2,7 +2,7 @@
  * GET /api/effectx
  *
  * Health checks for EffectX-facing sites and apps running behind prod nginx.
- * Each app is checked via HTTP with a 4s timeout.
+ * Each app is checked via HTTP with a short dashboard timeout.
  * SSL cert expiry is checked via TLS socket connection.
  */
 
@@ -10,7 +10,8 @@ import { NextResponse } from 'next/server';
 import * as tls from 'node:tls';
 import { requireSessionAuth } from '../_session-auth';
 
-const TIMEOUT_MS = 4_000;
+const HTTP_TIMEOUT_MS = 1_500;
+const TLS_TIMEOUT_MS = 1_500;
 
 const APPS = [
   {
@@ -246,7 +247,7 @@ interface AppHealth {
 
 async function checkSsl(hostname: string, port = 443): Promise<SslInfo | null> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), 5_000);
+    const timer = setTimeout(() => resolve(null), TLS_TIMEOUT_MS);
     try {
       const socket = tls.connect({ host: hostname, port, servername: hostname, rejectUnauthorized: false }, () => {
         clearTimeout(timer);
@@ -280,15 +281,11 @@ async function checkApp(app: typeof APPS[number]): Promise<AppHealth> {
   const [httpResult, ssl] = await Promise.all([
     (async () => {
       try {
-        const res = await Promise.race([
-          fetch(`${'probeUrl' in app ? app.probeUrl : app.url}${app.healthPath}`, {
-            cache: 'no-store',
-            headers: { 'User-Agent': 'MissionControl/1.0 HealthCheck' },
-          }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS),
-          ),
-        ]);
+        const res = await fetch(`${'probeUrl' in app ? app.probeUrl : app.url}${app.healthPath}`, {
+          cache: 'no-store',
+          headers: { 'User-Agent': 'MissionControl/1.0 HealthCheck' },
+          signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        });
         const latencyMs = Date.now() - start;
         const expectedStatus = 'healthyStatusCodes' in app && (app.healthyStatusCodes as readonly number[]).includes(res.status);
         // 2xx/3xx and explicitly configured access-control responses are healthy.
