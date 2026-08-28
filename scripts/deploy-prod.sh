@@ -41,6 +41,8 @@ RSYNC_EXCLUDES=(
   --exclude iperf-results.json
   --exclude network-history.db
   --exclude network-history.db-journal
+  --exclude network-history.db-shm
+  --exclude network-history.db-wal
   --exclude security-data.json
 )
 

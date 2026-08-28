@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readFirstExisting, runRemote, safeExec } from '../_security-logs';
+import { runRemoteAsync, safeExecAsync, tailFirstExisting } from '../_security-logs';
 import { requireSessionAuth } from '../../_session-auth';
 
 type Attack = { ts: string; ip: string; user: string };
@@ -31,11 +31,12 @@ export async function GET(req: Request) {
   try {
     const fetchRaw = async (host: 'bazza' | 'prod'): Promise<string> => {
       if (host === 'bazza') {
-        let raw = await readFirstExisting(['/host-logs/auth.log', '/var/log/auth.log']);
-        if (!raw) raw = safeExec("journalctl -u ssh -u sshd --no-pager -n 2000 2>/dev/null");
+        let raw = await tailFirstExisting(['/host-logs/auth.log', '/var/log/auth.log'], 2000);
+        if (!raw) raw = await safeExecAsync("journalctl -u ssh -u sshd --no-pager -n 2000 2>/dev/null");
         return raw;
       }
-      return runRemote('journalctl _SYSTEMD_UNIT=ssh.service --since "1 hour ago" --no-pager 2>/dev/null | grep -i "failed password\\|invalid user"');
+      if (process.env.SECURITY_INCLUDE_LEGACY_PROD_SSH !== '1') return '';
+      return runRemoteAsync('journalctl _SYSTEMD_UNIT=ssh.service --since "1 hour ago" --no-pager 2>/dev/null | grep -i "failed password\\|invalid user"', 2500);
     };
 
     const parseHost = async (host: 'bazza' | 'prod'): Promise<LabeledAttack[]> => {

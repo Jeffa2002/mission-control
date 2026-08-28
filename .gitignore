@@ -12,5 +12,7 @@ agent-status.json
 iperf-results.json
 network-history.db
 network-history.db-journal
+network-history.db-shm
+network-history.db-wal
 apps/panel/tsconfig.tsbuildinfo
 __pycache__/
