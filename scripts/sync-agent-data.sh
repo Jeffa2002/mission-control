@@ -154,7 +154,7 @@ PINGEOF
 fi
 
 # ── 6c. Snapshot and atomically sync network-history.db to prod ──────────────
-if [ -f "$DB" ] && [ $((10#$(date +%M) % 10)) -eq 0 ]; then
+if [ -f "$DB" ]; then
   SNAPSHOT=$(mktemp /tmp/network-history.XXXXXX.db)
   python3 - "$DB" "$SNAPSHOT" <<'SNAPEOF'
 import os, sqlite3, sys

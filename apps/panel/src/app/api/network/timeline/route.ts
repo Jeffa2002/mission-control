@@ -1,13 +1,6 @@
 import { NextResponse } from 'next/server';
-import { DatabaseSync } from 'node:sqlite';
 import { requireSessionAuth } from '../../_session-auth';
-
-const DB_PATHS = [
-  process.env.NETWORK_HISTORY_DB,
-  '/workspace/mission-control/network-history.db',
-  '/workspace-data/mission-control/network-history.db',
-  '/agent-data/network-history.db',
-].filter(Boolean) as string[];
+import { NETWORK_DB_PATHS, openNetworkDb } from '../_network-db';
 
 const RANGES: Record<string, number> = { day: 1, week: 7, month: 31, year: 366 };
 const LABELS: Record<string, string> = {
@@ -16,10 +9,10 @@ const LABELS: Record<string, string> = {
 };
 
 function query(sql: string) {
-  for (const path of DB_PATHS) {
-    let db: DatabaseSync | null = null;
+  for (const path of NETWORK_DB_PATHS) {
+    let db: ReturnType<typeof openNetworkDb> | null = null;
     try {
-      db = new DatabaseSync(path, { readOnly: true });
+      db = openNetworkDb(path);
       return db.prepare(sql).all() as Array<Record<string, unknown>>;
     } catch {}
     finally { try { db?.close(); } catch {} }

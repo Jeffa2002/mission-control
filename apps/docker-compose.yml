@@ -9,7 +9,7 @@ services:
       - PORT=3020
       - HOSTNAME=0.0.0.0
       - IPERF_RESULTS_FILE=/workspace/mission-control/iperf-results.json
-      - NETWORK_HISTORY_DB=/workspace/mission-control/network-history.db
+      - NETWORK_HISTORY_DB=/agent-data/network-history.db
       - NETWORK_CACHE_FILE=/tmp/mission-network-cache.json
       - AGENT_TELEMETRY_FILE=/workspace/mission-control/runtime/agent-telemetry.json
       - USAGE_TELEMETRY_FILE=/workspace/mission-control/runtime/token-usage.json

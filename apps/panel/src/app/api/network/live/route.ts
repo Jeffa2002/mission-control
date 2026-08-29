@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { DatabaseSync } from 'node:sqlite';
 import { requireSessionAuth } from '../../_session-auth';
+import { NETWORK_DB_PATHS, openNetworkDb } from '../_network-db';
 
 /**
  * GET /api/network/live
@@ -19,20 +19,13 @@ import { requireSessionAuth } from '../../_session-auth';
  *   }
  */
 
-const DB_PATHS = [
-  process.env.NETWORK_HISTORY_DB,
-  '/workspace/mission-control/network-history.db',
-  '/workspace-data/mission-control/network-history.db',
-  '/agent-data/network-history.db',
-].filter(Boolean) as string[];
-
-const STALE_MS = 90_000; // samples older than this are flagged stale
+const STALE_MS = 150_000; // collector and prod sync both run every minute
 
 function query(sql: string): Array<Record<string, unknown>> {
-  for (const path of DB_PATHS) {
-    let db: DatabaseSync | null = null;
+  for (const path of NETWORK_DB_PATHS) {
+    let db: ReturnType<typeof openNetworkDb> | null = null;
     try {
-      db = new DatabaseSync(path, { readOnly: true });
+      db = openNetworkDb(path);
       return db.prepare(sql).all() as Array<Record<string, unknown>>;
     } catch {
       /* try next path */
