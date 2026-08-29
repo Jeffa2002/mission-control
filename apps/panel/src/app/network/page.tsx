@@ -672,11 +672,88 @@ function fmtMbps(v?: number | null) {
   return v >= 1000 ? `${(v / 1000).toFixed(1)}Gbps` : `${Math.round(v)}Mbps`;
 }
 
+function relativeAge(iso?: string | null) {
+  if (!iso) return 'unknown';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return 'unknown';
+  const seconds = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
 function routeQuality(link: LinkData) {
   if (!link.active) return { label: 'Down', status: 'critical', score: 0, color: 'var(--sev-critical)' };
   if ((link.packetLoss ?? 0) > 0 || (link.latencyMs ?? 999) > 50) return { label: 'Poor', status: 'critical', score: 42, color: 'var(--sev-critical)' };
   if ((link.latencyMs ?? 999) > 20 || (link.iperf?.retransmits ?? 0) > 0) return { label: 'Watch', status: 'warning', score: 76, color: 'var(--sev-warning)' };
   return { label: 'Excellent', status: 'healthy', score: 98, color: 'var(--sev-healthy)' };
+}
+
+function routeScore(link: any) {
+  if (!link.active) return 1000;
+  return (link.packetLoss ?? 0) * 8
+    + Math.min(250, link.latencyMs ?? 250)
+    + Math.min(180, (link.iperf?.retransmits ?? 0) / 100)
+    - Math.min(80, Math.max(link.iperf?.mbpsSend ?? 0, link.iperf?.mbpsRecv ?? 0) / 10);
+}
+
+function buildInsights(nodes: any[], links: any[], live: any, liveFresh: boolean, data: any) {
+  const slowest = [...nodes].filter(n => n.latencyMs !== null).sort((a, b) => (b.latencyMs ?? 0) - (a.latencyMs ?? 0))[0];
+  const noisiest = [...nodes].filter(n => (n.iperf?.retransmits ?? 0) > 0).sort((a, b) => (b.iperf?.retransmits ?? 0) - (a.iperf?.retransmits ?? 0))[0];
+  const strongest = [...nodes].filter(n => n.iperf).sort((a, b) =>
+    Math.max(b.iperf?.mbpsSend ?? 0, b.iperf?.mbpsRecv ?? 0) - Math.max(a.iperf?.mbpsSend ?? 0, a.iperf?.mbpsRecv ?? 0))[0];
+  const unavailable = nodes.filter(n => n.status === 'offline');
+  const watchLinks = links.filter(l => routeQuality(l).status !== 'healthy').length;
+  const hasLiveRows = Boolean(live?.nodes && Object.keys(live.nodes).length);
+
+  const items = [];
+  if (unavailable.length) {
+    items.push({
+      tone: 'critical',
+      title: `${unavailable.length} node${unavailable.length === 1 ? '' : 's'} unreachable`,
+      body: unavailable.map(n => n.label).join(', '),
+    });
+  } else if (nodes.length) {
+    items.push({ tone: 'healthy', title: 'All monitored nodes are reachable', body: `${nodes.length} tailnet hosts replied in the latest scan.` });
+  }
+  if (data?.stale) {
+    items.push({ tone: 'warning', title: 'Reachability cache is stale', body: `Latest ping snapshot is ${relativeAge(data.measuredAt)}; refresh is running in the background.` });
+  }
+  if (!liveFresh) {
+    items.push({
+      tone: hasLiveRows ? 'warning' : 'info',
+      title: hasLiveRows ? 'Live flow feed stale' : 'Live flow feed waiting',
+      body: hasLiveRows ? `Newest byte counter sample is ${relativeAge(live?.measuredAt)}.` : 'Falling back to recent iperf capacity snapshots.',
+    });
+  }
+  if (noisiest) {
+    items.push({
+      tone: noisiest.iperf.retransmits > 500 ? 'warning' : 'info',
+      title: `${noisiest.label} has retransmits`,
+      body: `${noisiest.iperf.retransmits.toLocaleString()} retransmits in the latest retained iperf sample.`,
+    });
+  }
+  if (slowest) {
+    items.push({
+      tone: (slowest.latencyMs ?? 0) > 50 ? 'warning' : 'info',
+      title: `${slowest.label} is the slowest RTT`,
+      body: `${fmtMs(slowest.latencyMs)} from the prod-origin probe.`,
+    });
+  }
+  if (strongest) {
+    items.push({
+      tone: 'healthy',
+      title: `${strongest.label} has the strongest capacity`,
+      body: `${fmtMbps(Math.max(strongest.iperf?.mbpsSend ?? 0, strongest.iperf?.mbpsRecv ?? 0))} recent iperf peak.`,
+    });
+  }
+  if (watchLinks) {
+    items.push({ tone: 'warning', title: `${watchLinks} route${watchLinks === 1 ? '' : 's'} on watch`, body: 'Route cards rank latency, packet loss, capacity, and retransmits together.' });
+  }
+  return items.slice(0, 6);
 }
 
 function StatTile({ label, value, hint, tone = 'info' }: { label: string; value: string; hint: string; tone?: 'healthy' | 'warning' | 'critical' | 'info' }) {
@@ -722,6 +799,83 @@ function GlassPanel({ children, style = {} }: { children: React.ReactNode; style
     }}>
       {children}
     </div>
+  );
+}
+
+function InsightDeck({ nodes, links, live, liveFresh, data, networkTone }: any) {
+  const insights = buildInsights(nodes, links, live, liveFresh, data);
+  const colors: Record<string, string> = {
+    healthy: 'var(--sev-healthy)',
+    warning: 'var(--sev-warning)',
+    critical: 'var(--sev-critical)',
+    info: 'var(--sev-info)',
+  };
+  return (
+    <GlassPanel style={{ padding: 16 }}>
+      <PanelTitle
+        eyebrow="Signal Intelligence"
+        title={networkTone === 'healthy' ? 'What is healthy, stale, or noisy' : 'What needs attention now'}
+        action={<StatusBadge label={liveFresh ? 'live flow' : 'snapshot mode'} status={liveFresh ? 'healthy' : 'info'} />}
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+        {insights.map((item: any) => {
+          const color = colors[item.tone] ?? 'var(--sev-info)';
+          return (
+            <div key={`${item.title}-${item.body}`} style={{
+              display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: 10,
+              minHeight: 76, padding: 12, borderRadius: 12,
+              border: `1px solid color-mix(in srgb, ${color} 17%, transparent)`,
+              background: `linear-gradient(145deg, color-mix(in srgb, ${color} 7%, transparent), rgba(255,255,255,0.025))`,
+            }}>
+              <span style={{ width: 9, height: 9, marginTop: 4, borderRadius: 99, background: color, boxShadow: `0 0 16px ${color}` }} />
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', color: '#F3F7FF', fontSize: 12, fontWeight: 900 }}>{item.title}</span>
+                <span style={{ display: 'block', marginTop: 4, color: '#8B96AA', fontSize: 11, lineHeight: 1.4 }}>{item.body}</span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </GlassPanel>
+  );
+}
+
+function PriorityRoutes({ links, nodeMap, selectedLink, setSelectedLink, setSelectedNode }: any) {
+  const ranked = [...(links || [])]
+    .sort((a, b) => routeScore(b) - routeScore(a))
+    .slice(0, 5);
+  return (
+    <GlassPanel style={{ padding: 14 }}>
+      <PanelTitle eyebrow="Priority Routes" title="Where I would look first" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {ranked.map((link: any, index: number) => {
+          const key = `${link.from}-${link.to}`;
+          const quality = routeQuality(link);
+          const mbps = Math.max(link.iperf?.mbpsSend ?? 0, link.iperf?.mbpsRecv ?? 0);
+          return (
+            <button key={key} type="button" onClick={() => { setSelectedLink(key); setSelectedNode(null); }} style={{
+              width: '100%', display: 'grid', gridTemplateColumns: '22px minmax(0,1fr) auto',
+              alignItems: 'center', gap: 9, padding: '9px 10px', borderRadius: 11,
+              border: selectedLink === key ? '1px solid rgba(103,213,255,0.34)' : `1px solid color-mix(in srgb, ${quality.color} 14%, transparent)`,
+              background: selectedLink === key ? 'rgba(103,213,255,0.10)' : 'rgba(255,255,255,0.025)',
+              color: 'inherit', cursor: 'pointer', textAlign: 'left',
+            }}>
+              <span style={{ width: 22, height: 22, borderRadius: 99, display: 'grid', placeItems: 'center', color: quality.color, background: `color-mix(in srgb, ${quality.color} 10%, transparent)`, fontSize: 10, fontWeight: 950 }}>{index + 1}</span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 900, color: '#F3F7FF', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {nodeMap[link.from]?.label ?? link.from} → {nodeMap[link.to]?.label ?? link.to}
+                </span>
+                <span style={{ display: 'block', marginTop: 2, fontSize: 10, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fmtMs(link.latencyMs)} · {fmtMbps(mbps)} · {(link.iperf?.retransmits ?? 0).toLocaleString()} retransmits
+                </span>
+              </span>
+              <span style={{ color: quality.color, fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>{quality.label}</span>
+            </button>
+          );
+        })}
+        {!ranked.length && <div style={{ fontSize: 11, color: '#64748B', padding: '8px 2px' }}>No route data available.</div>}
+      </div>
+    </GlassPanel>
   );
 }
 
@@ -879,6 +1033,10 @@ function EventStrip({ nodes, links, measuredAt }: { nodes: NodeData[]; links: Li
     ...nodes
       .filter(n => n.status !== 'online')
       .map(n => ({ tone: n.status === 'degraded' ? 'var(--sev-warning)' : 'var(--sev-critical)', title: `${n.label} ${n.status}`, body: n.latencyMs === null ? 'No ping response from latest scan.' : `RTT is ${fmtMs(n.latencyMs)}.` })),
+    ...nodes
+      .filter(n => (n.iperf?.retransmits ?? 0) > 0)
+      .sort((a, b) => (b.iperf?.retransmits ?? 0) - (a.iperf?.retransmits ?? 0))
+      .map(n => ({ tone: (n.iperf?.retransmits ?? 0) > 500 ? 'var(--sev-warning)' : 'var(--sev-info)', title: `${n.label} retransmits`, body: `${(n.iperf?.retransmits ?? 0).toLocaleString()} retransmits in latest retained capacity sample.` })),
     ...links
       .filter(l => !l.active || l.packetLoss > 0 || (l.latencyMs ?? 0) > 50)
       .map(l => ({ tone: !l.active ? 'var(--sev-critical)' : 'var(--sev-warning)', title: `${l.from} → ${l.to}`, body: !l.active ? 'One or both endpoints did not respond.' : `Average endpoint RTT is ${fmtMs(l.latencyMs)}; this is not a route measurement.` })),
@@ -1130,6 +1288,9 @@ export default function NetworkPage() {
   const avgLatency = nodes.filter(n => n.latencyMs !== null).reduce((a, n, _, arr) =>
     a + (n.latencyMs! / arr.length), 0) ?? 0;
   const bestThroughput = Math.max(0, ...nodes.map(n => Math.max(n.iperf?.mbpsSend ?? 0, n.iperf?.mbpsRecv ?? 0)));
+  const liveFlowMbps = liveFresh
+    ? Object.values(live?.nodes ?? {}).reduce((sum: number, node: any) => sum + (Number(node.mbps) || 0), 0)
+    : null;
   const bestLink = links
     .filter(l => l.active && l.latencyMs !== null)
     .sort((a, b) => (a.latencyMs ?? 999) - (b.latencyMs ?? 999))[0];
@@ -1172,12 +1333,15 @@ export default function NetworkPage() {
           </div>
         </div>
 
-        <div className="mc-network-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+        <div className="mc-network-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
           <StatTile label="Reachability" value={`${onlineCount}/${totalNodes || '—'}`} hint={`${degradedCount} degraded · ${offlineCount} offline`} tone={networkTone as any} />
           <StatTile label="Route Quality" value={`${activeLinks}/${links.length || '—'}`} hint={`${lossPct}% average packet loss`} tone={lossPct ? 'critical' : activeLinks === links.length && links.length ? 'healthy' : 'warning'} />
           <StatTile label="Avg RTT" value={avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'} hint="live ping average across reachable hosts" tone={avgLatency > 50 ? 'critical' : avgLatency > 20 ? 'warning' : 'healthy'} />
           <StatTile label="Throughput" value={fmtMbps(bestThroughput)} hint="best recent iperf stream observed" tone="info" />
+          <StatTile label="Live Flow" value={liveFlowMbps == null ? 'snapshot' : fmtMbps(liveFlowMbps)} hint={liveFresh ? `${Object.keys(live?.nodes ?? {}).length} byte-counter feeds` : 'using retained iperf fallback'} tone={liveFresh ? 'healthy' : 'info'} />
         </div>
+
+        <InsightDeck nodes={nodes} links={links} live={live} liveFresh={liveFresh} data={data} networkTone={networkTone} />
 
         <div className="mc-network-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
@@ -1304,6 +1468,7 @@ export default function NetworkPage() {
               totals={{ online: onlineCount, total: totalNodes, links: links.length, loss: lossPct, bestLink: bestLink ? `${bestLink.from}→${bestLink.to}` : '—' }}
               stateTitle={networkTone === 'healthy' ? 'Mesh operating normally' : networkState}
             />
+            <PriorityRoutes links={links} nodeMap={nodeMap} selectedLink={selectedLink} setSelectedLink={setSelectedLink} setSelectedNode={setSelectedNode} />
             <NodeStatusList nodes={nodes} selectedNode={selectedNode} setSelectedNode={setSelectedNode} setSelectedLink={setSelectedLink} />
             <GlassPanel style={{ padding: 14 }}>
               <PanelTitle eyebrow="Exposure" title="Reachability zones" />
