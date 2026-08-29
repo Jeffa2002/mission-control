@@ -383,19 +383,17 @@ function SvgLineChart({ lines, range }: { lines: LineConfig[]; range: HistoryRan
   );
 }
 
-/* ─── Live flow gauges (Tier A, Netdata-style) ────────────── */
-/* Rolling send/recv throughput bars per node. Fed by iperf snapshots today;
-   swap `nodes[].iperf` for a Tier B live bytes/sec feed without touching UI. */
+/* ─── Live flow gauges (Netdata-style) ────────────── */
+/* Rolling send/recv throughput bars per node. This panel uses only live
+   byte-counter data so iperf capacity snapshots are not mistaken for traffic. */
 function LiveFlowGauges({ nodes, onSelect, selectedNode, live }: any) {
   const lnodes = live?.nodes ?? null;
   const rows = (nodes || [])
     .map((n: any) => {
       const lv = lnodes?.[n.id];
-      // Live bytes/sec -> Mbps split across tx(send)/rx(recv); else iperf snapshot.
-      const send = lv ? +((lv.txBps * 8) / 1e6).toFixed(2) : (n.iperf?.mbpsSend ?? 0);
-      const recv = lv ? +((lv.rxBps * 8) / 1e6).toFixed(2) : (n.iperf?.mbpsRecv ?? 0);
-      // Per-server last-checked: live ts if present, else iperf measuredAt.
-      const checkedTs = lv?.ts ?? n.iperf?.measuredAt ?? null;
+      const send = lv ? +((lv.txBps * 8) / 1e6).toFixed(2) : 0;
+      const recv = lv ? +((lv.rxBps * 8) / 1e6).toFixed(2) : 0;
+      const checkedTs = lv?.ts ?? null;
       return { id: n.id, label: n.label, emoji: n.emoji, status: n.status, send, recv, checkedTs, isLive: !!lv };
     })
     .sort((a: any, b: any) => Math.max(b.send, b.recv) - Math.max(a.send, a.recv));
@@ -480,7 +478,7 @@ function LiveFlowGauges({ nodes, onSelect, selectedNode, live }: any) {
       <div style={{ marginTop: 10, fontSize: 9.5, color: '#475569', display: 'flex', gap: 12 }}>
         <span><span style={{ color: '#7CE8FF' }}>▲</span> send</span>
         <span><span style={{ color: '#A78BFA' }}>▼</span> recv</span>
-        <span style={{ marginLeft: 'auto' }}>{live ? 'live · bytes/sec' : 'iperf snapshot · hourly'} · ● checked</span>
+        <span style={{ marginLeft: 'auto' }}>{live ? 'live · bytes/sec' : 'waiting for byte counters'} · ● checked</span>
       </div>
     </div>
   );
@@ -768,7 +766,7 @@ function buildInsights(nodes: any[], links: any[], live: any, liveFresh: boolean
     items.push({
       tone: hasLiveRows ? 'warning' : 'info',
       title: hasLiveRows ? 'Live flow feed stale' : 'Live flow feed waiting',
-      body: hasLiveRows ? `Newest byte counter sample is ${relativeAge(live?.measuredAt)}.` : 'Falling back to recent iperf capacity snapshots.',
+      body: hasLiveRows ? `Newest byte counter sample is ${relativeAge(live?.measuredAt)}.` : 'No fresh byte-counter rows are available yet.',
     });
   }
   if (noisiest) {
@@ -1308,18 +1306,15 @@ export default function NetworkPage() {
 
   const nodes = data?.nodes ?? [];
   const links = data?.links ?? [];
-  // Tier B: live Mbps per node (combined rx+tx). Falls back to iperf when live is stale/absent.
+  // Live Mbps per node (combined rx+tx) from real byte counters only.
   const liveFresh = !!live && !live.stale;
   const liveMbps = (id: string): number | null => {
     if (liveFresh && live?.nodes?.[id]) return live.nodes[id].mbps;
     return null;
   };
-  // Endpoint mbps for a link = max live throughput of its two endpoints (fallback to iperf).
-  const linkMbps = (link: any): number | null => {
+  const linkLiveMbps = (link: any): number | null => {
     const l = Math.max(liveMbps(link.from) ?? 0, liveMbps(link.to) ?? 0);
-    if (l > 0) return l;
-    const ip = Math.max(link.iperf?.mbpsSend ?? 0, link.iperf?.mbpsRecv ?? 0);
-    return ip || null;
+    return l > 0 ? l : null;
   };
   const totalNodes = data?.nodes.length ?? (loading ? 0 : HISTORY_NODES.length);
   const onlineCount = nodes.filter(n => n.status === 'online').length;
@@ -1380,7 +1375,7 @@ export default function NetworkPage() {
           <StatTile label="Route Quality" value={`${activeLinks}/${links.length || '—'}`} hint={`${lossPct}% average packet loss`} tone={lossPct ? 'critical' : activeLinks === links.length && links.length ? 'healthy' : 'warning'} />
           <StatTile label="Avg RTT" value={avgLatency ? `${avgLatency.toFixed(1)}ms` : '—'} hint="live ping average across reachable hosts" tone={avgLatency > 50 ? 'critical' : avgLatency > 20 ? 'warning' : 'healthy'} />
           <StatTile label="Throughput" value={fmtMbps(bestThroughput)} hint="best recent iperf stream observed" tone="info" />
-          <StatTile label="Live Flow" value={liveFlowMbps == null ? 'snapshot' : fmtMbps(liveFlowMbps)} hint={liveFresh ? `${Object.keys(live?.nodes ?? {}).length} byte-counter feeds` : 'using retained iperf fallback'} tone={liveFresh ? 'healthy' : 'info'} />
+          <StatTile label="Live Flow" value={liveFlowMbps == null ? 'pending' : fmtMbps(liveFlowMbps)} hint={liveFresh ? `${Object.keys(live?.nodes ?? {}).length} byte-counter feeds` : 'waiting for byte-counter feed'} tone={liveFresh ? 'healthy' : 'info'} />
         </div>
 
         <InsightDeck nodes={nodes} links={links} live={live} liveFresh={liveFresh} data={data} networkTone={networkTone} />
@@ -1413,7 +1408,7 @@ export default function NetworkPage() {
               </div>
               <div style={{ position: 'absolute', right: 15, top: 12, zIndex: 4, display: 'grid', gap: 5, justifyItems: 'end', color: '#64748B', fontSize: 9, fontWeight: 850 }}>
                 <span>mesh telemetry</span>
-                <span style={{ color: liveFresh ? 'var(--sev-healthy)' : '#67D5FF' }}>{liveFresh ? 'byte-counter feed' : 'capacity snapshot'}</span>
+                <span style={{ color: liveFresh ? 'var(--sev-healthy)' : '#67D5FF' }}>{liveFresh ? 'byte-counter feed' : 'byte-counter pending'}</span>
               </div>
               <div className="mc-network-corner mc-network-corner-tl" aria-hidden="true" />
               <div className="mc-network-corner mc-network-corner-tr" aria-hidden="true" />
@@ -1484,7 +1479,7 @@ export default function NetworkPage() {
                       color={latencyColor(link.latencyMs, thresholdsForLink(link))}
                       active={link.active}
                       latencyMs={link.latencyMs}
-                      mbps={linkMbps(link)}
+                      mbps={linkLiveMbps(link)}
                       reverse={(link.direction || '').includes('←')}
                       selected={selectedLink === key}
                       onClick={() => {

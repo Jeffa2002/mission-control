@@ -9,15 +9,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import { DatabaseSync } from 'node:sqlite';
 import { requireSessionAuth } from '../../_session-auth';
-
-const DB_PATHS = [
-  process.env.NETWORK_HISTORY_DB,
-  '/workspace/mission-control/network-history.db',
-  '/workspace-data/mission-control/network-history.db',
-  '/agent-data/network-history.db',
-].filter(Boolean) as string[];
+import { NETWORK_DB_PATHS, openNetworkDb } from '../_network-db';
 
 type Range = 'day' | 'week' | 'month' | 'year';
 type Metric = 'ping' | 'iperf';
@@ -48,10 +41,10 @@ function groupBy(range: Range): string {
 }
 
 function queryDb(sql: string): unknown[] {
-  for (const dbPath of DB_PATHS) {
-    let db: DatabaseSync | null = null;
+  for (const dbPath of NETWORK_DB_PATHS) {
+    let db: ReturnType<typeof openNetworkDb> | null = null;
     try {
-      db = new DatabaseSync(dbPath, { readOnly: true });
+      db = openNetworkDb(dbPath);
       return db.prepare(sql).all();
     } catch {}
     finally { try { db?.close(); } catch {} }
