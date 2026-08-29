@@ -74,8 +74,22 @@ code, pre, kbd, samp { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regul
   to { background-position: 48px 48px, -48px 48px; }
 }
 
+@keyframes mc-network-radar-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes mc-network-route-dash {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -80; }
+}
+
 .mc-status-pulse {
   animation: mc-status-pulse 1.8s ease-in-out infinite;
+}
+
+.mc-network-route-dash {
+  animation: mc-network-route-dash 2.4s linear infinite;
 }
 
 .mc-toolbar-button {
@@ -302,6 +316,59 @@ code, pre, kbd, samp { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regul
   max-height: calc(100vh - 92px);
   overflow: auto;
 }
+
+.mc-network-radar-sweep {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  width: min(82vw, 760px);
+  aspect-ratio: 1;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transform-origin: 50% 50%;
+  background:
+    conic-gradient(from 250deg, transparent 0deg, rgba(103,213,255,0.02) 38deg, rgba(103,213,255,0.24) 48deg, transparent 62deg, transparent 360deg);
+  border-radius: 50%;
+  filter: blur(0.4px);
+  mix-blend-mode: screen;
+  opacity: 0.7;
+  animation: mc-network-radar-spin 13s linear infinite;
+}
+
+.mc-network-canvas-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(4,8,18,0.65), transparent 15%, transparent 85%, rgba(4,8,18,0.65)),
+    linear-gradient(180deg, rgba(4,8,18,0.58), transparent 18%, transparent 82%, rgba(4,8,18,0.64));
+}
+
+.mc-network-corner {
+  position: absolute;
+  z-index: 4;
+  width: 38px;
+  height: 38px;
+  pointer-events: none;
+  opacity: 0.72;
+}
+
+.mc-network-corner::before,
+.mc-network-corner::after {
+  content: "";
+  position: absolute;
+  background: rgba(103,213,255,0.64);
+  box-shadow: 0 0 14px rgba(103,213,255,0.35);
+}
+
+.mc-network-corner::before { width: 100%; height: 1px; }
+.mc-network-corner::after { width: 1px; height: 100%; }
+.mc-network-corner-tl { left: 10px; top: 10px; }
+.mc-network-corner-tr { right: 10px; top: 10px; transform: rotate(90deg); }
+.mc-network-corner-br { right: 10px; bottom: 10px; transform: rotate(180deg); }
+.mc-network-corner-bl { left: 10px; bottom: 10px; transform: rotate(270deg); }
 
 @media (max-width: 1180px) {
   .mc-network-grid {
