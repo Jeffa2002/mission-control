@@ -61,6 +61,18 @@ function statusColor(s: string) {
   return 'var(--sev-critical)';
 }
 function fmtMs(ms: number | null) { return ms === null ? '—' : `${ms.toFixed(1)}ms`; }
+function nodeInitials(label: string) {
+  const words = label.replace(/[^a-z0-9\s-]/gi, ' ').split(/[\s-]+/).filter(Boolean);
+  if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
+  return words.map(word => word[0]).join('').slice(0, 3).toUpperCase();
+}
+
+function hexPoints(cx: number, cy: number, r: number) {
+  return Array.from({ length: 6 }, (_, i) => {
+    const angle = (Math.PI / 3) * i - Math.PI / 6;
+    return `${(cx + Math.cos(angle) * r).toFixed(1)},${(cy + Math.sin(angle) * r).toFixed(1)}`;
+  }).join(' ');
+}
 
 /* ─── Flow visual mapping (Tier A) ───────────────────────────── */
 /* Maps a link's real throughput (Mbps) to particle speed, density and stroke
@@ -130,7 +142,13 @@ function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, reverse,
   // Offset labels perpendicular to line so they don't overlap
   const dx = x2 - x1, dy = y2 - y1;
   const nx = -dy / len, ny = dx / len;
-  const off = 9;
+  const off = 13;
+  const bend = Math.min(18, len * 0.11);
+  const control = {
+    x: mid.x + nx * bend,
+    y: mid.y + ny * bend,
+  };
+  const path = `M${x1},${y1} Q${control.x.toFixed(1)},${control.y.toFixed(1)} ${x2},${y2}`;
 
   // Real-data-driven flow characteristics
   const dur = flowDuration(len, mbps);
@@ -139,8 +157,14 @@ function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, reverse,
   const busy = flowFraction(mbps);
   // Flow direction: reverse means traffic heads from (x2,y2) -> (x1,y1)
   const motionPath = reverse
-    ? `M${x2},${y2} L${x1},${y1}`
-    : `M${x1},${y1} L${x2},${y2}`;
+    ? `M${x2},${y2} Q${control.x.toFixed(1)},${control.y.toFixed(1)} ${x1},${y1}`
+    : path;
+  const label = latencyMs !== null
+    ? `${fmtMs(latencyMs)}${mbps != null && mbps > 0 ? ` · ${mbps >= 1000 ? `${(mbps/1000).toFixed(1)}Gbps` : `${Math.round(mbps)}Mbps`}` : ''}`
+    : 'no route';
+  const labelWidth = Math.min(76, Math.max(42, label.length * 4.3));
+  const labelX = mid.x + nx * off;
+  const labelY = mid.y + ny * off;
 
   return (
     <g
@@ -151,19 +175,24 @@ function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, reverse,
       aria-label={`Inspect endpoint link, ${active ? 'both endpoints online' : 'reachability incomplete'}${mbps ? `, ${Math.round(mbps)} Mbps` : ''}`}
       style={{ cursor: 'pointer' }}>
       {/* Hit target */}
-      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={16} />
+      <path d={path} stroke="transparent" strokeWidth={18} fill="none" />
       {/* Selection halo */}
-      {selected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={10} strokeOpacity={0.12} />}
+      {selected && <path d={path} stroke={color} strokeWidth={14} strokeOpacity={0.16} fill="none" strokeLinecap="round" filter="url(#networkGlowStrong)" />}
+      {active && <path d={path} stroke={color} strokeWidth={stroke + 8} strokeOpacity={0.08 + busy * 0.08} fill="none" strokeLinecap="round" filter="url(#networkGlow)" />}
       {/* Base conduit — thickness scales with throughput */}
-      <line x1={x1} y1={y1} x2={x2} y2={y2}
+      <path d={path}
         stroke={color} strokeWidth={stroke}
         strokeOpacity={active ? 0.35 + busy * 0.4 : 0.2}
         strokeLinecap="round"
+        fill="none"
         strokeDasharray={active ? 'none' : '4 4'}
       />
+      {active && (
+        <path d={path} stroke={color} strokeWidth={1} strokeOpacity={0.56} fill="none" strokeLinecap="round" strokeDasharray="1 9" className="mc-network-route-dash" />
+      )}
       {/* Flowing particles — count + speed scale with throughput */}
       {count > 0 && Array.from({ length: count }).map((_, i) => (
-        <circle key={i} r={2 + busy * 2.5} fill={color} fillOpacity={0.95}>
+        <circle key={i} r={2 + busy * 2.5} fill={color} fillOpacity={0.95} filter="url(#networkGlowStrong)">
           <animateMotion
             dur={`${dur}s`}
             begin={`${((dur / count) * i).toFixed(2)}s`}
@@ -172,24 +201,12 @@ function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, reverse,
           />
         </circle>
       ))}
-      {/* Latency label — above line */}
-      {latencyMs !== null && (
-        <text
-          x={mid.x + nx * off} y={mid.y + ny * off - 5}
-          textAnchor="middle" fontSize={9} fill={color} fontWeight={700}
-          style={{ pointerEvents: 'none' }}>
-          {fmtMs(latencyMs)}
+      <g style={{ pointerEvents: 'none' }}>
+        <rect x={labelX - labelWidth / 2} y={labelY - 8} width={labelWidth} height={16} rx={5} fill="rgba(3,7,18,0.78)" stroke={color} strokeOpacity={0.24} />
+        <text x={labelX} y={labelY + 3} textAnchor="middle" fontSize={7.4} fill={color} fontWeight={800}>
+          {label}
         </text>
-      )}
-      {/* Mbps label — below latency */}
-      {mbps != null && mbps > 0 && (
-        <text
-          x={mid.x + nx * off} y={mid.y + ny * off + 6}
-          textAnchor="middle" fontSize={8} fill={color} fontWeight={600} fillOpacity={0.75}
-          style={{ pointerEvents: 'none' }}>
-          {mbps >= 1000 ? `${(mbps/1000).toFixed(1)}Gbps` : `${Math.round(mbps)}Mbps`}
-        </text>
-      )}
+      </g>
     </g>
   );
 }
@@ -200,6 +217,7 @@ function NodeCircle({ node, selected, onClick }: { node: NodeData; selected: boo
   if (!pos) return null;
   const sc = statusColor(node.status);
   const r = 28;
+  const code = nodeInitials(node.label);
 
   return (
     <g
@@ -209,26 +227,33 @@ function NodeCircle({ node, selected, onClick }: { node: NodeData; selected: boo
       tabIndex={0}
       aria-label={`Inspect ${node.label}, ${node.status}, ${fmtMs(node.latencyMs)}`}
       style={{ cursor: 'pointer' }}>
-      {/* Glow */}
-      <circle cx={pos.x} cy={pos.y} r={r + 10} fill={sc} fillOpacity={selected ? 0.15 : 0.07}>
+      <circle cx={pos.x} cy={pos.y} r={r + 18} fill={sc} fillOpacity={selected ? 0.18 : 0.08} filter="url(#networkGlow)">
         {node.status === 'online' && (
-          <animate attributeName="r" values={`${r+8};${r+14};${r+8}`} dur="3s" repeatCount="indefinite" />
+          <animate attributeName="r" values={`${r+12};${r+20};${r+12}`} dur="3.4s" repeatCount="indefinite" />
         )}
       </circle>
-      {/* Ring */}
-      <circle cx={pos.x} cy={pos.y} r={r} fill="#0b1020"
-        stroke={selected ? '#7ce8ff' : sc} strokeWidth={selected ? 2 : 1.5} />
-      {/* Emoji */}
-      <text x={pos.x} y={pos.y - 4} textAnchor="middle" fontSize={16} dominantBaseline="middle">
-        {node.emoji}
+      <polygon points={hexPoints(pos.x, pos.y, r + 8)} fill="rgba(8,13,26,0.72)" stroke={sc} strokeOpacity={0.26} strokeWidth={1} />
+      <circle cx={pos.x} cy={pos.y} r={r + 4} fill="none" stroke={selected ? '#7ce8ff' : sc} strokeWidth={selected ? 2 : 1.25} strokeDasharray="5 7">
+        {node.status === 'online' && <animateTransform attributeName="transform" type="rotate" from={`0 ${pos.x} ${pos.y}`} to={`360 ${pos.x} ${pos.y}`} dur="18s" repeatCount="indefinite" />}
+      </circle>
+      <polygon points={hexPoints(pos.x, pos.y, r)} fill="url(#nodeCoreGradient)" stroke={selected ? '#F3F7FF' : sc} strokeWidth={selected ? 1.7 : 1.1} />
+      <circle cx={pos.x} cy={pos.y} r={r - 9} fill="rgba(103,213,255,0.04)" stroke="rgba(255,255,255,0.08)" />
+      <text x={pos.x} y={pos.y - 2} textAnchor="middle" fontSize={13}
+        fill="#F3F7FF" fontWeight={950} letterSpacing={0}>
+        {code}
       </text>
-      {/* Label */}
-      <text x={pos.x} y={pos.y + 14} textAnchor="middle" fontSize={9}
-        fill="#CBD5E1" fontWeight={700} letterSpacing={0.5}>
-        {node.label.toUpperCase()}
+      <text x={pos.x} y={pos.y + 12} textAnchor="middle" fontSize={6.8}
+        fill="#8B96AA" fontWeight={800} letterSpacing={0}>
+        {node.role.split(/\s+/).slice(0, 2).join(' ').toUpperCase()}
       </text>
-      {/* Status dot */}
-      <circle cx={pos.x + r - 4} cy={pos.y - r + 4} r={5} fill={sc}
+      <g style={{ pointerEvents: 'none' }}>
+        <rect x={pos.x - 36} y={pos.y + r + 7} width={72} height={18} rx={5} fill="rgba(3,7,18,0.78)" stroke={selected ? '#7ce8ff' : sc} strokeOpacity={selected ? 0.55 : 0.25} />
+        <text x={pos.x} y={pos.y + r + 19} textAnchor="middle" fontSize={8.2}
+          fill="#CBD5E1" fontWeight={900} letterSpacing={0}>
+          {node.label.toUpperCase()}
+        </text>
+      </g>
+      <circle cx={pos.x + r - 2} cy={pos.y - r + 1} r={5.5} fill={sc}
         stroke="#0b1020" strokeWidth={1.5} />
     </g>
   );
@@ -1348,13 +1373,15 @@ export default function NetworkPage() {
             <div className="mc-network-canvas" style={{
               borderRadius: 18,
               border: '1px solid rgba(103,213,255,0.18)',
-              background: 'radial-gradient(circle at 50% 45%, rgba(103,213,255,0.10), transparent 35%), linear-gradient(145deg, #070b16, #0B1020)',
+              background: 'radial-gradient(circle at 50% 45%, rgba(34,211,238,0.18), transparent 32%), radial-gradient(circle at 18% 74%, rgba(245,158,11,0.10), transparent 28%), radial-gradient(circle at 86% 18%, rgba(124,140,255,0.14), transparent 26%), linear-gradient(145deg, #040814, #0B1020 62%, #050712)',
               padding: 10,
               position: 'relative',
               minHeight: 420,
               overflow: 'hidden',
               boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 22px 56px rgba(0,0,0,0.30)',
             }}>
+              <div className="mc-network-radar-sweep" aria-hidden="true" />
+              <div className="mc-network-canvas-vignette" aria-hidden="true" />
               <div style={{ position: 'absolute', left: 14, top: 12, zIndex: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {[
                   ['Zone', 'Tailnet'],
@@ -1367,36 +1394,66 @@ export default function NetworkPage() {
                   </div>
                 ))}
               </div>
+              <div style={{ position: 'absolute', right: 15, top: 12, zIndex: 4, display: 'grid', gap: 5, justifyItems: 'end', color: '#64748B', fontSize: 9, fontWeight: 850 }}>
+                <span>mesh telemetry</span>
+                <span style={{ color: liveFresh ? 'var(--sev-healthy)' : '#67D5FF' }}>{liveFresh ? 'byte-counter feed' : 'capacity snapshot'}</span>
+              </div>
+              <div className="mc-network-corner mc-network-corner-tl" aria-hidden="true" />
+              <div className="mc-network-corner mc-network-corner-tr" aria-hidden="true" />
+              <div className="mc-network-corner mc-network-corner-bl" aria-hidden="true" />
+              <div className="mc-network-corner mc-network-corner-br" aria-hidden="true" />
               <div style={{
                 position: 'absolute', inset: 0, pointerEvents: 'none',
-                background: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255,255,255,0.025) 3px, rgba(255,255,255,0.025) 4px)',
+                background: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255,255,255,0.022) 3px, rgba(255,255,255,0.022) 4px)',
                 zIndex: 1,
               }} />
               <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0 }}>
                 <defs>
-                  <pattern id="network-grid" width="28" height="28" patternUnits="userSpaceOnUse">
-                    <path d="M 28 0 L 0 0 0 28" fill="none" stroke="rgba(103,213,255,0.055)" strokeWidth="1" />
-                    <circle cx={14} cy={14} r={1} fill="rgba(103,213,255,0.12)" />
+                  <pattern id="network-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+                    <path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(103,213,255,0.055)" strokeWidth="1" />
+                    <circle cx={16} cy={16} r={1} fill="rgba(103,213,255,0.13)" />
+                  </pattern>
+                  <pattern id="network-micro-grid" width="8" height="8" patternUnits="userSpaceOnUse">
+                    <path d="M 8 0 L 0 0 0 8" fill="none" stroke="rgba(148,163,184,0.035)" strokeWidth="1" />
                   </pattern>
                   <radialGradient id="network-radar">
-                    <stop offset="0%" stopColor="rgba(103,213,255,0.20)" />
-                    <stop offset="70%" stopColor="rgba(103,213,255,0.04)" />
+                    <stop offset="0%" stopColor="rgba(103,213,255,0.24)" />
+                    <stop offset="58%" stopColor="rgba(103,213,255,0.06)" />
                     <stop offset="100%" stopColor="rgba(103,213,255,0)" />
                   </radialGradient>
                 </defs>
                 <rect width="100%" height="100%" fill="url(#network-grid)" />
+                <rect width="100%" height="100%" fill="url(#network-micro-grid)" />
                 <circle cx="50%" cy="50%" r="34%" fill="url(#network-radar)" />
               </svg>
 
               <svg viewBox="0 0 600 340" style={{ width: '100%', height: '100%', minHeight: 386, position: 'relative', zIndex: 2 }}>
                 <defs>
-                  <filter id="glow">
-                    <feGaussianBlur stdDeviation="3" result="blur" />
+                  <filter id="networkGlow">
+                    <feGaussianBlur stdDeviation="3.2" result="blur" />
                     <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
                   </filter>
+                  <filter id="networkGlowStrong">
+                    <feGaussianBlur stdDeviation="5" result="blur" />
+                    <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                  </filter>
+                  <radialGradient id="nodeCoreGradient" cx="38%" cy="30%">
+                    <stop offset="0%" stopColor="rgba(243,247,255,0.20)" />
+                    <stop offset="48%" stopColor="rgba(103,213,255,0.10)" />
+                    <stop offset="100%" stopColor="rgba(7,12,24,0.96)" />
+                  </radialGradient>
                 </defs>
-                <circle cx="300" cy="152" r="124" fill="none" stroke="rgba(103,213,255,0.10)" strokeWidth="1" strokeDasharray="2 8" />
-                <circle cx="300" cy="152" r="204" fill="none" stroke="rgba(103,213,255,0.07)" strokeWidth="1" strokeDasharray="2 10" />
+                <g opacity="0.95">
+                  {[70, 124, 178, 226].map((radius, index) => (
+                    <circle key={radius} cx="300" cy="152" r={radius} fill="none" stroke={index % 2 ? 'rgba(103,213,255,0.10)' : 'rgba(124,140,255,0.08)'} strokeWidth="1" strokeDasharray={index % 2 ? '2 8' : '1 10'} />
+                  ))}
+                  {[0, 30, 60, 90, 120, 150].map(angle => (
+                    <line key={angle} x1="300" y1="152" x2="300" y2="-78" stroke="rgba(103,213,255,0.055)" strokeWidth="1" transform={`rotate(${angle} 300 152)`} />
+                  ))}
+                  <path d="M300 152 L300 -70" stroke="rgba(103,213,255,0.30)" strokeWidth="1.2" filter="url(#networkGlow)">
+                    <animateTransform attributeName="transform" type="rotate" from="0 300 152" to="360 300 152" dur="14s" repeatCount="indefinite" />
+                  </path>
+                </g>
 
                 {(links || []).map(link => {
                   const fromPos = NODE_POS[link.from];
@@ -1437,7 +1494,7 @@ export default function NetworkPage() {
                   { color: 'var(--sev-critical)', label: 'poor/down' },
                   { color: '#6B7280', label: 'offline' },
                 ].map(({ color, label }, i) => (
-                  <g key={label} transform={`translate(${12 + i * 82}, 320)`}>
+                  <g key={label} transform={`translate(${12 + i * 82}, 318)`}>
                     <line x1={0} y1={6} x2={16} y2={6} stroke={color} strokeWidth={2} />
                     <text x={20} y={10} fontSize={9} fill="#64748B">{label}</text>
                   </g>
