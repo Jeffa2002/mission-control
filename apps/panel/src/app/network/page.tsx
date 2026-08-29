@@ -49,10 +49,26 @@ const HISTORY_RANGES = ['day', 'week', 'month', 'year'] as const;
 type HistoryRange = typeof HISTORY_RANGES[number];
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
-function latencyColor(ms: number | null) {
+type LatencyThresholds = { watchAbove: number; poorAt: number };
+const DEFAULT_LATENCY_THRESHOLDS: LatencyThresholds = { watchAbove: 20, poorAt: 50 };
+const BACKUP_MELB_LATENCY_THRESHOLDS: LatencyThresholds = { watchAbove: 30, poorAt: 50 };
+
+function isBackupMelbPath(link: Pick<LinkData, 'from' | 'to'>) {
+  return link.from === 'backup-melb' || link.to === 'backup-melb';
+}
+
+function thresholdsForNode(node?: Pick<NodeData, 'id'> | null): LatencyThresholds {
+  return node?.id === 'backup-melb' ? BACKUP_MELB_LATENCY_THRESHOLDS : DEFAULT_LATENCY_THRESHOLDS;
+}
+
+function thresholdsForLink(link?: Pick<LinkData, 'from' | 'to'> | null): LatencyThresholds {
+  return link && isBackupMelbPath(link) ? BACKUP_MELB_LATENCY_THRESHOLDS : DEFAULT_LATENCY_THRESHOLDS;
+}
+
+function latencyColor(ms: number | null, thresholds = DEFAULT_LATENCY_THRESHOLDS) {
   if (ms === null) return '#6B7280';
-  if (ms < 20)  return 'var(--sev-healthy)';
-  if (ms < 50)  return 'var(--sev-warning)';
+  if (ms <= thresholds.watchAbove) return 'var(--sev-healthy)';
+  if (ms < thresholds.poorAt) return 'var(--sev-warning)';
   return 'var(--sev-critical)';
 }
 function statusColor(s: string) {
@@ -711,9 +727,10 @@ function relativeAge(iso?: string | null) {
 }
 
 function routeQuality(link: LinkData) {
+  const thresholds = thresholdsForLink(link);
   if (!link.active) return { label: 'Down', status: 'critical', score: 0, color: 'var(--sev-critical)' };
-  if ((link.packetLoss ?? 0) > 0 || (link.latencyMs ?? 999) > 50) return { label: 'Poor', status: 'critical', score: 42, color: 'var(--sev-critical)' };
-  if ((link.latencyMs ?? 999) > 20 || (link.iperf?.retransmits ?? 0) > 0) return { label: 'Watch', status: 'warning', score: 76, color: 'var(--sev-warning)' };
+  if ((link.packetLoss ?? 0) > 0 || (link.latencyMs ?? 999) >= thresholds.poorAt) return { label: 'Poor', status: 'critical', score: 42, color: 'var(--sev-critical)' };
+  if ((link.latencyMs ?? 999) > thresholds.watchAbove || (link.iperf?.retransmits ?? 0) > 0) return { label: 'Watch', status: 'warning', score: 76, color: 'var(--sev-warning)' };
   return { label: 'Excellent', status: 'healthy', score: 98, color: 'var(--sev-healthy)' };
 }
 
@@ -944,7 +961,7 @@ function InspectorCard({ selectedNodeData, selectedLinkData, nodeMap, totals, st
           <DetailRow k="IP" v={selectedNodeData.ip} />
           <DetailRow k="Location" v={selectedNodeData.location} />
           <DetailRow k="Role" v={selectedNodeData.role} />
-          <DetailRow k="Latency" v={fmtMs(selectedNodeData.latencyMs)} color={latencyColor(selectedNodeData.latencyMs)} />
+          <DetailRow k="Latency" v={fmtMs(selectedNodeData.latencyMs)} color={latencyColor(selectedNodeData.latencyMs, thresholdsForNode(selectedNodeData))} />
           <DetailRow k="Last seen" v={selectedNodeData.latencyMs === null ? 'unreachable' : 'current scan'} color={selectedNodeData.latencyMs === null ? 'var(--sev-critical)' : 'var(--sev-healthy)'} />
 
           {selectedNodeData?.iperf && (
@@ -969,7 +986,7 @@ function InspectorCard({ selectedNodeData, selectedLinkData, nodeMap, totals, st
           {selectedNodeData.history.length > 1 && (
             <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 10, color: '#64748B', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 800 }}>Latency trace</div>
-              <Sparkline data={selectedNodeData.history} color={latencyColor(selectedNodeData.latencyMs)} w={252} h={38} />
+              <Sparkline data={selectedNodeData.history} color={latencyColor(selectedNodeData.latencyMs, thresholdsForNode(selectedNodeData))} w={252} h={38} />
             </div>
           )}
         </>
@@ -988,7 +1005,7 @@ function InspectorCard({ selectedNodeData, selectedLinkData, nodeMap, totals, st
                 />
                 <div style={{ fontSize: 11, color: '#67D5FF', marginBottom: 10, fontWeight: 800 }}>{selectedLinkData.label}</div>
                 <DetailRow k="Direction" v={selectedLinkData.direction} />
-                <DetailRow k="Latency" v={fmtMs(selectedLinkData.latencyMs)} color={latencyColor(selectedLinkData.latencyMs)} />
+                <DetailRow k="Latency" v={fmtMs(selectedLinkData.latencyMs)} color={latencyColor(selectedLinkData.latencyMs, thresholdsForLink(selectedLinkData))} />
                 <DetailRow k="Packet loss" v={`${selectedLinkData.packetLoss}%`} color={selectedLinkData.packetLoss > 0 ? 'var(--sev-critical)' : 'var(--sev-healthy)'} />
                 <DetailRow k="Quality score" v={`${quality.score}/100`} color={quality.color} />
                 <DetailRow k="Status" v={selectedLinkData.active ? 'ACTIVE' : 'DOWN'} color={selectedLinkData.active ? 'var(--sev-healthy)' : 'var(--sev-critical)'} />
@@ -1041,9 +1058,9 @@ function NodeStatusList({ nodes, selectedNode, setSelectedNode, setSelectedLink 
               <div style={{ fontSize: 12, fontWeight: 900, color: '#F3F7FF' }}>{node.label}</div>
               <div style={{ fontSize: 10, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.role} · {node.ip}</div>
             </div>
-            <Sparkline data={node.history ?? []} color={latencyColor(node.latencyMs)} w={54} h={20} />
+            <Sparkline data={node.history ?? []} color={latencyColor(node.latencyMs, thresholdsForNode(node))} w={54} h={20} />
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, fontWeight: 900, color: latencyColor(node.latencyMs) }}>{fmtMs(node.latencyMs)}</div>
+              <div style={{ fontSize: 11, fontWeight: 900, color: latencyColor(node.latencyMs, thresholdsForNode(node)) }}>{fmtMs(node.latencyMs)}</div>
               <div style={{ fontSize: 9, color: statusColor(node.status), textTransform: 'uppercase', letterSpacing: '0.07em' }}>{node.status}</div>
             </div>
           </button>
@@ -1464,7 +1481,7 @@ export default function NetworkPage() {
                     <AnimatedLink key={key}
                       x1={fromPos.x} y1={fromPos.y}
                       x2={toPos.x} y2={toPos.y}
-                      color={latencyColor(link.latencyMs)}
+                      color={latencyColor(link.latencyMs, thresholdsForLink(link))}
                       active={link.active}
                       latencyMs={link.latencyMs}
                       mbps={linkMbps(link)}
