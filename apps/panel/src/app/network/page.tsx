@@ -90,31 +90,32 @@ function hexPoints(cx: number, cy: number, r: number) {
   }).join(' ');
 }
 
-/* ─── Flow visual mapping (Tier A) ───────────────────────────── */
-/* Maps a link's real throughput (Mbps) to particle speed, density and stroke
-   width. Kept as pure helpers so a future Tier B live feed (bytes/sec from
-   /proc/net/dev via /api/network/live) can reuse the exact same mapping. */
-const FLOW_MAX_MBPS = 1000;          // ~1 Gbps tailnet ceiling for scaling
-function flowFraction(mbps: number | null | undefined): number {
+/* ─── Flow visual mapping ───────────────────────────── */
+/* Maps real live traffic to particle speed, density, and stroke width. The map
+   scales against the current live peak so low-but-real traffic is still visible. */
+const FLOW_MAX_MBPS = 1000;
+const FLOW_MIN_VISUAL_PEAK_MBPS = 0.1;
+function flowFraction(mbps: number | null | undefined, peakMbps = FLOW_MAX_MBPS): number {
   if (!mbps || mbps <= 0) return 0;
-  // sqrt curve so low-throughput links still show visible motion
-  return Math.min(1, Math.sqrt(mbps / FLOW_MAX_MBPS));
+  const scaleMax = Math.max(FLOW_MIN_VISUAL_PEAK_MBPS, Math.min(FLOW_MAX_MBPS, peakMbps || FLOW_MAX_MBPS));
+  return Math.min(1, Math.sqrt(mbps / scaleMax));
 }
 // Particle traversal duration in seconds: busy link => faster (shorter dur)
-function flowDuration(len: number, mbps: number | null | undefined): number {
-  const f = flowFraction(mbps);
+function flowDuration(len: number, mbps: number | null | undefined, peakMbps?: number): number {
+  const f = flowFraction(mbps, peakMbps);
   const slow = len / 40;   // idle-ish link
   const fast = len / 260;  // saturated link
   return +(slow - (slow - fast) * f).toFixed(2);
 }
 // Number of particles on a link, scaled to throughput
-function flowParticles(mbps: number | null | undefined): number {
-  const f = flowFraction(mbps);
+function flowParticles(mbps: number | null | undefined, peakMbps?: number): number {
+  if (!mbps || mbps <= 0) return 0;
+  const f = flowFraction(mbps, peakMbps);
   return 1 + Math.round(f * 4); // 1..5 particles
 }
 // Stroke width scaled to throughput
-function flowStroke(mbps: number | null | undefined, selected: boolean): number {
-  const f = flowFraction(mbps);
+function flowStroke(mbps: number | null | undefined, selected: boolean, peakMbps?: number): number {
+  const f = flowFraction(mbps, peakMbps);
   return (selected ? 2.5 : 1.25) + f * 3;
 }
 
@@ -152,7 +153,7 @@ function Sparkline({ data, color = '#7ce8ff', w = 80, h = 28 }: { data: number[]
 }
 
 /* ─── Animated flow link for SVG (Tier A) ──────────────── */
-function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, reverse, selected, onClick }: any) {
+function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, flowPeakMbps, reverse, selected, onClick }: any) {
   const mid = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
   const len = Math.sqrt((x2-x1)**2 + (y2-y1)**2) || 1;
   // Offset labels perpendicular to line so they don't overlap
@@ -167,18 +168,18 @@ function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, reverse,
   const path = `M${x1},${y1} Q${control.x.toFixed(1)},${control.y.toFixed(1)} ${x2},${y2}`;
 
   // Real-data-driven flow characteristics
-  const dur = flowDuration(len, mbps);
-  const count = active ? flowParticles(mbps) : 0;
-  const stroke = flowStroke(mbps, selected);
-  const busy = flowFraction(mbps);
+  const dur = flowDuration(len, mbps, flowPeakMbps);
+  const count = active ? flowParticles(mbps, flowPeakMbps) : 0;
+  const stroke = flowStroke(mbps, selected, flowPeakMbps);
+  const busy = flowFraction(mbps, flowPeakMbps);
   // Flow direction: reverse means traffic heads from (x2,y2) -> (x1,y1)
   const motionPath = reverse
     ? `M${x2},${y2} Q${control.x.toFixed(1)},${control.y.toFixed(1)} ${x1},${y1}`
     : path;
   const label = latencyMs !== null
-    ? `${fmtMs(latencyMs)}${mbps != null && mbps > 0 ? ` · ${mbps >= 1000 ? `${(mbps/1000).toFixed(1)}Gbps` : `${Math.round(mbps)}Mbps`}` : ''}`
+    ? `${fmtMs(latencyMs)}${mbps != null && mbps > 0 ? ` · ${fmtMbps(mbps)}` : ''}`
     : 'no route';
-  const labelWidth = Math.min(76, Math.max(42, label.length * 4.3));
+  const labelWidth = Math.min(90, Math.max(42, label.length * 4.3));
   const labelX = mid.x + nx * off;
   const labelY = mid.y + ny * off;
 
@@ -188,7 +189,7 @@ function AnimatedLink({ x1, y1, x2, y2, color, active, latencyMs, mbps, reverse,
       onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick(); } }}
       role="button"
       tabIndex={0}
-      aria-label={`Inspect endpoint link, ${active ? 'both endpoints online' : 'reachability incomplete'}${mbps ? `, ${Math.round(mbps)} Mbps` : ''}`}
+      aria-label={`Inspect endpoint link, ${active ? 'both endpoints online' : 'reachability incomplete'}${mbps ? `, ${fmtMbps(mbps)} live throughput` : ''}`}
       style={{ cursor: 'pointer' }}>
       {/* Hit target */}
       <path d={path} stroke="transparent" strokeWidth={18} fill="none" />
@@ -708,6 +709,7 @@ function NetworkHistorySection() {
 /* ─── Command centre helpers ─────────────────────────────────────────── */
 function fmtMbps(v?: number | null) {
   if (v == null || Number.isNaN(v)) return '—';
+  if (v > 0 && v < 1) return `${Math.round(v * 1000)}Kbps`;
   return v >= 1000 ? `${(v / 1000).toFixed(1)}Gbps` : `${Math.round(v)}Mbps`;
 }
 
@@ -1316,6 +1318,8 @@ export default function NetworkPage() {
     const l = Math.max(liveMbps(link.from) ?? 0, liveMbps(link.to) ?? 0);
     return l > 0 ? l : null;
   };
+  const liveRouteActualPeakMbps = Math.max(0, ...links.map(link => linkLiveMbps(link) ?? 0));
+  const liveRoutePeakMbps = Math.max(FLOW_MIN_VISUAL_PEAK_MBPS, liveRouteActualPeakMbps);
   const totalNodes = data?.nodes.length ?? (loading ? 0 : HISTORY_NODES.length);
   const onlineCount = nodes.filter(n => n.status === 'online').length;
   const degradedCount = nodes.filter(n => n.status === 'degraded').length;
@@ -1409,6 +1413,7 @@ export default function NetworkPage() {
               <div style={{ position: 'absolute', right: 15, top: 12, zIndex: 4, display: 'grid', gap: 5, justifyItems: 'end', color: '#64748B', fontSize: 9, fontWeight: 850 }}>
                 <span>mesh telemetry</span>
                 <span style={{ color: liveFresh ? 'var(--sev-healthy)' : '#67D5FF' }}>{liveFresh ? 'byte-counter feed' : 'byte-counter pending'}</span>
+                {liveFresh && <span style={{ color: '#8B96AA' }}>peak flow {fmtMbps(liveRouteActualPeakMbps)}</span>}
               </div>
               <div className="mc-network-corner mc-network-corner-tl" aria-hidden="true" />
               <div className="mc-network-corner mc-network-corner-tr" aria-hidden="true" />
@@ -1480,6 +1485,7 @@ export default function NetworkPage() {
                       active={link.active}
                       latencyMs={link.latencyMs}
                       mbps={linkLiveMbps(link)}
+                      flowPeakMbps={liveRoutePeakMbps}
                       reverse={(link.direction || '').includes('←')}
                       selected={selectedLink === key}
                       onClick={() => {
