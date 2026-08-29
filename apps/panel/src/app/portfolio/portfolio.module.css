@@ -468,6 +468,7 @@
 
 .pillRow { display: flex; flex-wrap: wrap; gap: 6px; }
 .pillRow .riskPill { margin-left: 0; }
+.signalGroup > .riskPill { margin-left: 0; justify-self: start; }
 
 .repoLine { margin: 0; font-size: 11px; }
 .repoLine a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }

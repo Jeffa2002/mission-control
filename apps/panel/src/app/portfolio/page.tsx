@@ -20,6 +20,7 @@ type PortfolioProduct = {
   language: string;
   defaultBranch: string;
   risk: Risk;
+  riskReason: string | null;
   tone: Tone;
   toneReasons: string[];
   signalsDisagree: boolean;
@@ -158,7 +159,7 @@ function ToneBadge({ tone, label }: { tone: Tone; label?: string }) {
 }
 
 function RiskPill({ risk, muted = false }: { risk: Risk; muted?: boolean }) {
-  return <span className={styles.riskPill} data-risk={risk} data-muted={muted}>{risk}</span>;
+  return <span className={styles.riskPill} data-risk={risk} data-muted={muted}>{risk} risk</span>;
 }
 
 function ProductCard({ product, selected, onSelect }: { product: PortfolioProduct; selected: boolean; onSelect: (event: React.MouseEvent<HTMLElement>) => void }) {
@@ -285,6 +286,14 @@ function Inspector({ product, open, onClose, returnFocus }: {
         <ToneBadge tone={product.tone} />
         <ul className={styles.reasons}>{product.toneReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
         {product.signalsDisagree ? <p className={styles.verdictNote}>Signals disagree; pessimistic reading shown.</p> : null}
+      </section>
+
+      <section className={styles.signalGroup}>
+        <h3>Risk Tier</h3>
+        <RiskPill risk={product.risk} />
+        <p className={styles.verdictNote}>
+          {product.riskReason ?? 'Static registry risk tier. It does not mean the product is currently in incident.'}
+        </p>
       </section>
 
       <section className={styles.signalGroup} data-missing={!product.endpoints.length}>
