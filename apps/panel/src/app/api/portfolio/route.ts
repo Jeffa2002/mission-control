@@ -203,6 +203,7 @@ export async function GET(req: Request) {
       language: project.language,
       defaultBranch: project.defaultBranch,
       risk: project.risk,
+      riskReason: project.riskReason ?? null,
       tone: derivation.tone,
       toneReasons: derivation.toneReasons,
       signalsDisagree: derivation.signalsDisagree,
